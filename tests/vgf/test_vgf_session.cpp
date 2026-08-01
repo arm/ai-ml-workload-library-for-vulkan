@@ -656,6 +656,88 @@ TEST_F(VgfSessionExecutionTest, RunComputeShaderSegmentWithBoundPlaceholderModul
     EXPECT_EQ(outputBuffer.read(elements), expected);
 }
 
+TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRetriesAfterFailedConfigure) {
+    constexpr size_t elements = 10;
+    constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
+
+    const auto bytes = makePlaceholderAddInt32BuffersVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    CompiledExecution compiledExecution(context, workload);
+
+    Session session(context, workload, compiledExecution);
+    EXPECT_THROW(session.configure(), std::runtime_error);
+
+    ModuleImplementation implementation;
+    implementation.codeKind = ModuleCodeKind::Spirv;
+    implementation.spirv = assembleAddInt32BuffersSpirv();
+    session.bindModule(workload.placeholderModule(0), std::move(implementation));
+    session.configure();
+
+    const Buffer firstInputBuffer(physicalDevice, device, bufferSize);
+    const Buffer secondInputBuffer(physicalDevice, device, bufferSize);
+    const Buffer outputBuffer(physicalDevice, device, bufferSize);
+
+    const std::vector<int32_t> firstInput = {6, 2, 8, 1, 8, 2, 8, 4, 5, 9};
+    const std::vector<int32_t> secondInput = {1, -2, 3, -4, 5, -6, 7, -8, 9, -10};
+    firstInputBuffer.write(firstInput);
+    secondInputBuffer.write(secondInput);
+    outputBuffer.write(std::vector<int32_t>(elements, 0));
+
+    auto bindings = session.createBindingSet();
+    ASSERT_EQ(workload.resourceCount(), 3);
+    bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstInputBuffer.buffer});
+    bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondInputBuffer.buffer});
+    bindings.bindBuffer(workload.resource(2), BufferBindingInfo{*outputBuffer.buffer});
+
+    auto execution = session.prepare(bindings);
+    execution.run();
+
+    EXPECT_EQ(outputBuffer.read(elements), addVectors(firstInput, secondInput));
+}
+
+TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionChecksPlaceholderModules) {
+    const auto bytes = makePlaceholderAddInt32BuffersVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    CompiledExecution compiledExecution(context, workload);
+    const auto spirv = assembleAddInt32BuffersSpirv();
+
+    const auto bindPlaceholder = [&workload](Session &session, std::vector<uint32_t> code) {
+        ModuleImplementation implementation;
+        implementation.codeKind = ModuleCodeKind::Spirv;
+        implementation.spirv = std::move(code);
+        session.bindModule(workload.placeholderModule(0), std::move(implementation));
+    };
+
+    {
+        Session firstSession(context, workload, compiledExecution);
+        bindPlaceholder(firstSession, spirv);
+        firstSession.configure();
+    }
+
+    Session unboundSession(context, workload, compiledExecution);
+    EXPECT_NO_THROW(unboundSession.configure());
+
+    Session matchingSession(context, workload, compiledExecution);
+    bindPlaceholder(matchingSession, spirv);
+    EXPECT_NO_THROW(matchingSession.configure());
+
+    Session mismatchingSession(context, workload, compiledExecution);
+    auto differentSpirv = spirv;
+    differentSpirv.push_back(0);
+    bindPlaceholder(mismatchingSession, std::move(differentSpirv));
+    try {
+        mismatchingSession.configure();
+        FAIL() << "Mismatching placeholder module was accepted";
+    } catch (const std::runtime_error &error) {
+        EXPECT_STREQ("Session module implementations do not match the compiled execution", error.what());
+    }
+
+    bindPlaceholder(mismatchingSession, spirv);
+    EXPECT_NO_THROW(mismatchingSession.configure());
+}
+
 TEST_F(VgfSessionExecutionTest, RunGlslComputeShaderSegmentWithPushConstants) {
     if (!supports(Feature::GlslModules)) {
         GTEST_SKIP() << "GLSL source module support is not enabled in this build";
@@ -1061,6 +1143,47 @@ TEST_F(VgfSessionExecutionTest, RunMaxpoolRepeatedDifferentInput) {
         execution.run();
         EXPECT_EQ(outputTensor.read(outputTensor.numElements()), expectedMaxpool(input, inputTensor.shape));
     }
+}
+
+TEST_F(VgfSessionExecutionTest, RunTwoSessionsWithSharedCompiledExecution) {
+    const auto bytes = makeMaxpool16x16To8x8Vgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = Context::wrap({instance, physicalDevice, device, queueFamilyIndex, queue});
+    CompiledExecution compiledExecution(context, workload);
+
+    const Tensor firstInputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 16, 16, 16});
+    const Tensor firstOutputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 8, 8, 16});
+    const Tensor secondInputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 16, 16, 16});
+    const Tensor secondOutputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 8, 8, 16});
+
+    const auto firstInput = makeMaxpoolInput(firstInputTensor.shape, 9);
+    const auto secondInput = makeMaxpoolInput(secondInputTensor.shape, 17);
+    firstInputTensor.write(firstInput);
+    firstOutputTensor.fill(0, firstOutputTensor.numElements());
+    secondInputTensor.write(secondInput);
+    secondOutputTensor.fill(0, secondOutputTensor.numElements());
+
+    Session firstSession(context, workload, compiledExecution);
+    firstSession.configure();
+    auto firstBindings = firstSession.createBindingSet();
+    firstBindings.bindTensor(workload.resource(0), TensorBindingInfo{*firstInputTensor.tensor});
+    firstBindings.bindTensor(workload.resource(1), TensorBindingInfo{*firstOutputTensor.tensor});
+    auto firstExecution = firstSession.prepare(firstBindings);
+
+    Session secondSession(context, workload, compiledExecution);
+    secondSession.configure();
+    auto secondBindings = secondSession.createBindingSet();
+    secondBindings.bindTensor(workload.resource(0), TensorBindingInfo{*secondInputTensor.tensor});
+    secondBindings.bindTensor(workload.resource(1), TensorBindingInfo{*secondOutputTensor.tensor});
+    auto secondExecution = secondSession.prepare(secondBindings);
+
+    firstExecution.run();
+    secondExecution.run();
+
+    EXPECT_EQ(firstOutputTensor.read(firstOutputTensor.numElements()),
+              expectedMaxpool(firstInput, firstInputTensor.shape));
+    EXPECT_EQ(secondOutputTensor.read(secondOutputTensor.numElements()),
+              expectedMaxpool(secondInput, secondInputTensor.shape));
 }
 
 TEST_F(VgfSessionExecutionTest, RunTwoMaxpoolGraphSegments) {

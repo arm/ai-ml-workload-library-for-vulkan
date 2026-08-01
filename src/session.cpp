@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -183,6 +184,12 @@ Module moduleForExecutable(const Workload &workload, const std::map<uint32_t, Mo
     return moduleImplementationIt->second;
 }
 
+bool sameModuleImplementation(const Module &lhs, const Module &rhs) {
+    // Name and entry point are fixed by the shared Workload.
+    return lhs.codeKind == rhs.codeKind && lhs.code == rhs.code && lhs.source == rhs.source &&
+           lhs.buildOptions == rhs.buildOptions && lhs.includeDirs == rhs.includeDirs;
+}
+
 /*******************************************************************************
  * Executable configuration
  *******************************************************************************/
@@ -246,8 +253,8 @@ vk::raii::ShaderModule createShaderModule(const Module &compiledModule, const Co
 
 vk::raii::Pipeline createComputePipeline(const Executable &executable, const Module &compiledModule,
                                          const vk::raii::ShaderModule &shaderModule,
-                                         const vk::raii::PipelineLayout &pipelineLayout,
-                                         const ContextView &contextView) {
+                                         const vk::raii::PipelineLayout &pipelineLayout, const ContextView &contextView,
+                                         const vk::raii::PipelineCache *pipelineCache) {
     const auto &dispatchShape = executable.dispatchShape;
     if (dispatchShape[0] == 0 || dispatchShape[1] == 0 || dispatchShape[2] == 0) {
         throw std::runtime_error("Compute shader executables must have a non-zero 3D dispatch shape");
@@ -258,13 +265,14 @@ vk::raii::Pipeline createComputePipeline(const Executable &executable, const Mod
         {}, vk::ShaderStageFlagBits::eCompute, *shaderModule, compiledModule.entryPoint.c_str(),
         specializationInfo.populate(executable.specializationInfo));
     const vk::ComputePipelineCreateInfo pipelineCreateInfo({}, shaderStageCreateInfo, *pipelineLayout);
-    return {contextView.device.get(), nullptr, pipelineCreateInfo};
+    return {contextView.device.get(), pipelineCache, pipelineCreateInfo};
 }
 
 vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const Module &compiledModule,
                                            const vk::raii::ShaderModule &shaderModule,
                                            const vk::raii::PipelineLayout &pipelineLayout, const Workload &workload,
-                                           const ContextView &contextView) {
+                                           const ContextView &contextView,
+                                           const vk::raii::PipelineCache *pipelineCache) {
     DataGraphPipelineCreateStorage storage;
     populateDataGraphResources(storage, executable, workload);
     populateDataGraphConstants(storage, executable, workload);
@@ -277,7 +285,7 @@ vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const M
                                                                 static_cast<uint32_t>(storage.resourceInfos.size()),
                                                                 storage.resourceInfos.data(), &shaderModuleInfo);
     const vk::raii::DeferredOperationKHR deferredOperation(nullptr);
-    return {contextView.device.get(), deferredOperation, nullptr, pipelineCreateInfo};
+    return {contextView.device.get(), deferredOperation, pipelineCache, pipelineCreateInfo};
 }
 
 /*******************************************************************************
@@ -318,29 +326,77 @@ allocateDataGraphSessionMemory(const ContextView &contextView,
 
 } // namespace
 
-void Session::Impl::createPipeline(ExecutableState &executableState, uint32_t executableIndex) const {
+/*******************************************************************************
+ * Session implementation lifetime
+ *******************************************************************************/
+
+Session::Impl::Impl(Context &contextIn, const Workload &workloadIn, SessionOptions optionsIn)
+    : workload(workloadIn), contextView(contextIn.contextImpl().contextView()),
+      compiledExecutionState(std::make_shared<CompiledExecution::Impl>(contextIn, workloadIn, optionsIn)) {}
+
+Session::Impl::Impl(Context &contextIn, const Workload &workloadIn, CompiledExecution &compiledExecutionIn)
+    : workload(workloadIn), contextView(contextIn.contextImpl().contextView()),
+      compiledExecutionState(compiledExecutionIn.compiledExecutionImpl()) {
+    if (compiledExecutionState->context != &contextIn) {
+        throw std::runtime_error("CompiledExecution was not created for this Context");
+    }
+    if (compiledExecutionState->workload != &workloadIn) {
+        throw std::runtime_error("CompiledExecution was not created for this Workload");
+    }
+}
+
+/*******************************************************************************
+ * Compiled workload construction
+ *******************************************************************************/
+
+void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutable, uint32_t executableIndex) const {
     const auto &executable = workloadImpl(workload).executables.at(executableIndex);
+    if (executable.type != ExecutableKind::Graph && executable.type != ExecutableKind::Compute) {
+        throw std::runtime_error("Session only supports data graph and compute shader executables");
+    }
+
+    // Module resolution
     auto compiledModule = moduleForExecutable(workload, moduleImplementations, executableIndex);
     detail::compileModuleToSpirv(compiledModule, executable.type);
 
+    // Shared pipeline state
     validateExecutableBindings(workload, executable);
-    executableState.descriptorSetLayouts = createDescriptorSetLayouts(executable.bindings, workload, contextView);
-    executableState.pipelineLayout =
-        createPipelineLayout(executableState.descriptorSetLayouts, executable, contextView);
-    executableState.shaderModule = createShaderModule(compiledModule, contextView);
+    compiledExecutable.descriptorSetLayouts = createDescriptorSetLayouts(executable.bindings, workload, contextView);
+    compiledExecutable.pipelineLayout =
+        createPipelineLayout(compiledExecutable.descriptorSetLayouts, executable, contextView);
+    compiledExecutable.shaderModule = createShaderModule(compiledModule, contextView);
 
+    // Executable-specific pipeline state
     if (executable.type == ExecutableKind::Compute) {
-        executableState.pipeline = createComputePipeline(executable, compiledModule, executableState.shaderModule,
-                                                         executableState.pipelineLayout, contextView);
+        compiledExecutable.pipeline = createComputePipeline(executable, compiledModule, compiledExecutable.shaderModule,
+                                                            compiledExecutable.pipelineLayout, contextView,
+                                                            compiledExecutionState->options.pipelineCache);
         return;
     }
-    if (executable.type == ExecutableKind::Graph) {
-        executableState.pipeline = createDataGraphPipeline(executable, compiledModule, executableState.shaderModule,
-                                                           executableState.pipelineLayout, workload, contextView);
-        return;
-    }
-    throw std::logic_error("Unhandled executable kind after validation");
+
+    compiledExecutable.pipeline = createDataGraphPipeline(executable, compiledModule, compiledExecutable.shaderModule,
+                                                          compiledExecutable.pipelineLayout, workload, contextView,
+                                                          compiledExecutionState->options.pipelineCache);
 }
+
+/*******************************************************************************
+ * Compiled executable access
+ *******************************************************************************/
+
+const detail::CompiledExecutable &Session::Impl::compiledExecutable(uint32_t executableIndex) const {
+    if (!compiledExecutionState->compiledData.has_value()) {
+        throw std::runtime_error("Session compiled execution is not configured");
+    }
+    const auto &compiledExecutables = compiledExecutionState->compiledData->compiledExecutables;
+    if (executableIndex >= compiledExecutables.size()) {
+        throw std::runtime_error("Session compiled executable index is invalid");
+    }
+    return compiledExecutables[executableIndex];
+}
+
+/*******************************************************************************
+ * Configuration
+ *******************************************************************************/
 
 void Session::Impl::configureExecutableState(uint32_t executableIndex) {
     const auto &executable = workloadImpl(workload).executables.at(executableIndex);
@@ -348,37 +404,55 @@ void Session::Impl::configureExecutableState(uint32_t executableIndex) {
         throw std::runtime_error("Session only supports data graph and compute shader executables");
     }
 
-    auto &executableState = executableStates.emplace_back();
-    createPipeline(executableState, executableIndex);
+    auto &executableState = executableStates.emplace_back(compiledExecutable(executableIndex));
 
     if (executable.type == ExecutableKind::Compute) {
         return;
     }
-    if (executable.type == ExecutableKind::Graph) {
-        const vk::DataGraphPipelineSessionCreateInfoARM sessionCreateInfo({}, *executableState.pipeline);
-        executableState.graphSession =
-            vk::raii::DataGraphPipelineSessionARM(contextView.device.get(), sessionCreateInfo);
 
-        auto bindInfos =
-            allocateDataGraphSessionMemory(contextView, executableState.graphSession, executableState.sessionMemory);
-        if (!bindInfos.empty()) {
-            contextView.device.get().bindDataGraphPipelineSessionMemoryARM(bindInfos);
+    const auto &compiledExecutable = executableState.compiledExecutable.get();
+    const vk::DataGraphPipelineSessionCreateInfoARM sessionCreateInfo({}, *compiledExecutable.pipeline);
+    executableState.graphSession = vk::raii::DataGraphPipelineSessionARM(contextView.device.get(), sessionCreateInfo);
+
+    auto bindInfos =
+        allocateDataGraphSessionMemory(contextView, executableState.graphSession, executableState.sessionMemory);
+    if (!bindInfos.empty()) {
+        contextView.device.get().bindDataGraphPipelineSessionMemoryARM(bindInfos);
+    }
+}
+
+void Session::Impl::compileOrReuseExecutables() {
+    if (compiledExecutionState->compiledData.has_value()) {
+        const auto &compiledModules = compiledExecutionState->compiledData->moduleImplementations;
+        for (const auto &[moduleIndex, implementation] : moduleImplementations) {
+            const auto compiledModuleIt = compiledModules.find(moduleIndex);
+            if (compiledModuleIt == compiledModules.end() ||
+                !sameModuleImplementation(implementation, compiledModuleIt->second)) {
+                throw std::runtime_error("Session module implementations do not match the compiled execution");
+            }
         }
         return;
     }
-    throw std::logic_error("Unhandled executable kind after validation");
-}
 
-/*******************************************************************************
- * Configuration
- *******************************************************************************/
+    detail::CompiledExecutionData compiledData;
+    compiledData.compiledExecutables.reserve(workload.executableCount());
+    for (uint32_t executableIndex = 0; executableIndex < workload.executableCount(); ++executableIndex) {
+        auto &compiledExecutable = compiledData.compiledExecutables.emplace_back();
+        createPipeline(compiledExecutable, executableIndex);
+    }
+    compiledData.moduleImplementations = std::move(moduleImplementations);
+    compiledExecutionState->compiledData.emplace(std::move(compiledData));
+}
 
 void Session::Impl::configure() {
     if (configured) {
         throw std::runtime_error("Session::configure() must only be called once");
     }
 
-    // Executable state
+    // Compiled executables
+    compileOrReuseExecutables();
+
+    // Executable session state
     executableStates.reserve(workload.executableCount());
     for (uint32_t executableIndex = 0; executableIndex < workload.executableCount(); ++executableIndex) {
         configureExecutableState(executableIndex);
@@ -397,7 +471,11 @@ void Session::Impl::configure() {
  * Session lifetime
  *******************************************************************************/
 
-Session::Session(Context &context, const Workload &workload) : impl_(std::make_unique<Impl>(context, workload)) {}
+Session::Session(Context &context, const Workload &workload, SessionOptions options)
+    : impl_(std::make_unique<Impl>(context, workload, options)) {}
+
+Session::Session(Context &context, const Workload &workload, CompiledExecution &compiledExecution)
+    : impl_(std::make_unique<Impl>(context, workload, compiledExecution)) {}
 
 Session::~Session() = default;
 

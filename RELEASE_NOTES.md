@@ -1,5 +1,15 @@
 # ML Workload Library for Vulkan® — Release Notes
 
+---
+
+## Unreleased
+
+### Resource Binding and Execution
+
+- Added optional `CompiledExecution` for sharing compiled pipelines and layouts
+  across sessions for the same context and workload, while retaining separate
+  per-session state.
+
 ## Version 0.11.0 – *Initial Public Release*
 
 ## Purpose

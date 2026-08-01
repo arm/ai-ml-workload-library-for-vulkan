@@ -16,6 +16,7 @@
 #include <vulkan/vulkan_raii.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -69,7 +70,10 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderWorkload) {
     secondInputBuffer.write(secondInput);
     outputBuffer.write(std::vector<int32_t>(elements, 0));
 
-    Session session(context, workload);
+    const vk::raii::PipelineCache pipelineCache(device, vk::PipelineCacheCreateInfo{});
+    SessionOptions options;
+    options.pipelineCache = &pipelineCache;
+    Session session(context, workload, options);
     session.configure();
     auto bindings = session.createBindingSet();
     ASSERT_EQ(workload.resourceCount(), 3);
@@ -430,6 +434,75 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderWithMovedBindingSe
     assignedExecution.run();
 
     EXPECT_EQ(outputBuffer.read(elements), expected);
+}
+
+TEST_F(StandaloneComputeSessionExecutionTest, RunTwoSessionsWithSharedCompiledExecution) {
+    constexpr size_t elements = 10;
+    constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
+
+    auto workload = Workload::fromComputeShader(makeAddInt32BuffersDescription());
+    auto context = Context::wrap({instance, physicalDevice, device, queueFamilyIndex, queue});
+    auto compiledExecution = std::make_unique<CompiledExecution>(context, workload);
+
+    const Buffer firstLhsBuffer(physicalDevice, device, bufferSize);
+    const Buffer firstRhsBuffer(physicalDevice, device, bufferSize);
+    const Buffer firstOutputBuffer(physicalDevice, device, bufferSize);
+    const Buffer secondLhsBuffer(physicalDevice, device, bufferSize);
+    const Buffer secondRhsBuffer(physicalDevice, device, bufferSize);
+    const Buffer secondOutputBuffer(physicalDevice, device, bufferSize);
+
+    const std::vector<int32_t> firstLhs = {1, 2, 3, 4, 5, -6, -7, 8, 9, 10};
+    const std::vector<int32_t> firstRhs = {10, 9, 8, 7, 6, 5, 4, -3, -2, -1};
+    const std::vector<int32_t> secondLhs = {3, 5, 8, 13, 21, 34, 55, 89, 144, 233};
+    const std::vector<int32_t> secondRhs = {1, -1, 2, -2, 3, -3, 4, -4, 5, -5};
+    firstLhsBuffer.write(firstLhs);
+    firstRhsBuffer.write(firstRhs);
+    firstOutputBuffer.write(std::vector<int32_t>(elements, 0));
+    secondLhsBuffer.write(secondLhs);
+    secondRhsBuffer.write(secondRhs);
+    secondOutputBuffer.write(std::vector<int32_t>(elements, 0));
+
+    Session firstSession(context, workload, *compiledExecution);
+    Session secondSession(context, workload, *compiledExecution);
+    compiledExecution.reset();
+
+    firstSession.configure();
+    auto firstBindings = firstSession.createBindingSet();
+    firstBindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstLhsBuffer.buffer});
+    firstBindings.bindBuffer(workload.resource(1), BufferBindingInfo{*firstRhsBuffer.buffer});
+    firstBindings.bindBuffer(workload.resource(2), BufferBindingInfo{*firstOutputBuffer.buffer});
+    auto firstExecution = firstSession.prepare(firstBindings);
+
+    secondSession.configure();
+    auto secondBindings = secondSession.createBindingSet();
+    secondBindings.bindBuffer(workload.resource(0), BufferBindingInfo{*secondLhsBuffer.buffer});
+    secondBindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondRhsBuffer.buffer});
+    secondBindings.bindBuffer(workload.resource(2), BufferBindingInfo{*secondOutputBuffer.buffer});
+    auto secondExecution = secondSession.prepare(secondBindings);
+
+    firstExecution.run();
+    secondExecution.run();
+
+    EXPECT_EQ(firstOutputBuffer.read(elements), addVectors(firstLhs, firstRhs));
+    EXPECT_EQ(secondOutputBuffer.read(elements), addVectors(secondLhs, secondRhs));
+}
+
+TEST_F(StandaloneComputeSessionExecutionTest, ConfiguresSessionWithMovedCompiledExecution) {
+    auto workload = Workload::fromComputeShader(makeAddInt32BuffersDescription());
+    auto context = wrappedContext();
+
+    CompiledExecution compiledExecution(context, workload);
+    auto movedCompiledExecution(std::move(compiledExecution));
+    // Intentionally verify that the moved-from facade is rejected.
+    EXPECT_THROW(static_cast<void>(Session(context, workload,
+                                           compiledExecution)), // NOLINT(bugprone-use-after-move)
+                 std::runtime_error);
+
+    CompiledExecution assignedCompiledExecution(context, workload);
+    assignedCompiledExecution = std::move(movedCompiledExecution);
+
+    Session session(context, workload, assignedCompiledExecution);
+    session.configure();
 }
 
 /*******************************************************************************

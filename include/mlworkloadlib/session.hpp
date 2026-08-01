@@ -6,7 +6,7 @@
 #pragma once
 
 #include "mlworkloadlib/binding_set.hpp"
-#include "mlworkloadlib/context.hpp"
+#include "mlworkloadlib/compiled_execution.hpp"
 #include "mlworkloadlib/prepared_execution.hpp"
 #include "mlworkloadlib/workload.hpp"
 
@@ -30,10 +30,13 @@ class Session final {
      * Creation and lifetime
      **************************************************************************/
 
-    /** @brief Creates an unconfigured Session for a Workload and Context. */
-    Session(Context &context, const Workload &workload);
+    /** @brief Creates an unconfigured Session with its own compiled state. */
+    Session(Context &context, const Workload &workload, SessionOptions options = {});
 
-    /** @brief Releases pipelines, command state, and other device-specific session state. */
+    /** @brief Creates an unconfigured Session sharing state with @p compiledExecution. */
+    Session(Context &context, const Workload &workload, CompiledExecution &compiledExecution);
+
+    /** @brief Releases session-specific objects and its reference to compiled state. */
     ~Session();
 
     Session(const Session &) = delete;
@@ -45,10 +48,10 @@ class Session final {
      * Configuration
      **************************************************************************/
 
-    /** @brief Supplies or replaces the implementation for a placeholder module. */
+    /** @brief Supplies or replaces code for a placeholder module before configure(). */
     void bindModule(PlaceholderModuleView placeholderModule, ModuleImplementation implementation);
 
-    /** @brief Builds reusable device-specific state for every executable. */
+    /** @brief Builds or reuses pipelines and layouts, then creates per-Session data graph and command objects. */
     void configure();
 
     /***************************************************************************

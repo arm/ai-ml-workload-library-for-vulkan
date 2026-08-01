@@ -712,12 +712,12 @@ void PreparedExecution::Impl::createDescriptorSets() {
         for (const auto &[type, count] : descriptorCounts) {
             poolSizes.emplace_back(type, count);
         }
-        const auto &executableState = sessionImpl.executableStates[executableIndex];
-        descriptors.descriptorPool =
-            vk::raii::DescriptorPool(sessionImpl.contextView.device.get(),
-                                     {vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
-                                      static_cast<uint32_t>(executableState.descriptorSetLayouts.size()), poolSizes});
-        const auto descriptorSetLayouts = detail::rawDescriptorSetLayouts(executableState.descriptorSetLayouts);
+        const auto &compiledExecutable = sessionImpl.executableStates[executableIndex].compiledExecutable.get();
+        descriptors.descriptorPool = vk::raii::DescriptorPool(
+            sessionImpl.contextView.device.get(),
+            {vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
+             static_cast<uint32_t>(compiledExecutable.descriptorSetLayouts.size()), poolSizes});
+        const auto descriptorSetLayouts = detail::rawDescriptorSetLayouts(compiledExecutable.descriptorSetLayouts);
         const vk::DescriptorSetAllocateInfo allocateInfo(*descriptors.descriptorPool, descriptorSetLayouts);
         descriptors.descriptorSets = sessionImpl.contextView.device.get().allocateDescriptorSets(allocateInfo);
     }
@@ -984,20 +984,21 @@ void PreparedExecution::Impl::record(vk::CommandBuffer commandBuffer) {
     for (std::size_t executableIndex = 0; executableIndex < sessionState.executableStates.size(); ++executableIndex) {
         const auto &executableState = sessionState.executableStates[executableIndex];
         const auto &executable = workloadState.executables.at(executableIndex);
+        const auto &compiledExecutable = executableState.compiledExecutable.get();
         const auto &descriptors = descriptorSetStates[executableIndex];
         const auto pipelineBindPoint = detail::pipelineBindPoint(executable.type);
         for (uint32_t set = 0; set < static_cast<uint32_t>(descriptors.descriptorSets.size()); ++set) {
             auto *const descriptorSet = static_cast<VkDescriptorSet>(*descriptors.descriptorSets[set]);
             dispatcher->vkCmdBindDescriptorSets(
                 static_cast<VkCommandBuffer>(commandBuffer), static_cast<VkPipelineBindPoint>(pipelineBindPoint),
-                static_cast<VkPipelineLayout>(*executableState.pipelineLayout), set, 1, &descriptorSet, 0, nullptr);
+                static_cast<VkPipelineLayout>(*compiledExecutable.pipelineLayout), set, 1, &descriptorSet, 0, nullptr);
         }
         dispatcher->vkCmdBindPipeline(static_cast<VkCommandBuffer>(commandBuffer),
                                       static_cast<VkPipelineBindPoint>(pipelineBindPoint),
-                                      static_cast<VkPipeline>(*executableState.pipeline));
+                                      static_cast<VkPipeline>(*compiledExecutable.pipeline));
         for (const auto &range : executable.pushConstantRanges) {
             dispatcher->vkCmdPushConstants(static_cast<VkCommandBuffer>(commandBuffer),
-                                           static_cast<VkPipelineLayout>(*executableState.pipelineLayout),
+                                           static_cast<VkPipelineLayout>(*compiledExecutable.pipelineLayout),
                                            static_cast<VkShaderStageFlags>(range.stageFlags), range.offset, range.size,
                                            pushConstants.data() + range.offset);
         }
