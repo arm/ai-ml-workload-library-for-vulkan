@@ -16,6 +16,8 @@
 
 namespace mlsdk::workloadlib::detail {
 
+struct DescriptorBinding;
+
 /*******************************************************************************
  * Workload metadata
  *******************************************************************************/
@@ -23,7 +25,9 @@ namespace mlsdk::workloadlib::detail {
 ResourceKind resourceKind(vk::DescriptorType descriptorType) noexcept;
 std::string_view resourceKindName(ResourceKind kind) noexcept;
 
-vk::DeviceSize elementCount(const std::vector<int64_t> &shape) noexcept;
+vk::DeviceSize elementCount(const std::vector<int64_t> &shape);
+vk::DeviceSize byteSizeFromShapeAndStride(const std::vector<int64_t> &shape, const std::vector<int64_t> &stride,
+                                          vk::DeviceSize elementSize, std::string_view description);
 vk::DeviceSize storageBufferByteSize(vk::DeviceSize explicitByteSize, vk::Format format,
                                      const std::vector<int64_t> &shape, const std::vector<int64_t> &stride);
 
@@ -105,6 +109,9 @@ vk::AccessFlags2 imageAccess(ExecutableKind executableKind, vk::DescriptorType d
 /*******************************************************************************
  * Descriptor sets
  *******************************************************************************/
+
+std::vector<std::vector<DescriptorBinding>> splitBindingsBySet(const std::vector<DescriptorBinding> &descBindings,
+                                                               uint32_t maxDescriptorSets);
 
 std::vector<vk::DescriptorSetLayout>
 rawDescriptorSetLayouts(const std::vector<vk::raii::DescriptorSetLayout> &descriptorSetLayouts);
