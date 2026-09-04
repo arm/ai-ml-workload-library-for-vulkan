@@ -1,0 +1,487 @@
+{
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "spdxVersion": "SPDX-2.3",
+  "creationInfo": {
+    "created": "2026-08-17T13:42:10Z",
+    "creators": [
+      "Organization: COMPANY NAME",
+      "Tool: Black Duck Hub - 2026.4.2"
+    ],
+    "licenseListVersion": "3.28"
+  },
+  "name": "ml-workload-lib-for-vulkan",
+  "dataLicense": "CC0-1.0",
+  "documentNamespace": "https://blackducksoftware.github.io/spdx/ML%3AMLSDKforVulkan-9c63b026-60ea-422b-8407-3a80e60c150e",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "b8e7b325-699b-4292-a4ca-1caa37086e03",
+          "referenceType": "BlackDuck-Version"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "(Apache-2.0)",
+      "licenseDeclared": "(Apache-2.0)",
+      "name": "ml-workload-lib-for-vulkan",
+      "originator": "Organization: Arm Limited.",
+      "copyrightText": "Copyright (c) Arm Limited",
+      "supplier": "Organization: Arm Limited.",
+      "versionInfo": "ml-workload-lib-for-vulkan"
+    },
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---18e36ba3-5553-495c-afa3-ef67a7b417c1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:github/kitware/cmake@v3.31.8",
+          "referenceType": "purl"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "2b0e0fe6-e799-4ef5-9fdd-239a192a8ec0",
+          "referenceType": "BlackDuck-ComponentOrigin"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "18e36ba3-5553-495c-afa3-ef67a7b417c1",
+          "referenceType": "BlackDuck-ComponentVersion"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "11ad566d-e0a2-4e11-98a7-08ad33356f4e",
+          "referenceType": "BlackDuck-Component"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "name": "CMake",
+      "originator": "Organization: kitware",
+      "supplier": "Organization: kitware",
+      "versionInfo": "v3.31.8"
+    },
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---294e1b93-c201-4680-ae6f-a345ea9e21ee",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "294e1b93-c201-4680-ae6f-a345ea9e21ee",
+          "referenceType": "BlackDuck-ComponentVersion"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "6cb0170d-8184-4704-bb88-36647e878309",
+          "referenceType": "BlackDuck-Component"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "pytest-xdist",
+      "originator": "Organization: pytest-xdist",
+      "supplier": "Organization: pytest-xdist",
+      "versionInfo": "3.8.0"
+    },
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---3c53bb1a-f1ad-4f37-9f56-e59f0e9ef333",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "SECURITY",
+          "referenceLocator": "cpe:2.3:a:numpy:numpy:1.26.4:*:*:*:*:*:*:*",
+          "referenceType": "cpe23Type"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "3c53bb1a-f1ad-4f37-9f56-e59f0e9ef333",
+          "referenceType": "BlackDuck-ComponentVersion"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "4f899c74-a646-4687-a056-3bbcc16bdb04",
+          "referenceType": "BlackDuck-Component"
+        },
+        {
+          "referenceCategory": "SECURITY",
+          "referenceLocator": "cpe:2.3:a:pypi_package:numpy:1.26.4:*:*:*:*:*:*:*",
+          "referenceType": "cpe23Type"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "name": "NumPy",
+      "originator": "Organization: NumPy",
+      "supplier": "Organization: NumPy",
+      "versionInfo": "1.26.4"
+    },
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---441ed925-dd99-4126-bd74-9dc39d2194cd",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "441ed925-dd99-4126-bd74-9dc39d2194cd",
+          "referenceType": "BlackDuck-ComponentVersion"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "caf839c6-257e-4280-b853-31165dbd8762",
+          "referenceType": "BlackDuck-Component"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "Vulkan-Headers",
+      "originator": "Organization: Vulkan-Headers",
+      "supplier": "Organization: Vulkan-Headers",
+      "versionInfo": "vulkan-sdk-1.4.357.0"
+    },
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---5475b1bb-dbbf-4224-a702-1fac07dcae62",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "ac3331eb-2aa8-4867-ab91-8226042a13e4",
+          "referenceType": "BlackDuck-Component"
+        },
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:github/google/googletest@v1.17.0",
+          "referenceType": "purl"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "ce432f5d-4c27-4506-b1a7-ca3ef65415d5",
+          "referenceType": "BlackDuck-ComponentOrigin"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "5475b1bb-dbbf-4224-a702-1fac07dcae62",
+          "referenceType": "BlackDuck-ComponentVersion"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "name": "Google C++ Testing Framework",
+      "originator": "Organization: google",
+      "supplier": "Organization: google",
+      "versionInfo": "1.17.0"
+    },
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---67b31fbf-3104-4554-acb9-d6fba3907e59",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "67b31fbf-3104-4554-acb9-d6fba3907e59",
+          "referenceType": "BlackDuck-ComponentVersion"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "d0051fc6-5023-4f14-8059-3fbc4710dca1",
+          "referenceType": "BlackDuck-Component"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "p-ranav/argparse",
+      "originator": "Organization: p-ranav/argparse",
+      "supplier": "Organization: p-ranav/argparse",
+      "versionInfo": "v3.2"
+    },
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---70b5c41e-d141-444b-bc03-d703a1e6a4ac",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "d04c4a54-3c58-494c-8be8-aa8697895683",
+          "referenceType": "BlackDuck-Component"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "70b5c41e-d141-444b-bc03-d703a1e6a4ac",
+          "referenceType": "BlackDuck-ComponentVersion"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "name": "pybind11",
+      "originator": "Organization: pybind11",
+      "supplier": "Organization: pybind11",
+      "versionInfo": "3.1.0"
+    },
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---d4103750-db6f-409d-9694-9a0c5e13cec0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "d4103750-db6f-409d-9694-9a0c5e13cec0",
+          "referenceType": "BlackDuck-ComponentVersion"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "fd3f8515-4925-4e6d-9896-d204878efe7e",
+          "referenceType": "BlackDuck-Component"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "name": "SPIRV-Tools",
+      "originator": "Organization: SPIRV-Tools",
+      "supplier": "Organization: SPIRV-Tools",
+      "versionInfo": "vulkan-sdk-1.4.357.0"
+    },
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---75e13088-641e-4ba4-883a-a02158986e82",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "75e13088-641e-4ba4-883a-a02158986e82",
+          "referenceType": "BlackDuck-ComponentVersion"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "d14db7d7-15e4-4a44-9fe5-1780d6d922af",
+          "referenceType": "BlackDuck-Component"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "name": "glslang",
+      "originator": "Organization: glslang",
+      "supplier": "Organization: glslang",
+      "versionInfo": "vulkan-sdk-1.4.357.0"
+    },
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---9ae38eb8-9a4f-4b6a-b80e-06fd92d59ba0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "9ae38eb8-9a4f-4b6a-b80e-06fd92d59ba0",
+          "referenceType": "BlackDuck-ComponentVersion"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "7355d1e8-3e81-447c-a726-fa23a3541ac2",
+          "referenceType": "BlackDuck-Component"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "JSON for Modern Cpp",
+      "originator": "Organization: JSON for Modern Cpp",
+      "supplier": "Organization: JSON for Modern Cpp",
+      "versionInfo": "3.12.0"
+    },
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---bff123a4-c1b9-4ea8-813a-ab24e10578c9",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "5cfa28cc-2db8-49ea-be29-c1eb08c09330",
+          "referenceType": "BlackDuck-ComponentOrigin"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "bff123a4-c1b9-4ea8-813a-ab24e10578c9",
+          "referenceType": "BlackDuck-ComponentVersion"
+        },
+        {
+          "referenceCategory": "SECURITY",
+          "referenceLocator": "cpe:2.3:a:holger_krekel_and_pytest_dev_team:pytest:9.0.3:*:*:*:*:*:*:*",
+          "referenceType": "cpe23Type"
+        },
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:github/pytest-dev/pytest@9.0.3",
+          "referenceType": "purl"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "50b11cf7-bb6c-4d2b-86bd-c4c43548ef76",
+          "referenceType": "BlackDuck-Component"
+        },
+        {
+          "referenceCategory": "SECURITY",
+          "referenceLocator": "cpe:2.3:a:pypi_package:pytest:9.0.3:*:*:*:*:*:*:*",
+          "referenceType": "cpe23Type"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "pytest",
+      "originator": "Organization: pytest-dev",
+      "supplier": "Organization: pytest-dev",
+      "versionInfo": "9.0.3"
+    },
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---e6b1ed54-1d48-4b40-a6b7-afb902a76390",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "5a1545e1-ae50-4a5b-a909-6315ae937e11",
+          "referenceType": "BlackDuck-ComponentOrigin"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "e6b1ed54-1d48-4b40-a6b7-afb902a76390",
+          "referenceType": "BlackDuck-ComponentVersion"
+        },
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:github/arm/ai-ml-sdk-vgf-library@v0.10.0",
+          "referenceType": "purl"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "404f394a-75ef-468a-9ba4-223bd5e748be",
+          "referenceType": "BlackDuck-Component"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "arm/ai-ml-sdk-vgf-library",
+      "originator": "Organization: arm",
+      "supplier": "Organization: arm",
+      "versionInfo": "v0.10.0"
+    },
+    {
+      "SPDXID": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---f28bdd29-280f-4f5c-8ded-c5b66ea83ece",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:github/google/flatbuffers@v25.2.10",
+          "referenceType": "purl"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "6581ad3c-cfa6-41be-9cd6-5c0c7431973e",
+          "referenceType": "BlackDuck-ComponentOrigin"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "f28bdd29-280f-4f5c-8ded-c5b66ea83ece",
+          "referenceType": "BlackDuck-ComponentVersion"
+        },
+        {
+          "referenceCategory": "OTHER",
+          "referenceLocator": "ae906881-37fd-4af4-8fe7-e435fd2056af",
+          "referenceType": "BlackDuck-Component"
+        },
+        {
+          "referenceCategory": "SECURITY",
+          "referenceLocator": "cpe:2.3:a:google:flatbuffers:25.2.10:*:*:*:*:*:*:*",
+          "referenceType": "cpe23Type"
+        },
+        {
+          "referenceCategory": "SECURITY",
+          "referenceLocator": "cpe:2.3:a:crates_package:flatbuffers:25.2.10:*:*:*:*:*:*:*",
+          "referenceType": "cpe23Type"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "name": "FlatBuffers",
+      "originator": "Organization: google",
+      "supplier": "Organization: google",
+      "versionInfo": "25.2.10"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03"
+    },
+    {
+      "spdxElementId": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "relationshipType": "DYNAMIC_LINK",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---18e36ba3-5553-495c-afa3-ef67a7b417c1"
+    },
+    {
+      "spdxElementId": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "relationshipType": "DYNAMIC_LINK",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---294e1b93-c201-4680-ae6f-a345ea9e21ee"
+    },
+    {
+      "spdxElementId": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "relationshipType": "DYNAMIC_LINK",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---3c53bb1a-f1ad-4f37-9f56-e59f0e9ef333"
+    },
+    {
+      "spdxElementId": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "relationshipType": "DYNAMIC_LINK",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---441ed925-dd99-4126-bd74-9dc39d2194cd"
+    },
+    {
+      "spdxElementId": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "relationshipType": "DYNAMIC_LINK",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---5475b1bb-dbbf-4224-a702-1fac07dcae62"
+    },
+    {
+      "spdxElementId": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "relationshipType": "DYNAMIC_LINK",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---67b31fbf-3104-4554-acb9-d6fba3907e59"
+    },
+    {
+      "spdxElementId": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "relationshipType": "DYNAMIC_LINK",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---70b5c41e-d141-444b-bc03-d703a1e6a4ac"
+    },
+    {
+      "spdxElementId": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "relationshipType": "DYNAMIC_LINK",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---d4103750-db6f-409d-9694-9a0c5e13cec0"
+    },
+    {
+      "spdxElementId": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "relationshipType": "DYNAMIC_LINK",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---75e13088-641e-4ba4-883a-a02158986e82"
+    },
+    {
+      "spdxElementId": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "relationshipType": "DYNAMIC_LINK",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---9ae38eb8-9a4f-4b6a-b80e-06fd92d59ba0"
+    },
+    {
+      "spdxElementId": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "relationshipType": "DYNAMIC_LINK",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---bff123a4-c1b9-4ea8-813a-ab24e10578c9"
+    },
+    {
+      "spdxElementId": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "relationshipType": "DYNAMIC_LINK",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---e6b1ed54-1d48-4b40-a6b7-afb902a76390"
+    },
+    {
+      "spdxElementId": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03",
+      "relationshipType": "DYNAMIC_LINK",
+      "relatedSpdxElement": "SPDXRef-package-b8e7b325-699b-4292-a4ca-1caa37086e03---f28bdd29-280f-4f5c-8ded-c5b66ea83ece"
+    }
+  ]
+}

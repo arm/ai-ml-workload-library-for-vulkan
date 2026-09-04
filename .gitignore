@@ -1,69 +1,39 @@
-# Prerequisites
-*.d
+#
+# SPDX-FileCopyrightText: Copyright 2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
+# SPDX-License-Identifier: Apache-2.0
+#
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# Repo
+.repo
 
-# Precompiled Headers
-*.gch
-*.pch
+# Build artifacts
+/build*
+install/
 
-# Linker files
-*.ilk
+# Unit test / coverage reports
+.cache
 
-# Debugger Files
-*.pdb
+# Environments
+.env
+.venv
+env/
+venv/
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-*.so.*
+# Generated IDE files
+.idea/
+.vs/
+.vscode/
 
+# Developer tool files
+.clangd
+AGENTS.md
 
-# Fortran module files
-*.mod
-*.smod
+# Test output
+test/output/
 
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# Build directories
-build/
-Build/
-build-*/
-
-# CMake generated files
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
-install_manifest.txt
-compile_commands.json
-
-# Temporary files
-*.tmp
-*.log
-*.bak
-*.swp
-
-# vcpkg
-vcpkg_installed/
-
-# debug information files
-*.dwo
-
-# test output & cache
-Testing/
-.cache/
+# Fuzz output
+fuzz/artifacts/
+fuzz/crash-*
+fuzz/leak-*
+fuzz/oom-*
+fuzz/timeout-*
