@@ -175,7 +175,7 @@ RuntimeAllocation::Impl *RuntimeAllocation::runtimeAllocationImpl() noexcept { r
 const RuntimeAllocation::Impl *RuntimeAllocation::runtimeAllocationImpl() const noexcept { return impl_.get(); }
 
 BoundMemoryInfo RuntimeAllocation::memory() const {
-    const auto *allocationState = this->runtimeAllocationImpl();
+    const auto *allocationState = runtimeAllocationImpl();
     return allocationState != nullptr ? allocationState->memoryInfo : BoundMemoryInfo{};
 }
 
@@ -190,15 +190,15 @@ struct TensorAllocation::Impl : RuntimeAllocation::Impl {
 TensorAllocation::TensorAllocation() : RuntimeAllocation(std::make_unique<Impl>()) {}
 
 TensorAllocation::Impl *TensorAllocation::tensorAllocationImpl() noexcept {
-    return dynamic_cast<Impl *>(this->runtimeAllocationImpl());
+    return dynamic_cast<Impl *>(runtimeAllocationImpl());
 }
 
 const TensorAllocation::Impl *TensorAllocation::tensorAllocationImpl() const noexcept {
-    return dynamic_cast<const Impl *>(this->runtimeAllocationImpl());
+    return dynamic_cast<const Impl *>(runtimeAllocationImpl());
 }
 
 vk::TensorARM TensorAllocation::handle() const {
-    const auto *allocationState = this->tensorAllocationImpl();
+    const auto *allocationState = tensorAllocationImpl();
     return allocationState != nullptr ? *allocationState->tensor : vk::TensorARM(nullptr);
 }
 
@@ -213,15 +213,15 @@ struct BufferAllocation::Impl : RuntimeAllocation::Impl {
 BufferAllocation::BufferAllocation() : RuntimeAllocation(std::make_unique<Impl>()) {}
 
 BufferAllocation::Impl *BufferAllocation::bufferAllocationImpl() noexcept {
-    return dynamic_cast<Impl *>(this->runtimeAllocationImpl());
+    return dynamic_cast<Impl *>(runtimeAllocationImpl());
 }
 
 const BufferAllocation::Impl *BufferAllocation::bufferAllocationImpl() const noexcept {
-    return dynamic_cast<const Impl *>(this->runtimeAllocationImpl());
+    return dynamic_cast<const Impl *>(runtimeAllocationImpl());
 }
 
 vk::Buffer BufferAllocation::handle() const {
-    const auto *allocationState = this->bufferAllocationImpl();
+    const auto *allocationState = bufferAllocationImpl();
     return allocationState != nullptr ? *allocationState->buffer : vk::Buffer(nullptr);
 }
 
@@ -238,20 +238,20 @@ struct ImageAllocation::Impl : RuntimeAllocation::Impl {
 ImageAllocation::ImageAllocation() : RuntimeAllocation(std::make_unique<Impl>()) {}
 
 ImageAllocation::Impl *ImageAllocation::imageAllocationImpl() noexcept {
-    return dynamic_cast<Impl *>(this->runtimeAllocationImpl());
+    return dynamic_cast<Impl *>(runtimeAllocationImpl());
 }
 
 const ImageAllocation::Impl *ImageAllocation::imageAllocationImpl() const noexcept {
-    return dynamic_cast<const Impl *>(this->runtimeAllocationImpl());
+    return dynamic_cast<const Impl *>(runtimeAllocationImpl());
 }
 
 vk::Image ImageAllocation::handle() const {
-    const auto *allocationState = this->imageAllocationImpl();
+    const auto *allocationState = imageAllocationImpl();
     return allocationState != nullptr ? *allocationState->image : vk::Image(nullptr);
 }
 
 ImageBindingInfo ImageAllocation::binding() const {
-    const auto *allocationState = this->imageAllocationImpl();
+    const auto *allocationState = imageAllocationImpl();
     if (allocationState == nullptr) {
         return {};
     }

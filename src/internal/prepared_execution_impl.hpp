@@ -26,40 +26,11 @@ struct PreparedExecution::Impl {
      * Bound resource records
      **************************************************************************/
 
-    struct BoundTensor {
-        DescriptorBinding descBinding;
-        vk::TensorARM tensor{nullptr};
-        vk::raii::TensorViewARM tensorView{nullptr};
-        BoundMemoryInfo memory{};
-    };
+    struct BoundTensor;
+    struct BoundBuffer;
+    struct BoundImage;
 
-    struct BoundBuffer {
-        DescriptorBinding descBinding;
-        vk::Buffer buffer{nullptr};
-        BoundMemoryInfo memory{};
-    };
-
-    struct BoundImage {
-        // Bound handles
-        DescriptorBinding descBinding;
-        vk::Image image{nullptr};
-        vk::ImageView imageView{nullptr};
-        vk::Sampler sampler{nullptr};
-
-        // Runtime-owned descriptor helpers
-        vk::raii::ImageView ownedImageView{nullptr};
-        vk::raii::Sampler ownedSampler{nullptr};
-
-        // Memory and layout metadata
-        BoundMemoryInfo memory{};
-        std::optional<vk::ImageLayout> layout;
-        vk::ImageSubresourceRange subresourceRange;
-    };
-
-    struct DescriptorSetState {
-        vk::raii::DescriptorPool descriptorPool{nullptr};
-        std::vector<vk::raii::DescriptorSet> descriptorSets;
-    };
+    struct DescriptorSetState;
 
     /***************************************************************************
      * Runtime resource storage

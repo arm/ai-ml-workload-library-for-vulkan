@@ -252,7 +252,7 @@ class ExecutableView {
 
 // Common workload description consumed by Session. Returned view objects are
 // non-owning and must not outlive the Workload.
-class Workload {
+class Workload final {
   private:
     template <typename Derived> class RangeIteratorBase {
       public:
@@ -382,7 +382,7 @@ class Workload {
      * Lifetime
      ***************************************************************************/
 
-    virtual ~Workload();
+    ~Workload();
 
     Workload(const Workload &) = delete;
     Workload &operator=(const Workload &) = delete;

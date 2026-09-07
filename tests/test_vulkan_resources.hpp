@@ -87,8 +87,8 @@ struct Tensor {
            std::vector<int64_t> shapeIn)
         : shape(std::move(shapeIn)) {
         const vk::TensorDescriptionARM description(vk::TensorTilingARM::eLinear, format,
-                                                   static_cast<uint32_t>(this->shape.size()), this->shape.data(),
-                                                   nullptr, vk::TensorUsageFlagBitsARM::eDataGraph);
+                                                   static_cast<uint32_t>(shape.size()), shape.data(), nullptr,
+                                                   vk::TensorUsageFlagBitsARM::eDataGraph);
         const vk::TensorCreateInfoARM createInfo({}, &description, vk::SharingMode::eExclusive);
         tensor = vk::raii::TensorARM(device, createInfo);
 
