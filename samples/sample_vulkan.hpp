@@ -7,7 +7,6 @@
 #include "mlworkloadlib/context.hpp"
 
 #include <vulkan/vulkan_beta.h>
-#include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
 
 #include <algorithm>
