@@ -20,7 +20,7 @@
 
 extern const TBuiltInResource *GetDefaultResources();
 
-namespace mlworkloadlib::detail {
+namespace mlsdk::workloadlib::detail {
 namespace {
 
 class GlslangProcess {
@@ -136,4 +136,4 @@ const bool registeredGlslCompiler = SourceModuleCompilerRegistration(ModuleCodeK
 
 } // namespace
 
-} // namespace mlworkloadlib::detail
+} // namespace mlsdk::workloadlib::detail

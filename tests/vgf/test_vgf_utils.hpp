@@ -14,7 +14,7 @@
 #include <sstream>
 #include <string>
 
-namespace mlworkloadlib::test {
+namespace mlsdk::workloadlib::test {
 
 template <typename Populate> std::string writeVgf(Populate populate) {
     auto encoder = mlsdk::vgflib::CreateEncoder(VK_HEADER_VERSION);
@@ -26,4 +26,4 @@ template <typename Populate> std::string writeVgf(Populate populate) {
     return stream.str();
 }
 
-} // namespace mlworkloadlib::test
+} // namespace mlsdk::workloadlib::test

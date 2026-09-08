@@ -15,7 +15,7 @@
 
 #include <memory>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 /*******************************************************************************
  * Session
@@ -73,4 +73,4 @@ class Session {
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

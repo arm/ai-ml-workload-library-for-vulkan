@@ -11,7 +11,7 @@
 #include <cstddef>
 #include <memory>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 class PreparedExecution;
 class Session;
@@ -65,4 +65,4 @@ class BindingSet {
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

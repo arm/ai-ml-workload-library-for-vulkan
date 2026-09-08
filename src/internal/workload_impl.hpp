@@ -20,7 +20,7 @@
 #include <variant>
 #include <vector>
 
-namespace mlworkloadlib::detail {
+namespace mlsdk::workloadlib::detail {
 
 /*******************************************************************************
  * Workload metadata model
@@ -124,9 +124,9 @@ struct Executable {
     bool implicitBarrier = true;
 };
 
-} // namespace mlworkloadlib::detail
+} // namespace mlsdk::workloadlib::detail
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 /*******************************************************************************
  * Implementation state
@@ -156,4 +156,4 @@ struct Workload::Impl {
     std::vector<Executable> executables;
 };
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

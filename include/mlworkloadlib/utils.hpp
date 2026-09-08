@@ -6,7 +6,7 @@
 
 #include <cstddef>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 template <typename T> class ArrayView {
   public:
@@ -29,4 +29,4 @@ template <typename T> class ArrayView {
     std::size_t size_ = 0;
 };
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

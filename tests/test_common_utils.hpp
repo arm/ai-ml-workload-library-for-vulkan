@@ -10,7 +10,7 @@
 #include <string>
 #include <string_view>
 
-namespace mlworkloadlib::test {
+namespace mlsdk::workloadlib::test {
 
 /*******************************************************************************
  * Common test helpers
@@ -26,4 +26,4 @@ inline void replaceAll(std::string &text, std::string_view from, std::string_vie
     }
 }
 
-} // namespace mlworkloadlib::test
+} // namespace mlsdk::workloadlib::test

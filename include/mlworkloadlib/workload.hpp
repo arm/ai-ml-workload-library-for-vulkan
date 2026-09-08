@@ -15,7 +15,7 @@
 #include <string>
 #include <string_view>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 class BindingSet;
 class PreparedExecution;
@@ -449,4 +449,4 @@ class Workload {
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

@@ -28,7 +28,7 @@ extern "C" const char *__lsan_default_options() { return "detect_leaks=0"; }
 
 namespace {
 
-namespace workload_fuzz = mlworkloadlib::fuzz;
+namespace workload_fuzz = mlsdk::workloadlib::fuzz;
 namespace vgflib = mlsdk::vgflib;
 
 using workload_fuzz::ByteReader;

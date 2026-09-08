@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace mlworkloadlib::samples {
+namespace mlsdk::workloadlib::samples {
 
 inline bool hasExtension(const std::vector<vk::ExtensionProperties> &extensions, const char *name) {
     return std::any_of(extensions.begin(), extensions.end(), [name](const auto &extension) {
@@ -136,4 +136,4 @@ class ApplicationVulkanContext {
     uint32_t queueFamilyIndex_ = std::numeric_limits<uint32_t>::max();
 };
 
-} // namespace mlworkloadlib::samples
+} // namespace mlsdk::workloadlib::samples

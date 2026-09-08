@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace mlworkloadlib::test {
+namespace mlsdk::workloadlib::test {
 
 /*******************************************************************************
  * Vulkan fixture
@@ -140,4 +140,4 @@ class RuntimeSessionExecutionTest : public ::testing::Test {
     vk::PhysicalDeviceShaderReplicatedCompositesFeaturesEXT replicatedCompositesFeatures;
 };
 
-} // namespace mlworkloadlib::test
+} // namespace mlsdk::workloadlib::test

@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 namespace vgflib = mlsdk::vgflib;
 namespace utils = detail::utils;
 namespace vulkan_helpers = detail::vulkan_helpers;
@@ -425,4 +425,4 @@ Workload Workload::fromVGF(const std::filesystem::path &path) {
 
 Workload Workload::fromVGF(const void *data, std::size_t size) { return decodeVgfMemory(data, size); }
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

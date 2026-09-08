@@ -12,7 +12,7 @@
 #include <functional>
 #include <vector>
 
-namespace mlworkloadlib::test {
+namespace mlsdk::workloadlib::test {
 
 /*******************************************************************************
  * Expected result helpers
@@ -92,4 +92,4 @@ inline std::vector<int8_t> expectedMaxpool(const std::vector<int8_t> &input, con
     return expected;
 }
 
-} // namespace mlworkloadlib::test
+} // namespace mlsdk::workloadlib::test

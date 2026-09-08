@@ -8,7 +8,7 @@
 
 #include <optional>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 /*******************************************************************************
  * Binding metadata
@@ -50,4 +50,4 @@ struct ImageBindingInfo {
     vk::ImageSubresourceRange subresourceRange;
 };
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

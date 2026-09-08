@@ -7,8 +7,8 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace mlworkloadlib::fuzz {
+namespace mlsdk::workloadlib::fuzz {
 
 void fuzzWorkloadBytes(const uint8_t *data, std::size_t size);
 
-} // namespace mlworkloadlib::fuzz
+} // namespace mlsdk::workloadlib::fuzz

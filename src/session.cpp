@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 namespace utils = detail::utils;
 namespace vulkan_helpers = detail::vulkan_helpers;
@@ -431,4 +431,4 @@ PreparedExecution Session::prepare(const BindingSet &bindings) {
     return {*this, bindings};
 }
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

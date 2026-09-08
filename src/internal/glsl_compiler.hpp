@@ -8,10 +8,10 @@
 #include <cstdint>
 #include <vector>
 
-namespace mlworkloadlib::detail {
+namespace mlsdk::workloadlib::detail {
 
 struct Module;
 
 std::vector<uint32_t> compileGlslComputeToSpirv(const Module &module);
 
-} // namespace mlworkloadlib::detail
+} // namespace mlsdk::workloadlib::detail

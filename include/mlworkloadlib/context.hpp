@@ -14,7 +14,7 @@
 #include <memory>
 #include <vector>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 class ResourceView;
 class Session;
@@ -189,4 +189,4 @@ class Context {
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace mlworkloadlib::test {
+namespace mlsdk::workloadlib::test {
 
 /*******************************************************************************
  * Workload resource requirements
@@ -55,4 +55,4 @@ inline ResourceRequirements makeStorageImageRequirements() {
     return resource;
 }
 
-} // namespace mlworkloadlib::test
+} // namespace mlsdk::workloadlib::test

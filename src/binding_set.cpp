@@ -15,7 +15,7 @@
 #include <string>
 #include <string_view>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 namespace utils = detail::utils;
 
@@ -150,4 +150,4 @@ void BindingSet::bindPushConstants(const void *data, std::size_t size) {
     bindingSetState->pushConstants.assign(begin, begin + size);
 }
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

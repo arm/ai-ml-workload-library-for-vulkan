@@ -19,7 +19,7 @@
 #include <string_view>
 #include <vector>
 
-namespace mlworkloadlib::test {
+namespace mlsdk::workloadlib::test {
 
 inline const std::vector<mlsdk::vgflib::GraphConstantBindingRef> noGraphConstants;
 
@@ -187,4 +187,4 @@ inline std::string makeAddInt32BuffersVgf() {
     });
 }
 
-} // namespace mlworkloadlib::test
+} // namespace mlsdk::workloadlib::test

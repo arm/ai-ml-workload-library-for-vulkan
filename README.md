@@ -14,9 +14,9 @@ The installed public headers are included directly as needed:
 #include <mlworkloadlib/session.hpp>
 ```
 
-The API exposes `mlworkloadlib::Workload`, `mlworkloadlib::Context`,
-`mlworkloadlib::Session`, `mlworkloadlib::BindingSet`, and
-`mlworkloadlib::PreparedExecution`. Supported workloads are VGF-backed workloads
+The API exposes `mlsdk::workloadlib::Workload`, `mlsdk::workloadlib::Context`,
+`mlsdk::workloadlib::Session`, `mlsdk::workloadlib::BindingSet`, and
+`mlsdk::workloadlib::PreparedExecution`. Supported workloads are VGF-backed workloads
 created with `Workload::fromVGF(...)` and standalone compute shader workloads
 created with `Workload::fromComputeShader(...)`, and standalone Vulkan® data
 graph workloads created with `Workload::fromDataGraph(...)`; callers provide
@@ -72,7 +72,7 @@ location. For direct CMake configuration, use
 `ML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT` with `DXC_PATH`.
 
 Applications can query the source backends available in the linked library with
-`mlworkloadlib::supports(...)`.
+`mlsdk::workloadlib::supports(...)`.
 
 ## Documentation
 

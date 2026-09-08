@@ -17,7 +17,7 @@
 
 namespace {
 
-using namespace mlworkloadlib;
+using namespace mlsdk::workloadlib;
 
 ResourceRequirements tensorRequirements(vk::Format format, std::vector<int64_t> shape) {
     ResourceRequirements requirements;

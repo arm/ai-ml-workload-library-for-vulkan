@@ -4,7 +4,7 @@ ML Workload Library for Vulkan® C++ API
 API reference
 ---------------------
 
-.. doxygennamespace:: mlworkloadlib
+.. doxygennamespace:: mlsdk::workloadlib
     :project: MLSDK
     :members:
     :protected-members:

@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-namespace mlworkloadlib::detail {
+namespace mlsdk::workloadlib::detail {
 
 /*******************************************************************************
  * Module metadata
@@ -130,4 +130,4 @@ class WorkloadBuilder {
 
     std::unique_ptr<Workload::Impl> workloadState_;
 };
-} // namespace mlworkloadlib::detail
+} // namespace mlsdk::workloadlib::detail

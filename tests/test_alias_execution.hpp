@@ -18,7 +18,7 @@
 #include <ostream>
 #include <vector>
 
-namespace mlworkloadlib::test {
+namespace mlsdk::workloadlib::test {
 
 /*******************************************************************************
  * Alias execution harness
@@ -297,4 +297,4 @@ class AliasExecutionTestBase : public RuntimeSessionExecutionTest {
     }
 };
 
-} // namespace mlworkloadlib::test
+} // namespace mlsdk::workloadlib::test

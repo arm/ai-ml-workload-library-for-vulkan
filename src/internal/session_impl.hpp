@@ -13,7 +13,7 @@
 #include <map>
 #include <vector>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 /*******************************************************************************
  * Implementation state
@@ -75,4 +75,4 @@ struct Session::Impl {
     bool configured = false;
 };
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

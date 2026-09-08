@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace mlworkloadlib::test {
+namespace mlsdk::workloadlib::test {
 
 inline DataGraphDescription makeMaxpoolDescription() {
     DataGraphDescription description;
@@ -75,4 +75,4 @@ inline DataGraphDescription makeConv2dRescaleConstantDescription(const std::vect
     return description;
 }
 
-} // namespace mlworkloadlib::test
+} // namespace mlsdk::workloadlib::test

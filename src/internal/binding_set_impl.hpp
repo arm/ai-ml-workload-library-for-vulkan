@@ -11,7 +11,7 @@
 #include <map>
 #include <vector>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 /*******************************************************************************
  * Implementation state
@@ -38,4 +38,4 @@ struct BindingSet::Impl {
     std::vector<uint8_t> pushConstants;
 };
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib
