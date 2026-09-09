@@ -22,7 +22,7 @@ namespace mlsdk::workloadlib {
  *******************************************************************************/
 
 // Configured runtime state for a Workload on a Context.
-class Session {
+class Session final {
   public:
     /***************************************************************************
      * Creation and lifetime

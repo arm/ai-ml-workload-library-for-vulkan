@@ -74,7 +74,7 @@ class RuntimeAllocation {
 };
 
 // RAII tensor and backing memory allocated by a runtime-owned Context.
-class TensorAllocation : public RuntimeAllocation {
+class TensorAllocation final : public RuntimeAllocation {
   public:
     vk::TensorARM handle() const;
 
@@ -94,7 +94,7 @@ class TensorAllocation : public RuntimeAllocation {
 };
 
 // RAII buffer and backing memory allocated by a runtime-owned Context.
-class BufferAllocation : public RuntimeAllocation {
+class BufferAllocation final : public RuntimeAllocation {
   public:
     vk::Buffer handle() const;
 
@@ -114,7 +114,7 @@ class BufferAllocation : public RuntimeAllocation {
 };
 
 // RAII image, view, and backing memory allocated by a runtime-owned Context.
-class ImageAllocation : public RuntimeAllocation {
+class ImageAllocation final : public RuntimeAllocation {
   public:
     vk::Image handle() const;
 

@@ -32,6 +32,41 @@ namespace vulkan_helpers = detail::vulkan_helpers;
 using DescriptorBinding = detail::DescriptorBinding;
 using Resource = detail::Resource;
 
+struct PreparedExecution::Impl::BoundTensor {
+    DescriptorBinding descBinding;
+    vk::TensorARM tensor{nullptr};
+    vk::raii::TensorViewARM tensorView{nullptr};
+    BoundMemoryInfo memory{};
+};
+
+struct PreparedExecution::Impl::BoundBuffer {
+    DescriptorBinding descBinding;
+    vk::Buffer buffer{nullptr};
+    BoundMemoryInfo memory{};
+};
+
+struct PreparedExecution::Impl::BoundImage {
+    // Bound handles
+    DescriptorBinding descBinding;
+    vk::Image image{nullptr};
+    vk::ImageView imageView{nullptr};
+    vk::Sampler sampler{nullptr};
+
+    // Runtime-owned descriptor helpers
+    vk::raii::ImageView ownedImageView{nullptr};
+    vk::raii::Sampler ownedSampler{nullptr};
+
+    // Memory and layout metadata
+    BoundMemoryInfo memory{};
+    std::optional<vk::ImageLayout> layout;
+    vk::ImageSubresourceRange subresourceRange;
+};
+
+struct PreparedExecution::Impl::DescriptorSetState {
+    vk::raii::DescriptorPool descriptorPool{nullptr};
+    std::vector<vk::raii::DescriptorSet> descriptorSets;
+};
+
 /*******************************************************************************
  * Runtime resource storage
  *******************************************************************************/

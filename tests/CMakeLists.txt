@@ -3,15 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-include(spirv-tools)
 include(gtest)
+include(spirv-tools)
 
 add_executable(mlworkloadlib_tests
+    composed/test_composed_session.cpp
+    composed/test_composed_utils.hpp
     standalone_compute/test_standalone_compute_session.cpp
     standalone_compute/test_standalone_compute_utils.hpp
     standalone_compute/test_standalone_compute_workload.cpp
-    composed/test_composed_utils.hpp
-    composed/test_composed_session.cpp
     standalone_data_graph/test_standalone_data_graph_session.cpp
     standalone_data_graph/test_standalone_data_graph_utils.hpp
     standalone_data_graph/test_standalone_data_graph_workload.cpp
@@ -42,12 +42,12 @@ target_link_libraries(mlworkloadlib_tests PRIVATE
 )
 
 target_compile_definitions(mlworkloadlib_tests PRIVATE
-    ML_WORKLOAD_LIB_MAXPOOL_16X16_TO_8X8_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/maxpool_16x16_to_8x8.spvasm"
-    ML_WORKLOAD_LIB_MAXPOOL_8X8_TO_4X4_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/maxpool_8x8_to_4x4.spvasm"
     ML_WORKLOAD_LIB_ADD_INT32_BUFFERS_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/add_int32_buffers.spvasm"
     ML_WORKLOAD_LIB_ADD_F32_CONSTANT_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/add_f32_constant.spvasm"
     ML_WORKLOAD_LIB_ARSHIFT_SPECBOOL_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/arshift_specbool.spvasm"
     ML_WORKLOAD_LIB_CONV2D_RESCALE_CONSTANT_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/conv2d_rescale_constant.spvasm"
+    ML_WORKLOAD_LIB_MAXPOOL_16X16_TO_8X8_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/maxpool_16x16_to_8x8.spvasm"
+    ML_WORKLOAD_LIB_MAXPOOL_8X8_TO_4X4_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/maxpool_8x8_to_4x4.spvasm"
     ML_WORKLOAD_LIB_GLSL_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resources/glsl"
 )
 
