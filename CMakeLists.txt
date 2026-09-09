@@ -92,6 +92,10 @@ function(mlworkloadlib_configure_target target_name)
         VGF::vgf-utils
     )
 
+    target_link_libraries(${target_name} PRIVATE
+        ${CMAKE_DL_LIBS}
+    )
+
     target_compile_options(${target_name} PRIVATE ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS})
 endfunction()
 
