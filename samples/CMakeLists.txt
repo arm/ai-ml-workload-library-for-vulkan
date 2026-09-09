@@ -31,7 +31,10 @@ if(ML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT)
     add_executable(mlworkloadlib_wrapped_context_sample
         4_run_glsl_compute_with_wrapped_context.cpp
     )
-    target_link_libraries(mlworkloadlib_wrapped_context_sample PRIVATE mlworkloadlib_glsl_glslang)
+    target_link_libraries(mlworkloadlib_wrapped_context_sample PRIVATE
+        mlworkloadlib_glsl_glslang
+        ${CMAKE_DL_LIBS}
+    )
     target_compile_options(mlworkloadlib_wrapped_context_sample PRIVATE ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS})
 else()
     message(STATUS "Skipping GLSL execution samples because ML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT is disabled")
