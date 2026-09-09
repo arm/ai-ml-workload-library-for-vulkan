@@ -43,6 +43,8 @@ class MappedMemory {
 
     MappedMemory(const MappedMemory &) = delete;
     MappedMemory &operator=(const MappedMemory &) = delete;
+    MappedMemory(MappedMemory &&) = delete;
+    MappedMemory &operator=(MappedMemory &&) = delete;
 
     void *data() const noexcept { return data_; }
 

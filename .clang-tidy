@@ -249,7 +249,6 @@ Checks: >
     readability-use-std-min-max,
 
 WarningsAsErrors: '*'
-HeaderFilterRegex: '.*/workload-lib/.*'
 FormatStyle: file
 CheckOptions:
   - key: bugprone-unsafe-functions.ReportDefaultFunctions

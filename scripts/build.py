@@ -267,6 +267,7 @@ class Builder:
                     "-quiet",
                     f"-j{self.threads}",
                     f"-p{self.build_dir}",
+                    "-header-filter=workload-lib/.*",
                 ] + src_dirs
                 subprocess.run(clang_tidy_cmd, check=True)
 
