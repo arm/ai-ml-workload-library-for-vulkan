@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace mlworkloadlib::detail {
+namespace mlsdk::workloadlib::detail {
 
 namespace {
 
@@ -436,4 +436,4 @@ Resource::Role WorkloadBuilder::publicRoleForAccess(ResourceAccess access) {
     throw std::runtime_error("Unsupported workload resource access");
 }
 
-} // namespace mlworkloadlib::detail
+} // namespace mlsdk::workloadlib::detail

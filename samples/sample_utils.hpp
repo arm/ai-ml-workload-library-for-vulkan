@@ -23,7 +23,7 @@
 #include <string_view>
 #include <vector>
 
-namespace mlworkloadlib::samples {
+namespace mlsdk::workloadlib::samples {
 
 class MappedMemory {
   public:
@@ -160,4 +160,4 @@ inline std::string addBuffersVgf(std::size_t elementCount, bool embedImplementat
 }
 // [vgf-building-end]
 
-} // namespace mlworkloadlib::samples
+} // namespace mlsdk::workloadlib::samples

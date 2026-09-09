@@ -24,11 +24,11 @@
 
 namespace {
 
-using namespace mlworkloadlib;
-using namespace mlworkloadlib::test;
+using namespace mlsdk::workloadlib;
+using namespace mlsdk::workloadlib::test;
 
-using mlworkloadlib::detail::Resource;
-using mlworkloadlib::detail::WorkloadBuilder;
+using mlsdk::workloadlib::detail::Resource;
+using mlsdk::workloadlib::detail::WorkloadBuilder;
 
 class ComposedSessionExecutionTest : public RuntimeSessionExecutionTest {};
 

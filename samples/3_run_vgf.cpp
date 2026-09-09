@@ -16,8 +16,8 @@
 
 namespace {
 
-using namespace mlworkloadlib;
-using namespace mlworkloadlib::samples;
+using namespace mlsdk::workloadlib;
+using namespace mlsdk::workloadlib::samples;
 
 // [runtime-resource-binding-begin]
 struct RuntimeResources {

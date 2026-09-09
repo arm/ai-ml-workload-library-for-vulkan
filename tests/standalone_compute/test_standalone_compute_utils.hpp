@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace mlworkloadlib::test {
+namespace mlsdk::workloadlib::test {
 
 template <typename T> inline std::vector<uint8_t> bytesOf(const T &value) {
     std::vector<uint8_t> bytes(sizeof(T));
@@ -132,4 +132,4 @@ inline ResourceRequirements makeSampledImageRequirements(bool runtimeSampler) {
     return resource;
 }
 
-} // namespace mlworkloadlib::test
+} // namespace mlsdk::workloadlib::test

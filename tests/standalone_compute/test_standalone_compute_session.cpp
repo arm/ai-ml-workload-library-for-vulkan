@@ -19,8 +19,8 @@
 
 namespace {
 
-using namespace mlworkloadlib;
-using namespace mlworkloadlib::test;
+using namespace mlsdk::workloadlib;
+using namespace mlsdk::workloadlib::test;
 
 class StandaloneComputeSessionExecutionTest : public RuntimeSessionExecutionTest {};
 

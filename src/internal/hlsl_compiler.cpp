@@ -49,7 +49,7 @@ void __CRTDECL operator delete(void *ptr) throw() { DxcDelete(ptr); }
 void __CRTDECL operator delete(void *ptr, const std::nothrow_t &) throw() { DxcDelete(ptr); }
 #endif
 
-namespace mlworkloadlib::detail {
+namespace mlsdk::workloadlib::detail {
 namespace {
 
 class HlslCompiler {
@@ -313,4 +313,4 @@ const bool registeredHlslCompiler = SourceModuleCompilerRegistration(ModuleCodeK
 
 } // namespace
 
-} // namespace mlworkloadlib::detail
+} // namespace mlsdk::workloadlib::detail

@@ -13,7 +13,7 @@
 #include <optional>
 #include <vector>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 /*******************************************************************************
  * Implementation state
@@ -168,4 +168,4 @@ struct PreparedExecution::Impl {
     std::vector<DescriptorSetState> descriptorSetStates;
 };
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

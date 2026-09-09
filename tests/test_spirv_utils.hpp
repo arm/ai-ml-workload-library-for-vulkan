@@ -16,7 +16,7 @@
 #include <string_view>
 #include <vector>
 
-namespace mlworkloadlib::test {
+namespace mlsdk::workloadlib::test {
 
 /*******************************************************************************
  * SPIR-V assembly helpers
@@ -97,4 +97,4 @@ inline std::vector<uint32_t> assembleConv2dRescaleConstantSpirv(std::string_view
     return assembleGraphSpirvFromTemplate(name, ML_WORKLOAD_LIB_CONV2D_RESCALE_CONSTANT_SPVASM, bindings);
 }
 
-} // namespace mlworkloadlib::test
+} // namespace mlsdk::workloadlib::test

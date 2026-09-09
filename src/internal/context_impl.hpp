@@ -9,7 +9,7 @@
 
 #include <limits>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 /*******************************************************************************
  * Implementation state
@@ -81,4 +81,4 @@ struct Context::Impl::Wrapped final : Context::Impl {
     ContextView context;
 };
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

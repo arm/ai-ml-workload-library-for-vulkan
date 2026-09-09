@@ -11,8 +11,8 @@
 
 namespace {
 
-using namespace mlworkloadlib;
-using namespace mlworkloadlib::samples;
+using namespace mlsdk::workloadlib;
+using namespace mlsdk::workloadlib::samples;
 
 std::string_view resourceKindName(ResourceKind kind) {
     switch (kind) {

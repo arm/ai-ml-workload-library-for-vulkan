@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-namespace mlworkloadlib::test {
+namespace mlsdk::workloadlib::test {
 
 /*******************************************************************************
  * Mapped device memory helpers
@@ -192,4 +192,4 @@ struct Image {
     vk::DeviceSize memorySize = 0;
 };
 
-} // namespace mlworkloadlib::test
+} // namespace mlsdk::workloadlib::test

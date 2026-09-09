@@ -14,7 +14,7 @@
 #include <exception>
 #include <stdexcept>
 
-namespace mlworkloadlib::fuzz {
+namespace mlsdk::workloadlib::fuzz {
 namespace {
 
 constexpr std::size_t kMaxRawInputSize = 64U * 1024U;
@@ -214,4 +214,4 @@ void fuzzWorkloadBytes(const uint8_t *data, std::size_t size) {
     }
 }
 
-} // namespace mlworkloadlib::fuzz
+} // namespace mlsdk::workloadlib::fuzz

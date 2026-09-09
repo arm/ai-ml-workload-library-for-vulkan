@@ -8,7 +8,7 @@
 
 #include <stdexcept>
 
-namespace mlworkloadlib::detail {
+namespace mlsdk::workloadlib::detail {
 namespace {
 
 SourceModuleCompiler hlslCompiler = nullptr;
@@ -86,4 +86,4 @@ void compileModuleToSpirv(Module &module, ExecutableKind executableKind) {
     throw std::runtime_error("Unsupported workload module code kind");
 }
 
-} // namespace mlworkloadlib::detail
+} // namespace mlsdk::workloadlib::detail

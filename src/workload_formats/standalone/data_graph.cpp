@@ -12,7 +12,7 @@
 #include <stdexcept>
 #include <utility>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 namespace utils = detail::utils;
 
@@ -66,4 +66,4 @@ Workload Workload::fromDataGraph(DataGraphDescription description) {
     return builder.finish();
 }
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

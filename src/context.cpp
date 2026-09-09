@@ -18,7 +18,7 @@
 #include <utility>
 #include <vector>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 namespace utils = detail::utils;
 namespace vulkan_helpers = detail::vulkan_helpers;
@@ -472,4 +472,4 @@ ImageAllocation Context::createImage(ResourceView resource) const {
     return allocation;
 }
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

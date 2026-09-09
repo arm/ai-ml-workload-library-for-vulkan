@@ -16,8 +16,8 @@
 #include <vector>
 
 int main() {
-    using namespace mlworkloadlib;
-    using namespace mlworkloadlib::samples;
+    using namespace mlsdk::workloadlib;
+    using namespace mlsdk::workloadlib::samples;
 
     try {
         // [glsl-support-check-begin]

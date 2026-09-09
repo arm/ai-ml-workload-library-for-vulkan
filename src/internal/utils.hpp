@@ -22,7 +22,7 @@
 #include <string_view>
 #include <vector>
 
-namespace mlworkloadlib::detail {
+namespace mlsdk::workloadlib::detail {
 
 /*******************************************************************************
  * General utilities
@@ -416,4 +416,4 @@ rawLayouts(const std::vector<vk::raii::DescriptorSetLayout> &descriptorSetLayout
 }
 
 } // namespace vulkan_helpers
-} // namespace mlworkloadlib::detail
+} // namespace mlsdk::workloadlib::detail

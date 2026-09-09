@@ -24,7 +24,7 @@
 #include <utility>
 #include <vector>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 namespace utils = detail::utils;
 namespace vulkan_helpers = detail::vulkan_helpers;
@@ -1037,4 +1037,4 @@ void PreparedExecution::run() { preparedExecutionImpl().run(); }
 
 void PreparedExecution::record(vk::CommandBuffer commandBuffer) { preparedExecutionImpl().record(commandBuffer); }
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

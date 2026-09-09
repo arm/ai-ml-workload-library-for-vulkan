@@ -12,7 +12,7 @@
 
 namespace {
 
-using namespace mlworkloadlib;
+using namespace mlsdk::workloadlib;
 
 /*******************************************************************************
  * Positive coverage

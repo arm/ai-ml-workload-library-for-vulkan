@@ -11,7 +11,7 @@
 #include <memory>
 #include <utility>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 namespace utils = detail::utils;
 
@@ -54,4 +54,4 @@ Workload Workload::fromComputeShader(ComputeShaderDescription description) {
     return builder.finish();
 }
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

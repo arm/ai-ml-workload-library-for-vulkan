@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace mlworkloadlib::fuzz {
+namespace mlsdk::workloadlib::fuzz {
 
 class ByteReader {
   public:
@@ -43,4 +43,4 @@ class ByteReader {
     std::size_t offset_ = 0;
 };
 
-} // namespace mlworkloadlib::fuzz
+} // namespace mlsdk::workloadlib::fuzz

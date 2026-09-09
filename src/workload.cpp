@@ -17,7 +17,7 @@
 #include <variant>
 #include <vector>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 /*******************************************************************************
  * State access
@@ -465,4 +465,4 @@ uint32_t PlaceholderModuleView::index() const { return index_; }
 
 ModuleView PlaceholderModuleView::module() const { return {workload_, moduleIndex_}; }
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib

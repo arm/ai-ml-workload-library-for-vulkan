@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace mlworkloadlib::detail {
+namespace mlsdk::workloadlib::detail {
 
 struct Module;
 
@@ -22,4 +22,4 @@ bool supportsGlslModules();
 bool supportsHlslModules();
 void compileModuleToSpirv(Module &module, ExecutableKind executableKind);
 
-} // namespace mlworkloadlib::detail
+} // namespace mlsdk::workloadlib::detail

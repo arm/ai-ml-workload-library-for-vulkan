@@ -26,8 +26,8 @@
 namespace {
 
 using mlsdk::vgflib::GraphConstantBindingRef;
-using namespace mlworkloadlib;
-using namespace mlworkloadlib::test;
+using namespace mlsdk::workloadlib;
+using namespace mlsdk::workloadlib::test;
 
 const std::vector<GraphConstantBindingRef> noGraphConstants;
 

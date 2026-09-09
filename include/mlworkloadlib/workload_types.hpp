@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace mlworkloadlib {
+namespace mlsdk::workloadlib {
 
 /*******************************************************************************
  * Library feature queries
@@ -183,4 +183,4 @@ struct DataGraphDescription {
     bool implicitBarrier = true;
 };
 
-} // namespace mlworkloadlib
+} // namespace mlsdk::workloadlib
