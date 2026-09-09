@@ -4,7 +4,7 @@
  */
 #pragma once
 
-#include "mlworkloadlib/utils.hpp"
+#include "mlworkloadlib/array_view.hpp"
 #include "mlworkloadlib/workload_types.hpp"
 
 #include <vulkan/vulkan.hpp>

@@ -8,6 +8,7 @@
 #include "mlworkloadlib/context.hpp"
 #include "mlworkloadlib/session.hpp"
 #include "mlworkloadlib/workload.hpp"
+#include "mlworkloadlib_utils/mapped_device_memory.hpp"
 
 #include <cstdint>
 #include <exception>
@@ -38,9 +39,9 @@ int main() {
         auto rhsBuffer = context.createBuffer(workload.resource(1));
         auto outputBuffer = context.createBuffer(workload.resource(2));
 
-        writeMemory(contextView.device, lhsBuffer.memory(), lhs);
-        writeMemory(contextView.device, rhsBuffer.memory(), rhs);
-        clearMemory(contextView.device, outputBuffer.memory());
+        utils::writeDeviceMemory(contextView.device, lhsBuffer.memory(), lhs);
+        utils::writeDeviceMemory(contextView.device, rhsBuffer.memory(), rhs);
+        utils::clearDeviceMemory(contextView.device, outputBuffer.memory());
 
         Session session(context, workload);
         session.configure();
@@ -54,7 +55,7 @@ int main() {
         // [standalone-compute-execution-end]
 
         const std::vector<int32_t> expected = {11, 22, 33, 44};
-        const auto output = readMemory<int32_t>(contextView.device, outputBuffer.memory(), lhs.size());
+        const auto output = utils::readDeviceMemory<int32_t>(contextView.device, outputBuffer.memory(), lhs.size());
         if (output != expected) {
             std::cerr << "Unexpected output\n";
             return 1;

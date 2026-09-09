@@ -23,7 +23,7 @@
 namespace mlsdk::workloadlib::detail {
 
 /*******************************************************************************
- * Workload metadata model
+ * Internal workload representation
  *******************************************************************************/
 
 struct DescriptorBinding {
@@ -68,6 +68,11 @@ struct Resource {
         std::optional<SamplerConfig> samplerConfig;
     };
 
+    // Metadata helpers
+    static Role publicRoleForAccess(ResourceAccess access);
+    static ResourceAccess accessForRole(Role role);
+    vk::Extent3D imageExtent() const;
+
     std::string name;
     Role role = Role::Input;
     std::optional<vk::DescriptorType> descriptorType;
@@ -103,9 +108,13 @@ struct Module {
 };
 
 struct Constant {
+    static constexpr int64_t unspecifiedSparsityDimension = -1;
+
     uint32_t resourceIndex = 0;
     ArrayView<const uint8_t> payloadView;
-    int64_t sparsityDimension = -1;
+    int64_t sparsityDimension = unspecifiedSparsityDimension;
+
+    bool hasSparsity() const noexcept { return sparsityDimension >= 0; }
 };
 
 struct Executable {
@@ -138,6 +147,14 @@ struct Workload::Impl {
     using Executable = detail::Executable;
     using Module = detail::Module;
     using Resource = detail::Resource;
+
+    /***************************************************************************
+     * Metadata queries
+     **************************************************************************/
+
+    ResourceAccess resourceAccess(uint32_t resourceIndex) const;
+    vk::DescriptorType descriptorTypeForBinding(const DescriptorBinding &descBinding) const;
+    uint32_t requiredPushConstantSize() const;
 
     /***************************************************************************
      * Stored metadata

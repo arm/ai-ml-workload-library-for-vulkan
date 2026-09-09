@@ -23,12 +23,12 @@ namespace {
  *******************************************************************************/
 
 vk::DescriptorType descriptorTypeForResource(const ResourceRequirements &requirements) {
-    const auto descriptorKind = vulkan_helpers::resourceKind(requirements.descriptorType);
+    const auto descriptorKind = resourceKind(requirements.descriptorType);
     if (descriptorKind != ResourceKind::Unknown) {
         if (requirements.kind != ResourceKind::Unknown && requirements.kind != descriptorKind) {
-            throw std::runtime_error(
-                "Workload resource kind " + std::string(utils::resourceKindName(requirements.kind)) +
-                " does not match descriptor kind " + std::string(utils::resourceKindName(descriptorKind)));
+            throw std::runtime_error("Workload resource kind " + std::string(resourceKindName(requirements.kind)) +
+                                     " does not match descriptor kind " +
+                                     std::string(resourceKindName(descriptorKind)));
         }
         return requirements.descriptorType;
     }
@@ -51,7 +51,7 @@ ResourceKind kindForResource(const ResourceRequirements &requirements, vk::Descr
         return requirements.kind;
     }
 
-    const auto kind = vulkan_helpers::resourceKind(descriptorType);
+    const auto kind = resourceKind(descriptorType);
     if (kind == ResourceKind::Unknown) {
         throw std::runtime_error("Workload descriptor type is not supported");
     }
@@ -161,8 +161,7 @@ uint32_t WorkloadBuilder::addResource(std::string name, const ResourceRequiremen
                                  requirements.buffer.byteSize, usage);
     }
     case ResourceKind::Image: {
-        const auto usage =
-            requirements.image.usage ? requirements.image.usage : vulkan_helpers::imageUsage(descriptorType, false);
+        const auto usage = requirements.image.usage ? requirements.image.usage : imageUsage(descriptorType, false);
         std::optional<Resource::ImageMetadata::SamplerConfig> samplerConfig;
         if (requirements.image.runtimeSampler.has_value()) {
             samplerConfig = samplerConfigForRequirements(*requirements.image.runtimeSampler);
@@ -419,21 +418,6 @@ Workload WorkloadBuilder::finish() {
 
     // Workload creation
     return Workload(std::move(workloadState_));
-}
-
-/*******************************************************************************
- * Shared helpers
- *******************************************************************************/
-
-Resource::Role WorkloadBuilder::publicRoleForAccess(ResourceAccess access) {
-    switch (access) {
-    case ResourceAccess::Read:
-        return Resource::Role::Input;
-    case ResourceAccess::Write:
-    case ResourceAccess::ReadWrite:
-        return Resource::Role::Output;
-    }
-    throw std::runtime_error("Unsupported workload resource access");
 }
 
 } // namespace mlsdk::workloadlib::detail

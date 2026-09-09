@@ -13,8 +13,7 @@
 
 namespace mlsdk::workloadlib {
 
-namespace utils = detail::utils;
-
+using Resource = detail::Resource;
 using WorkloadBuilder = detail::WorkloadBuilder;
 
 /*******************************************************************************
@@ -38,7 +37,7 @@ Workload Workload::fromComputeShader(ComputeShaderDescription description) {
     builder.setImplicitBarrier(executableIndex, description.implicitBarrier);
 
     // Specialization constants
-    utils::validateSpecializationInfo(description.specializationInfo, "Standalone compute");
+    detail::validateSpecializationInfo(description.specializationInfo, "Standalone compute");
     builder.setSpecializationInfo(executableIndex, std::move(description.specializationInfo));
 
     // Public resources and descriptor bindings
@@ -46,7 +45,7 @@ Workload Workload::fromComputeShader(ComputeShaderDescription description) {
     for (auto &resourceDescription : description.resources) {
         const auto resourceIndex =
             builder.addResource(std::move(resourceDescription.name), resourceDescription.resource,
-                                WorkloadBuilder::publicRoleForAccess(resourceDescription.access));
+                                Resource::publicRoleForAccess(resourceDescription.access));
         builder.addDescriptorBinding(executableIndex, resourceIndex, resourceDescription.set,
                                      resourceDescription.binding, resourceDescription.access);
     }

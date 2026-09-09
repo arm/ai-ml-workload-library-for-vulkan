@@ -5,7 +5,8 @@
 
 #pragma once
 
-#include "test_utils.hpp"
+#include "test_resource_requirements.hpp"
+#include "test_spirv_utils.hpp"
 
 #include "mlworkloadlib/workload.hpp"
 

@@ -5,8 +5,14 @@
 #include "mlworkloadlib/context.hpp"
 #include "mlworkloadlib/session.hpp"
 #include "mlworkloadlib/workload.hpp"
+#include "test_alias_execution.hpp"
+#include "test_expected_results.hpp"
+#include "test_spirv_utils.hpp"
 #include "test_vgf_utils.hpp"
+#include "test_vulkan_fixture.hpp"
+#include "test_vulkan_resources.hpp"
 
+#include "vgf-utils/temp_folder.hpp"
 #include "vgf/decoder.hpp"
 
 #include <gtest/gtest.h>

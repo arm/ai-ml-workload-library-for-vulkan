@@ -14,8 +14,7 @@
 
 namespace mlsdk::workloadlib {
 
-namespace utils = detail::utils;
-
+using Resource = detail::Resource;
 using WorkloadBuilder = detail::WorkloadBuilder;
 
 /*******************************************************************************
@@ -31,7 +30,7 @@ Workload Workload::fromDataGraph(DataGraphDescription description) {
     auto &executable = builder.executable(executableIndex);
 
     // Pipeline metadata
-    utils::validateSpecializationInfo(description.pipeline.specializationInfo, "Standalone data graph pipeline");
+    detail::validateSpecializationInfo(description.pipeline.specializationInfo, "Standalone data graph pipeline");
     builder.setSpecializationInfo(executableIndex, std::move(description.pipeline.specializationInfo));
     executable.dataGraphPipelineIdentifier = std::move(description.pipeline.identifier);
     executable.dataGraphPipelineFlags = description.pipeline.flags;
@@ -42,7 +41,7 @@ Workload Workload::fromDataGraph(DataGraphDescription description) {
     for (auto &resourceDescription : description.resources) {
         const auto resourceIndex =
             builder.addResource(std::move(resourceDescription.name), resourceDescription.resource,
-                                WorkloadBuilder::publicRoleForAccess(resourceDescription.access));
+                                Resource::publicRoleForAccess(resourceDescription.access));
         builder.addDescriptorBinding(executableIndex, resourceIndex, resourceDescription.set,
                                      resourceDescription.binding, resourceDescription.access);
     }
@@ -50,9 +49,10 @@ Workload Workload::fromDataGraph(DataGraphDescription description) {
     // Graph constants
     executable.constantIndexes.reserve(description.constants.size());
     for (auto &constantDescription : description.constants) {
-        const auto sparsityDimension =
-            constantDescription.sparse2To4.has_value() ? constantDescription.sparse2To4->dimension : -1;
-        if (constantDescription.sparse2To4.has_value() && !utils::isSparsityDimensionSpecified(sparsityDimension)) {
+        const auto sparsityDimension = constantDescription.sparse2To4.has_value()
+                                           ? constantDescription.sparse2To4->dimension
+                                           : detail::Constant::unspecifiedSparsityDimension;
+        if (constantDescription.sparse2To4.has_value() && sparsityDimension < 0) {
             throw std::runtime_error("Sparse standalone data graph constants must specify a sparsity dimension");
         }
 

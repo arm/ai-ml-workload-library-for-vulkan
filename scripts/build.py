@@ -239,6 +239,7 @@ class Builder:
             if self.lint:
                 src_dirs = [
                     f"{ML_WORKLOAD_LIB_DIR / 'src'}",
+                    f"{ML_WORKLOAD_LIB_DIR / 'utils'}",
                     f"{ML_WORKLOAD_LIB_DIR / 'samples'}",
                     f"{ML_WORKLOAD_LIB_DIR / 'fuzz'}",
                     f"{ML_WORKLOAD_LIB_DIR / 'tests'}",

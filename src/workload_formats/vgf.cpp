@@ -5,8 +5,9 @@
 
 #include "mlworkloadlib/workload.hpp"
 
-#include "internal/utils.hpp"
 #include "internal/workload_builder.hpp"
+
+#include "internal/utils.hpp"
 
 #include "vgf/decoder.hpp"
 
@@ -25,8 +26,6 @@
 
 namespace mlsdk::workloadlib {
 namespace vgflib = mlsdk::vgflib;
-namespace utils = detail::utils;
-namespace vulkan_helpers = detail::vulkan_helpers;
 
 using Resource = detail::Resource;
 using WorkloadBuilder = detail::WorkloadBuilder;
@@ -111,7 +110,7 @@ ResourceKind kindForResource(std::optional<vk::DescriptorType> descriptorType, R
         throw std::runtime_error("VGF non-constant resource is missing descriptor type");
     }
 
-    const auto kind = vulkan_helpers::resourceKind(*descriptorType);
+    const auto kind = detail::resourceKind(*descriptorType);
     if (kind == ResourceKind::Unknown) {
         throw std::runtime_error("Unsupported VGF resource descriptor type");
     }
@@ -158,7 +157,7 @@ uint32_t addDecodedResource(WorkloadBuilder &builder, const vgflib::ModelResourc
     const auto format = vk::Format(decoder.getVkFormat(resourceIndex));
     auto shape = toVector(decoder.getTensorShape(resourceIndex));
     auto stride = toVector(decoder.getTensorStride(resourceIndex));
-    const auto elementCount = utils::elementCount(shape);
+    const auto elementCount = detail::elementCount(shape);
     const auto aliasGroupId = decoder.getAliasGroupId(resourceIndex);
     const bool requiresBoundMemoryInfo = aliasGroupId.has_value();
 
@@ -179,13 +178,13 @@ uint32_t addDecodedResource(WorkloadBuilder &builder, const vgflib::ModelResourc
     case ResourceKind::Image:
         return builder.addImageResource(
             {}, role, *descriptorType, format, std::move(shape), std::move(stride), elementCount, aliasGroupId,
-            requiresBoundMemoryInfo, {}, vulkan_helpers::imageUsage(*descriptorType, aliasGroupId.has_value()),
-            vulkan_helpers::imageLayout(*descriptorType), {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+            requiresBoundMemoryInfo, {}, detail::imageUsage(*descriptorType, aliasGroupId.has_value()),
+            detail::imageLayout(*descriptorType), {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
             samplerConfigFromVgfResource(decoder, resourceIndex));
     case ResourceKind::Unknown:
         throw std::runtime_error("Unsupported VGF resource descriptor type");
     }
-    throw std::runtime_error("Unsupported VGF resource kind " + std::string(utils::resourceKindName(kind)));
+    throw std::runtime_error("Unsupported VGF resource kind " + std::string(detail::resourceKindName(kind)));
 }
 
 uint32_t addDecodedModule(WorkloadBuilder &builder, const vgflib::ModuleTableDecoder &decoder, uint32_t moduleIndex) {
@@ -208,26 +207,12 @@ uint32_t addDecodedModule(WorkloadBuilder &builder, const vgflib::ModuleTableDec
 
 uint32_t addDecodedConstant(WorkloadBuilder &builder, const vgflib::ConstantDecoder &decoder, uint32_t constantIndex) {
     const auto sparsityDimension = decoder.getConstantSparsityDimension(constantIndex);
-    if (!utils::isSparsityDimensionValid(sparsityDimension)) {
+    if (sparsityDimension < detail::Constant::unspecifiedSparsityDimension) {
         throw std::runtime_error("VGF constant has invalid sparsity dimension");
     }
     const auto constantData = decoder.getConstant(constantIndex);
     return builder.addConstant(decoder.getConstantMrtIndex(constantIndex), constantData.data(), byteSize(constantData),
                                sparsityDimension);
-}
-
-ResourceAccess accessForRole(Resource::Role role) {
-    switch (role) {
-    case Resource::Role::Input:
-        return ResourceAccess::Read;
-    case Resource::Role::Output:
-        return ResourceAccess::Write;
-    case Resource::Role::Constant:
-        return ResourceAccess::Read;
-    case Resource::Role::Intermediate:
-        return ResourceAccess::ReadWrite;
-    }
-    throw std::runtime_error("Unsupported workload resource role");
 }
 
 bool bindingSlotMatches(const vgflib::ModelSequenceTableDecoder &decoder, uint32_t executableIndex,
@@ -259,7 +244,7 @@ ResourceAccess bindingAccess(const vgflib::ModelSequenceTableDecoder &decoder, u
     if (output) {
         return ResourceAccess::Write;
     }
-    return accessForRole(role);
+    return Resource::accessForRole(role);
 }
 
 void addDecodedPushConstantRanges(const vgflib::ModelSequenceTableDecoder &decoder, WorkloadBuilder &builder,
