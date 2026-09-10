@@ -23,6 +23,18 @@ graph workloads created with `Workload::fromDataGraph(...)`; callers provide
 application-owned Vulkan® objects through `Context::wrap(...)`, or let
 `Context::create()` create a runtime-owned Vulkan® context.
 
+## Building the ML Workload Library for Vulkan® from source
+
+The build system must have:
+
+- C/C++ 17 compiler: GCC or Clang on Linux, Clang on Darwin, or MSVC on
+  Windows®.
+- CMake 3.25 or later.
+- Ninja 1.8.2 or later.
+- Python 3.10 or later. Required python libraries for building are listed in
+  `tooling-requirements.txt`.
+- Doxygen 1.9.1 or later. (When building documentation)
+
 ## Build-tree usage
 
 Enable the library when configuring the standalone project:
