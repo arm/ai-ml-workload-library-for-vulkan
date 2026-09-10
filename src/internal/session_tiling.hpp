@@ -40,6 +40,7 @@ vk::TensorUsageFlagsARM tensorUsageForTiling(const Workload &workload, uint32_t 
 
 std::vector<ResourceTiling> defaultResourceTilings(const Workload &workload);
 void validateAliasGroupTilings(const Workload &workload, const std::vector<ResourceTiling> &resourceTilings);
+void validateAliasImageTensorLayouts(const Workload &workload, const std::vector<ResourceTiling> &resourceTilings);
 void selectResourceTiling(const Workload &workload, std::vector<ResourceTiling> &resourceTilings,
                           uint32_t resourceIndex, ResourceTiling tiling);
 

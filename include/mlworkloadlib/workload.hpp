@@ -115,7 +115,7 @@ class ImageRequirementsView {
 };
 
 /**
- * @brief Non-owning view of requirements for a public workload resource.
+ * @brief Non-owning view of public resource or intermediate alias peer requirements.
  *
  * Use the asTensor(), asBuffer(), or asImage() member matching kind() for
  * kind-specific requirements.
@@ -140,7 +140,7 @@ class ResourceRequirementsView {
     /** @brief Returns the logical element count, or zero when it cannot be determined. */
     vk::DeviceSize elementCount() const;
 
-    /** @brief Returns the required storage size in bytes, or zero when it cannot be determined. */
+    /** @brief Returns logical storage bytes, not Vulkan allocation requirements or Session stride overrides. */
     vk::DeviceSize byteSize() const;
 
     /** @brief Narrows this view to tensor requirements. */
@@ -158,6 +158,7 @@ class ResourceRequirementsView {
 
     friend class Workload;
     friend class ResourceView;
+    friend class AliasPeerView;
 
     const Workload *workload_ = nullptr;
     uint32_t resourceIndex_ = 0;
@@ -166,6 +167,24 @@ class ResourceRequirementsView {
 /*******************************************************************************
  * Resource views
  *******************************************************************************/
+
+/** @brief Non-owning view of an intermediate alias peer created by the library. */
+class AliasPeerView {
+  public:
+    /** @brief Returns a non-owning view of the intermediate alias peer's requirements. */
+    ResourceRequirementsView requirements() const;
+
+  private:
+    AliasPeerView(const Workload *workload, uint32_t resourceIndex)
+        : workload_(workload), resourceIndex_(resourceIndex) {}
+
+    friend class ResourceView;
+    friend class BindingSet;
+    friend class Session;
+
+    const Workload *workload_ = nullptr;
+    uint32_t resourceIndex_ = 0;
+};
 
 /** @brief Non-owning view of a bindable public workload resource. */
 class ResourceView {
@@ -181,6 +200,12 @@ class ResourceView {
 
     /** @brief Returns a non-owning view of the resource requirements. */
     ResourceRequirementsView requirements() const;
+
+    /** @brief Returns the number of intermediate peers in this resource's alias group. */
+    uint32_t aliasPeerCount() const;
+
+    /** @brief Returns an intermediate alias peer in workload order, using a group-local index. */
+    AliasPeerView aliasPeer(uint32_t peerIndex) const;
 
   private:
     ResourceView(const Workload *workload, uint32_t index, uint32_t resourceIndex)

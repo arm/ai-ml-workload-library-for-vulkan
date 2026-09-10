@@ -469,6 +469,35 @@ ResourceAccess ResourceView::access() const { return workloadImpl(*workload_).re
 
 ResourceRequirementsView ResourceView::requirements() const { return {workload_, resourceIndex_}; }
 
+uint32_t ResourceView::aliasPeerCount() const {
+    const auto group = workloadResource(*workload_, resourceIndex_).aliasGroupId;
+    if (!group.has_value()) {
+        return 0;
+    }
+    const auto &resources = workloadResources(*workload_);
+    return static_cast<uint32_t>(std::count_if(resources.begin(), resources.end(), [group](const auto &resource) {
+        return resource.role == Resource::Role::Intermediate && resource.aliasGroupId == group;
+    }));
+}
+
+AliasPeerView ResourceView::aliasPeer(uint32_t peerIndex) const {
+    const auto group = workloadResource(*workload_, resourceIndex_).aliasGroupId;
+    if (group.has_value()) {
+        const auto &resources = workloadResources(*workload_);
+        for (uint32_t index = 0; index < resources.size(); ++index) {
+            if (resources[index].role == Resource::Role::Intermediate && resources[index].aliasGroupId == group) {
+                if (peerIndex == 0) {
+                    return {workload_, index};
+                }
+                --peerIndex;
+            }
+        }
+    }
+    throw std::out_of_range("Workload alias peer index out of range");
+}
+
+ResourceRequirementsView AliasPeerView::requirements() const { return {workload_, resourceIndex_}; }
+
 /*******************************************************************************
  * Executable views
  *******************************************************************************/

@@ -7,6 +7,9 @@
 #include "utils.hpp"
 #include "workload_impl.hpp"
 
+#include <vulkan/vulkan_format_traits.hpp>
+
+#include <algorithm>
 #include <cstddef>
 #include <map>
 #include <stdexcept>
@@ -35,7 +38,7 @@ vk::TensorUsageFlagsARM tensorUsageForTiling(const Workload &workload, uint32_t 
     // Optimal image peers use eTensorAliasingARM, so their tensor peers must
     // describe the same image-compatible layout.
     for (const auto &peer : resources) {
-        if (peer.role != Resource::Role::Constant && peer.aliasGroupId == resource.aliasGroupId &&
+        if (peer.aliasGroupId == resource.aliasGroupId &&
             std::holds_alternative<Resource::ImageMetadata>(peer.metadata)) {
             usage |= vk::TensorUsageFlagBitsARM::eImageAliasing;
             break;
@@ -44,13 +47,54 @@ vk::TensorUsageFlagsARM tensorUsageForTiling(const Workload &workload, uint32_t 
     return usage;
 }
 
+namespace {
+
+// Check the declarations we own even though callers still guarantee that their
+// external handles were created with those declarations.
+void validateImageTensorAliases(const Workload &workload) {
+    const auto &resources = workloadImpl(workload).resources;
+    for (const auto &image : resources) {
+        if (!image.aliasGroupId.has_value() || !std::holds_alternative<Resource::ImageMetadata>(image.metadata)) {
+            continue;
+        }
+        const auto components = vk::componentCount(image.format);
+        const auto requiredRank = image.imageExtent().depth > 1 ? 4 : 3;
+        for (const auto &tensor : resources) {
+            if (tensor.aliasGroupId != image.aliasGroupId || tensor.role == Resource::Role::Constant ||
+                !std::holds_alternative<Resource::TensorMetadata>(tensor.metadata)) {
+                continue;
+            }
+            // Image extents determine dimensionality; extra outer tensor dimensions are singleton.
+            if (tensor.shape.size() < static_cast<size_t>(requiredRank) || tensor.shape.back() != components ||
+                !std::all_of(tensor.shape.begin(), tensor.shape.end() - requiredRank,
+                             [](int64_t dimension) { return dimension == 1; })) {
+                throw std::runtime_error("Image/tensor aliases require matching component count, sufficient rank and "
+                                         "singleton outer dimensions");
+            }
+            const auto bits = vk::componentBits(tensor.format, 0);
+            bool compatible = components != 0 && bits != 0 && vk::componentCount(tensor.format) == 1 &&
+                              !vk::isCompressed(image.format) && vk::planeCount(image.format) == 1 &&
+                              !vk::hasDepthComponent(image.format) && !vk::hasStencilComponent(image.format) &&
+                              vk::blockSize(image.format) == components * vk::blockSize(tensor.format);
+            for (uint8_t component = 0; component < components; ++component) {
+                compatible = compatible && vk::componentBits(image.format, component) == bits;
+            }
+            if (!compatible) {
+                throw std::runtime_error("Image/tensor alias component formats are incompatible or unsupported");
+            }
+        }
+    }
+}
+
+} // namespace
+
 std::vector<ResourceTiling> defaultResourceTilings(const Workload &workload) {
+    validateImageTensorAliases(workload);
+
     struct AliasGroupTiling {
         ResourceTiling tiling = ResourceTiling::Linear;
         bool requiresLinear = false;
         bool requiresOptimal = false;
-        bool hasImage = false;
-        bool hasOversizedTensor = false;
     };
 
     const auto &resources = workloadImpl(workload).resources;
@@ -71,12 +115,6 @@ std::vector<ResourceTiling> defaultResourceTilings(const Workload &workload) {
         }
 
         auto &group = aliasGroupTilings[*resource.aliasGroupId];
-        if (image != nullptr) {
-            group.hasImage = true;
-        }
-        if (tensor != nullptr && !resource.shape.empty() && resource.shape.back() > 4) {
-            group.hasOversizedTensor = true;
-        }
         if (resourceTilings.back() == ResourceTiling::Optimal) {
             group.tiling = ResourceTiling::Optimal;
         }
@@ -99,12 +137,6 @@ std::vector<ResourceTiling> defaultResourceTilings(const Workload &workload) {
         }
 
         const auto &group = aliasGroupTilings.at(*resource.aliasGroupId);
-        // Both Linear and Optimal image aliases require the tensor's innermost
-        // dimension to match the image format's component count.
-        if (group.hasImage && group.hasOversizedTensor) {
-            throw std::runtime_error("Alias group " + std::to_string(*resource.aliasGroupId) +
-                                     " cannot alias an image with a tensor whose innermost dimension exceeds 4");
-        }
         if (group.requiresLinear && group.requiresOptimal) {
             throw std::runtime_error("Alias group " + std::to_string(*resource.aliasGroupId) +
                                      " has incompatible tiling requirements");
@@ -141,6 +173,35 @@ void validateAliasGroupTilings(const Workload &workload, const std::vector<Resou
         if (!inserted && group->second != tiling) {
             throw std::runtime_error("Alias group " + std::to_string(*resource.aliasGroupId) +
                                      " has resources with different tiling");
+        }
+    }
+}
+
+void validateAliasImageTensorLayouts(const Workload &workload, const std::vector<ResourceTiling> &resourceTilings) {
+    const auto &resources = workloadImpl(workload).resources;
+    for (size_t imageIndex = 0; imageIndex < resources.size(); ++imageIndex) {
+        const auto &image = resources[imageIndex];
+        if (!image.aliasGroupId.has_value() || !std::holds_alternative<Resource::ImageMetadata>(image.metadata) ||
+            resourceTilings.at(imageIndex) != ResourceTiling::Linear) {
+            continue;
+        }
+        for (size_t tensorIndex = 0; tensorIndex < resources.size(); ++tensorIndex) {
+            const auto &tensor = resources[tensorIndex];
+            if (tensor.aliasGroupId != image.aliasGroupId || tensor.role == Resource::Role::Constant ||
+                !std::holds_alternative<Resource::TensorMetadata>(tensor.metadata)) {
+                continue;
+            }
+            const auto pair = "Alias group " + std::to_string(*image.aliasGroupId) + " image resource " +
+                              std::to_string(imageIndex) + " and tensor resource " + std::to_string(tensorIndex);
+            // We do not negotiate library-created image pitches/offsets before graph compilation.
+            if (image.role == Resource::Role::Intermediate) {
+                throw std::runtime_error(pair + ": linear image/tensor aliases require a caller-owned image");
+            }
+            // The aliasing rules refer to depthPitch for rank > 3, but that pitch is undefined for 2D images.
+            if (image.imageExtent().depth == 1 && tensor.shape.size() != 3) {
+                throw std::runtime_error(pair + ": a 2D linear image requires a rank-three tensor alias; "
+                                                "depthPitch is undefined for 2D images");
+            }
         }
     }
 }

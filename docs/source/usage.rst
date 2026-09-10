@@ -41,6 +41,7 @@ By default, each ``Session`` owns its compiled pipelines and layouts. To share
 them across sessions for the same context and workload, pass a
 ``CompiledExecution`` to each session. Each session still has its own binding
 sets and command state.
+Sessions sharing a ``CompiledExecution`` must use matching graph tensor strides.
 
 Each session also has its own tiling selection. Building shared pipelines fixes
 graph tensor tiling and the tiling of its alias peers. Sessions created
@@ -159,31 +160,15 @@ The workload exposes its public resources in order through
 ``Workload::resources()`` or by index through ``Workload::resource(...)``.
 
 Choose public tensor or image tiling with ``Session::setTensorTiling()`` or
-``Session::setImageTiling()`` before calling ``configure()``. Without a
-selection, tensors use Linear tiling and images use Optimal tiling. A tensor
-that requires image aliasing uses Optimal. Alias groups use a common default
-tiling: Optimal if any peer defaults to Optimal, unless a storage-buffer peer
-or explicit tensor strides require Linear. Image/tensor alias groups are
-rejected if a tensor peer's innermost dimension exceeds four, regardless of
-tiling.
-Incompatible alias tiling requirements are rejected. For Optimal image/tensor
-aliases, the required tensor usage includes ``eImageAliasing``.
-
-The allocation overloads without a tiling argument create Linear tensors and
-Optimal images. ``ImageRequirementsView::usage()`` returns the usage for
-Optimal tiling.
+``Session::setImageTiling()`` before ``configure()``. Tensors normally default to
+Linear and images to Optimal; alias groups select a compatible common tiling.
 
 To create and bind resources:
 
-#. Create each public resource from its kind and requirements, or use
-   ``Context::createTensor()``, ``Context::createBuffer()``, or
-   ``Context::createImage()``. For tensors and images, use the tiling returned
-   by ``session.tensorTiling(resource)`` or ``session.imageTiling(resource)``
-   when creating the Vulkan® object; pass it to the ``Context`` helper if
-   using one. For a tensor created directly, query its required usage with
-   ``resource.requirements().asTensor().usage(session.tensorTiling(resource))``.
-   For an image created directly, query its required usage with
-   ``resource.requirements().asImage().usage(session.imageTiling(resource))``.
+#. Create each public resource from its requirements, directly through Vulkan®
+   or with ``Context::createTensor()``, ``createBuffer()`` or ``createImage()``.
+   Use ``session.tensorTiling(resource)`` or ``session.imageTiling(resource)``
+   for creation and the requirements' ``usage(tiling)`` query.
 
 #. Bind every required public resource with ``bindTensor()``, ``bindBuffer()``,
    or ``bindImage()`` before preparing an execution.
@@ -197,10 +182,8 @@ Sample 3 binds every public resource according to its kind:
    :start-after: // [runtime-resource-binding-begin]
    :end-before: // [runtime-resource-binding-end]
 
-Supply ``BoundMemoryInfo`` when
-``ResourceRequirementsView::requiresBoundMemoryInfo()`` is true. Image bindings
-must provide an image view and the required subresource range, and must provide a
-sampler only when the image requirements request one.
+Supply ``BoundMemoryInfo`` when ``requiresBoundMemoryInfo()`` is true. Image
+bindings also need a view, subresource range and any requested sampler.
 
 ``ImageRequirementsView::requiredSubresourceRange()`` derives an unspecified
 aspect mask from the image format. Sampled depth/stencil images default to the
@@ -208,9 +191,68 @@ depth aspect; an explicit range can select depth or stencil individually.
 Workload construction rejects aspect masks that do not match the format and
 sampled depth/stencil ranges that select both aspects.
 
-An image layout is optional. When supplied, it describes the current layout, and
-prepared execution transitions the image to the workload-required layout. When
-omitted, the application manages the image layout.
+External image/tensor aliases
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For an application-owned image with a library-created tensor peer, follow the
+Vulkan® `memory aliasing rules
+<https://docs.vulkan.org/spec/latest/chapters/resources.html#resources-memory-aliasing>`_.
+This example uses a single-subresource, linear RGBA8 SNORM image and an R8 SINT
+tensor shaped ``[height, width, 4]``:
+
+#. Create the unbound image with ``eAlias`` and the image requirements'
+   ``usage(vk::ImageTiling::eLinear)``. Use ``ePreinitialized`` as its initial
+   layout for this example.
+
+#. Query the image layout, then configure the peer's byte strides before
+   querying its allocation requirements:
+
+   .. code-block:: cpp
+
+      Session session(context, workload);
+      const auto peer = imageResource.aliasPeer(0);
+      const auto layout = image.getSubresourceLayout({vk::ImageAspectFlagBits::eColor, 0, 0});
+      session.setImageTiling(imageResource, vk::ImageTiling::eLinear);
+      session.setTensorStrides(peer, {static_cast<int64_t>(layout.rowPitch), 4, 1});
+      session.configure();
+      const auto imageReq = image.getMemoryRequirements();
+      const auto peerReq = session.aliasPeerMemoryRequirements(peer);
+      const auto regionSize = std::max(imageReq.size, layout.offset + peerReq.memory.size);
+      const auto memoryTypes = imageReq.memoryTypeBits & peerReq.memory.memoryTypeBits;
+
+   For a 3D image, the tensor's additional spatial stride comes from ``layout.depthPitch``.
+
+#. Allocate ``regionSize`` bytes using a type from ``memoryTypes``. Neither
+   resource may require a dedicated allocation. Choose ``baseOffset`` so the
+   image binding and ``baseOffset + layout.offset`` both meet their respective
+   alignments; allocate ``baseOffset + regionSize`` bytes if it is nonzero.
+   Bind the image at ``baseOffset`` and create its view.
+
+#. Supply the shared region and place the tensor at the image's subresource
+   offset. Bind the remaining public resources before preparing:
+
+   .. code-block:: cpp
+
+      auto bindings = session.createBindingSet();
+      bindings.bindImage(imageResource,
+                         {*image, {*memory, baseOffset, regionSize}, *imageView, {},
+                          vk::ImageLayout::ePreinitialized,
+                          {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}});
+      bindings.setAliasPeerOffset(peer, layout.offset);
+      // Bind other public resources here.
+      auto execution = session.prepare(bindings);
+      execution.run();
+
+For multiple peers, query each ``aliasPeer(index)`` and allocate for them all.
+Bound aliases must supply the same finite ``BoundMemoryInfo`` region; peer
+offsets are relative to it and default to zero. ``Context::create*()`` allocates
+for one resource only. The caller guarantees that the allocation's actual memory
+type is supported by every alias.
+
+Alias groups share one memory dependency scope, independent of peer placement
+offsets. One executable may access multiple tensor/buffer peers when they require
+the same image layout state. Simultaneous accesses to distinct image peers, or to
+both an optimal tensor and an image peer in the same group, are rejected.
 
 Push constants
 --------------

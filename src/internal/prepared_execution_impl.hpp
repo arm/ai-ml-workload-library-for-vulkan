@@ -84,7 +84,8 @@ struct PreparedExecution::Impl {
      **************************************************************************/
 
     void resolveUnaliasedIntermediateAllocations(const std::vector<DescriptorBinding> &descBindings);
-    void resolveAliasGroups(const std::map<uint32_t, std::vector<DescriptorBinding>> &aliasGroups);
+    void resolveAliasGroups(const std::map<uint32_t, std::vector<DescriptorBinding>> &aliasGroups,
+                            const std::map<uint32_t, vk::DeviceSize> &aliasPeerOffsets);
 
     // Resolve unaliased intermediates.
     void resolveUnaliasedIntermediateTensor(const DescriptorBinding &descBinding);
@@ -92,14 +93,15 @@ struct PreparedExecution::Impl {
     void resolveUnaliasedIntermediateImage(const DescriptorBinding &descBinding);
 
     // Resolve alias groups.
-    ExistingAliasGroupBindings findExistingAliasGroupBindings(uint32_t aliasGroupId) const;
+    ExistingAliasGroupBindings findExistingAliasGroupBindings(uint32_t aliasGroupId, bool createsPeers) const;
     void resolveAliasGroupBinding(const DescriptorBinding &descBinding,
                                   const ExistingAliasGroupBindings &existingBindings,
-                                  PendingAliasGroupAllocation &pendingAllocation);
+                                  PendingAliasGroupAllocation &pendingAllocation,
+                                  const std::map<uint32_t, vk::DeviceSize> &aliasPeerOffsets);
     void addExistingAliasBinding(const DescriptorBinding &descBinding, vk::DescriptorType descriptorType,
                                  const ExistingAliasGroupBindings &existingBindings);
     vk::raii::DeviceMemory allocateAliasGroupMemory(const PendingAliasGroupAllocation &pendingAllocation) const;
-    void bindAliasGroupMemory(PendingAliasGroupAllocation &pendingAllocation, vk::DeviceMemory aliasMemory) const;
+    void bindAliasGroupMemory(PendingAliasGroupAllocation &pendingAllocation, BoundMemoryInfo aliasMemory) const;
     void adoptAliasGroupResources(PendingAliasGroupAllocation &pendingAllocation, BoundMemoryInfo aliasMemory);
 
     /***************************************************************************

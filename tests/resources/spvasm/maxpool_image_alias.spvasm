@@ -1,0 +1,59 @@
+;
+; SPDX-FileCopyrightText: Copyright 2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
+; SPDX-License-Identifier: Apache-2.0
+;
+; Pool NHWC [1,8,8,4] to [1,4,4,4], then reshape to HWC [4,4,4] for a 2D image alias.
+               OpCapability GraphARM
+               OpCapability Int8
+               OpCapability TensorsARM
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability Int16
+               OpCapability Int64
+               OpCapability Matrix
+               OpExtension "SPV_ARM_graph"
+               OpExtension "SPV_ARM_tensors"
+       %tosa = OpExtInstImport "TOSA.001000.1"
+               OpMemoryModel Logical Vulkan
+               OpDecorate %input Binding 0
+               OpDecorate %input DescriptorSet 0
+               OpDecorate %output Binding 1
+               OpDecorate %output DescriptorSet 0
+        %i8 = OpTypeInt 8 0
+       %u32 = OpTypeInt 32 0
+      %zero = OpConstant %u32 0
+       %one = OpConstant %u32 1
+       %two = OpConstant %u32 2
+     %three = OpConstant %u32 3
+      %four = OpConstant %u32 4
+     %eight = OpConstant %u32 8
+    %shape1 = OpTypeArray %u32 %one
+    %shape3 = OpTypeArray %u32 %three
+    %shape4 = OpTypeArray %u32 %four
+%input_shape = OpConstantComposite %shape4 %one %eight %eight %four
+ %pool_shape = OpConstantComposite %shape4 %one %four %four %four
+%image_shape = OpConstantComposite %shape3 %four %four %four
+%input_tensor = OpTypeTensorARM %i8 %four %input_shape
+ %pool_tensor = OpTypeTensorARM %i8 %four %pool_shape
+%image_tensor = OpTypeTensorARM %i8 %three %image_shape
+  %input_ptr = OpTypePointer UniformConstant %input_tensor
+ %output_ptr = OpTypePointer UniformConstant %image_tensor
+      %input = OpVariable %input_ptr UniformConstant
+     %output = OpVariable %output_ptr UniformConstant
+ %graph_type = OpTypeGraphARM 1 %input_tensor %image_tensor
+ %pair_shape = OpConstantComposite %shape1 %two
+ %quad_shape = OpConstantComposite %shape1 %four
+%triple_shape = OpConstantComposite %shape1 %three
+ %pair_tensor = OpTypeTensorARM %u32 %one %pair_shape
+ %quad_tensor = OpTypeTensorARM %u32 %one %quad_shape
+%triple_tensor = OpTypeTensorARM %u32 %one %triple_shape
+     %window = OpConstantComposite %pair_tensor %two %two
+    %padding = OpConstantNull %quad_tensor
+ %new_shape = OpConstantComposite %triple_tensor %four %four %four
+               OpGraphEntryPointARM %main "main" %input %output
+       %main = OpGraphARM %graph_type
+      %value = OpGraphInputARM %input_tensor %zero
+     %pooled = OpExtInst %pool_tensor %tosa MAX_POOL2D %window %window %padding %one %value
+      %image = OpExtInst %image_tensor %tosa RESHAPE %pooled %new_shape
+               OpGraphSetOutputARM %image %zero
+               OpGraphEndARM

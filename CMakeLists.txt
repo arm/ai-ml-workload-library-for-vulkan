@@ -91,6 +91,7 @@ set(ML_WORKLOAD_LIB_SOURCES
     src/compiled_execution.cpp
     src/context.cpp
     src/internal/module_compiler.cpp
+    src/internal/runtime_resource.cpp
     src/internal/session_tiling.cpp
     src/internal/utils.cpp
     src/internal/workload_builder.cpp

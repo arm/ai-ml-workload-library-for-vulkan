@@ -17,6 +17,7 @@
 #include "vgf-utils/temp_folder.hpp"
 #include "vgf/decoder.hpp"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
@@ -26,6 +27,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -1858,6 +1860,145 @@ TEST_F(VgfSessionExecutionTest, ConfigureFailsWhenPlaceholderModuleIsUnbound) {
 
     Session session(context, workload);
     EXPECT_THROW(session.configure(), std::runtime_error);
+}
+
+namespace {
+
+Workload makeImageTensorAliasWorkload() {
+    const auto code = assembleSpirv(readSpvasmFile(ML_WORKLOAD_LIB_MAXPOOL_IMAGE_ALIAS_SPVASM));
+    const auto bytes = writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
+        const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::GRAPH, "linear_alias", "main", code);
+        const auto input = encoder.AddInputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 8, 8, 4}, {});
+        const auto output =
+            encoder.AddIntermediateResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {4, 4, 4}, {}, 17);
+        encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_FORMAT_R8G8B8A8_SNORM, {1, 4, 4, 4}, {}, 17);
+        const auto inputBinding = encoder.AddBindingSlot(0, input);
+        const auto outputBinding = encoder.AddBindingSlot(1, output);
+        const auto set = encoder.AddDescriptorSetInfo({inputBinding, outputBinding});
+        encoder.AddSegmentInfo(module, "linear_alias", {set}, {inputBinding}, {outputBinding},
+                               std::vector<mlsdk::vgflib::GraphConstantBindingRef>{});
+    });
+    return Workload::fromVGF(bytes.data(), bytes.size());
+}
+
+} // namespace
+
+TEST_F(VgfSessionExecutionTest, RejectsInvalidExternalImageAliasMemory) {
+    const auto workload = makeImageTensorAliasWorkload();
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.configure();
+    const auto imageResource = workload.resource(1);
+    const auto input = context.createTensor(workload.resource(0), session.tensorTiling(workload.resource(0)));
+    const auto image = context.createImage(imageResource, session.imageTiling(imageResource));
+    const auto requirements =
+        device.getImageMemoryRequirements2(vk::ImageMemoryRequirementsInfo2(image.handle())).memoryRequirements;
+    auto bindings = session.createBindingSet();
+    bindings.bindTensor(workload.resource(0), {input.handle()});
+
+    auto invalid = image.binding();
+    invalid.memory.size = requirements.size - 1;
+    bindings.bindImage(imageResource, invalid);
+    EXPECT_THAT([&] { (void)session.prepare(bindings); },
+                ::testing::ThrowsMessage<std::runtime_error>(::testing::AllOf(
+                    ::testing::HasSubstr("Alias resource 2:"), ::testing::HasSubstr("region is too small"))));
+    if (requirements.alignment > 1) {
+        invalid.memory = {image.memory().memory, 1, image.memory().size - 1};
+        bindings.bindImage(imageResource, invalid);
+        EXPECT_THAT([&] { (void)session.prepare(bindings); },
+                    ::testing::ThrowsMessage<std::runtime_error>(::testing::AllOf(
+                        ::testing::HasSubstr("Alias resource 2:"), ::testing::HasSubstr("misaligned"))));
+    }
+}
+
+TEST_F(VgfSessionExecutionTest, RunIntermediateTensorOnExternalLinearImage) {
+    const auto workload = makeImageTensorAliasWorkload();
+    const auto imageResource = workload.resource(1);
+    const auto usage = imageResource.requirements().asImage().usage(vk::ImageTiling::eLinear);
+    ASSERT_TRUE(usage & vk::ImageUsageFlagBits::eStorage);
+    ASSERT_FALSE(usage & vk::ImageUsageFlagBits::eTensorAliasingARM);
+    try {
+        (void)physicalDevice.getImageFormatProperties(vk::Format::eR8G8B8A8Snorm, vk::ImageType::e2D,
+                                                      vk::ImageTiling::eLinear, usage, vk::ImageCreateFlagBits::eAlias);
+    } catch (const vk::FormatNotSupportedError &) {
+        GTEST_SKIP() << "Linear RGBA8 SNORM storage images are unavailable";
+    }
+    vk::raii::DeviceMemory memory(nullptr);
+    const vk::raii::Image image(device, {{vk::ImageCreateFlagBits::eAlias},
+                                         vk::ImageType::e2D,
+                                         vk::Format::eR8G8B8A8Snorm,
+                                         {4, 4, 1},
+                                         1,
+                                         1,
+                                         vk::SampleCountFlagBits::e1,
+                                         vk::ImageTiling::eLinear,
+                                         usage,
+                                         vk::SharingMode::eExclusive,
+                                         {},
+                                         vk::ImageLayout::ePreinitialized});
+    const auto subresource = image.getSubresourceLayout({vk::ImageAspectFlagBits::eColor, 0, 0});
+    if (subresource.rowPitch < 16 ||
+        subresource.rowPitch > static_cast<vk::DeviceSize>(std::numeric_limits<int64_t>::max()) / 4) {
+        GTEST_SKIP() << "Image pitches cannot describe a valid rank-three tensor";
+    }
+    const std::vector<int64_t> strides{static_cast<int64_t>(subresource.rowPitch), 4, 1};
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.setImageTiling(imageResource, vk::ImageTiling::eLinear);
+    session.setTensorStrides(imageResource.aliasPeer(0), strides);
+    session.configure();
+    const auto peerRequirements = session.aliasPeerMemoryRequirements(imageResource.aliasPeer(0));
+    ASSERT_FALSE(peerRequirements.requiresDedicatedAllocation);
+    const auto tensorRequirements = peerRequirements.memory;
+    const auto imageRequirements = image.getMemoryRequirements();
+    if (subresource.offset % tensorRequirements.alignment != 0) {
+        GTEST_SKIP() << "Image subresource offset does not satisfy tensor binding alignment";
+    }
+    const auto memoryTypes = tensorRequirements.memoryTypeBits & imageRequirements.memoryTypeBits;
+    const auto properties = physicalDevice.getMemoryProperties();
+    uint32_t memoryType = UINT32_MAX;
+    for (uint32_t i = 0; i < properties.memoryTypeCount; ++i) {
+        const auto flags = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent;
+        if ((memoryTypes & (1u << i)) && (properties.memoryTypes[i].propertyFlags & flags) == flags) {
+            memoryType = i;
+            break;
+        }
+    }
+    if (memoryType == UINT32_MAX) {
+        GTEST_SKIP() << "No host-coherent memory type compatible with both image and tensor";
+    }
+    const auto baseOffset = 2 * std::max(imageRequirements.alignment, tensorRequirements.alignment);
+    const auto regionSize = std::max(imageRequirements.size, subresource.offset + tensorRequirements.size);
+    memory = vk::raii::DeviceMemory(device, {baseOffset + regionSize, memoryType});
+    image.bindMemory(*memory, baseOffset);
+    auto *mapped = static_cast<int8_t *>(memory.mapMemory(0, baseOffset + regionSize));
+    std::fill_n(mapped, static_cast<size_t>(baseOffset + regionSize), int8_t{0});
+    memory.unmapMemory();
+
+    const Tensor input(physicalDevice, device, vk::Format::eR8Sint, {1, 8, 8, 4});
+    const auto values = makeMaxpoolInput(input.shape, 5);
+    input.write(values);
+    const vk::ImageSubresourceRange range(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+    const vk::raii::ImageView imageView(device,
+                                        {{}, *image, vk::ImageViewType::e2D, vk::Format::eR8G8B8A8Snorm, {}, range});
+    auto bindings = session.createBindingSet();
+    bindings.bindTensor(workload.resource(0), {*input.tensor});
+    const ImageBindingInfo imageBinding{*image, {*memory, baseOffset, regionSize}, *imageView,
+                                        {},     vk::ImageLayout::ePreinitialized,  range};
+    bindings.setAliasPeerOffset(imageResource.aliasPeer(0), subresource.offset);
+    bindings.bindImage(imageResource, imageBinding);
+    auto execution = session.prepare(bindings);
+    execution.run();
+
+    mapped = static_cast<int8_t *>(memory.mapMemory(0, baseOffset + regionSize));
+    std::vector<int8_t> actual(4UL * 16);
+    for (size_t row = 0; row < 4; ++row) {
+        const auto *pixels = mapped + baseOffset + subresource.offset + (row * subresource.rowPitch);
+        std::copy_n(pixels, 16, actual.begin() + static_cast<std::ptrdiff_t>(row * 16));
+    }
+    EXPECT_TRUE(std::all_of(mapped, mapped + baseOffset, [](int8_t value) { return value == 0; }));
+    memory.unmapMemory();
+    EXPECT_EQ(actual, expectedMaxpool(values, input.shape));
 }
 
 TEST_P(VgfAliasExecutionTest, PrepareRequiresBoundMemoryInfo) {

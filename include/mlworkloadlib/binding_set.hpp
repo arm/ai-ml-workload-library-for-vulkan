@@ -10,6 +10,7 @@
 #include "mlworkloadlib/workload.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -54,6 +55,13 @@ class BindingSet {
 
     /** @brief Binds an image, replacing any binding for the same resource. */
     void bindImage(ResourceView resource, ImageBindingInfo bindingInfo);
+
+    /**
+     * @brief Places a runtime-created alias peer relative to its group's BoundMemoryInfo::offset.
+     *
+     * Defaults to zero. Supply the caller-resolved subresource offset when needed.
+     */
+    void setAliasPeerOffset(AliasPeerView peer, vk::DeviceSize byteOffset);
 
     /**
      * @brief Copies a payload for one executable, replacing its previous payload.
