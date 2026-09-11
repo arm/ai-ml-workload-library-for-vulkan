@@ -64,6 +64,7 @@ class Builder:
         self.gtest_path = absolute(args.gtest_path)
         self.enable_glsl_support = args.enable_glsl_support
         self.enable_hlsl_support = args.enable_hlsl_support
+        self.package_version = args.package_version
         self.install = args.install
 
     def setup_platform_build(self, cmake_cmd):
@@ -209,6 +210,9 @@ class Builder:
         if self.enable_hlsl_support:
             cmake_setup_cmd.append("-DML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT=ON")
             cmake_setup_cmd.append(f"-DDXC_PATH={self.dxc_path}")
+
+        if self.package_version:
+            cmake_setup_cmd.append(f"-DML_SDK_PACKAGE_VERSION={self.package_version}")
 
         if not self.setup_platform_build(cmake_setup_cmd):
             return 1
@@ -421,6 +425,11 @@ def parse_arguments():
     parser.add_argument(
         "--install",
         help="Install build artifacts into a provided location",
+    )
+    parser.add_argument(
+        "--package-version",
+        help="Manually specify package version number",
+        default="",
     )
 
     if argcomplete:
