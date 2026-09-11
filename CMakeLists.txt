@@ -77,6 +77,14 @@ set(ML_WORKLOAD_LIB_SOURCES
     src/workload_formats/vgf.cpp
 )
 
+if(ANDROID)
+    # Link with 16KiB ELF segment alignment.
+    add_link_options(
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,common-page-size=16384"
+    )
+endif()
+
 function(mlworkloadlib_configure_target target_name)
     target_include_directories(${target_name}
         PUBLIC
