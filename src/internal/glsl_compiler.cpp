@@ -11,7 +11,6 @@
 #include <StandAlone/DirStackFileIncluder.h>
 #include <glslang/Public/ShaderLang.h>
 
-#include <filesystem>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -59,15 +58,6 @@ std::string parsePreprocessorOptions(std::string_view options) {
     return preamble;
 }
 
-std::vector<std::string> includeDirStrings(const std::vector<std::filesystem::path> &includeDirs) {
-    std::vector<std::string> result;
-    result.reserve(includeDirs.size());
-    for (const auto &includeDir : includeDirs) {
-        result.push_back(includeDir.string());
-    }
-    return result;
-}
-
 std::string compilerLog(glslang::TShader &shader) {
     return std::string(shader.getInfoLog()) + "\n" + std::string(shader.getInfoDebugLog());
 }
@@ -88,7 +78,7 @@ std::vector<uint32_t> compileGlslComputeToSpirv(const Module &module) {
     const char *source = module.source.c_str();
     shader.setStrings(&source, 1);
 
-    const auto includeDirs = includeDirStrings(module.includeDirs);
+    const auto includeDirs = moduleIncludeDirectoryStrings(module);
     DirStackFileIncluder includer;
     for (const auto &includeDir : includeDirs) {
         includer.pushExternalDirectory(includeDir);

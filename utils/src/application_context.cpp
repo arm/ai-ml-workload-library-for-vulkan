@@ -11,9 +11,7 @@
 
 #include <limits>
 #include <stdexcept>
-#include <string>
 #include <string_view>
-#include <vector>
 
 namespace mlsdk::workloadlib::utils {
 
@@ -24,18 +22,7 @@ ApplicationContext::ApplicationContext(std::string_view applicationName) {
 }
 
 bool ApplicationContext::initialize(std::string_view applicationName) {
-    const std::string applicationNameStorage(applicationName);
-    const vk::ApplicationInfo applicationInfo(applicationNameStorage.c_str(), 1, nullptr, 0, VK_API_VERSION_1_3);
-    std::vector<const char *> instanceExtensions;
-    vk::InstanceCreateFlags instanceFlags;
-    const auto availableInstanceExtensions = raiiContext.enumerateInstanceExtensionProperties();
-    if (detail::hasExtension(availableInstanceExtensions, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
-        instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-        instanceFlags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
-    }
-    instance = vk::raii::Instance(raiiContext, vk::InstanceCreateInfo(instanceFlags, &applicationInfo, {}, {},
-                                                                      static_cast<uint32_t>(instanceExtensions.size()),
-                                                                      instanceExtensions.data()));
+    instance = detail::createVulkanInstance(raiiContext, applicationName);
 
     const auto requiredDeviceExtensions = detail::requiredWorkloadDeviceExtensions();
     for (auto &candidate : vk::raii::PhysicalDevices(instance)) {

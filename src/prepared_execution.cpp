@@ -171,6 +171,16 @@ void waitForFence(const vk::raii::Device &device, const vk::raii::Fence &fence) 
     }
 }
 
+void recordPipelineBarrier(const vk::raii::Device &device, vk::CommandBuffer commandBuffer,
+                           const vk::DependencyInfo &dependencyInfo) {
+    const auto *const dispatcher = device.getDispatcher();
+    if (!dispatcher->vkCmdPipelineBarrier2) {
+        throw std::runtime_error("vkCmdPipelineBarrier2 is not available");
+    }
+    dispatcher->vkCmdPipelineBarrier2(static_cast<VkCommandBuffer>(commandBuffer),
+                                      reinterpret_cast<const VkDependencyInfo *>(&dependencyInfo));
+}
+
 vk::SamplerCreateInfo makeSamplerCreateInfo(const Resource::ImageMetadata::SamplerConfig &samplerConfig) {
     return {{},
             samplerConfig.magFilter,
@@ -189,16 +199,8 @@ vk::SamplerCreateInfo makeSamplerCreateInfo(const Resource::ImageMetadata::Sampl
             samplerConfig.borderColor};
 }
 
-vk::ImageSubresourceRange defaultImageSubresourceRange() { return {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}; }
-
 vk::ImageLayout requiredImageLayout(const Workload &workload, const DescriptorBinding &descBinding) {
-    const auto &workloadState = workloadImpl(workload);
-    const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
-    const auto layout = detail::imageMetadata(resource).layout;
-    if (layout != vk::ImageLayout::eUndefined) {
-        return layout;
-    }
-    return detail::imageLayout(workloadState.descriptorTypeForBinding(descBinding));
+    return workloadImpl(workload).resources.at(descBinding.resourceIndex).requiredImageLayout();
 }
 
 template <typename RuntimeResource>
@@ -404,7 +406,7 @@ void PreparedExecution::Impl::addBoundImage(ImageBindingInfo imageBindingInfo, D
 
     auto subresourceRange = imageBindingInfo.subresourceRange;
     if (!subresourceRange.aspectMask) {
-        subresourceRange = defaultImageSubresourceRange();
+        subresourceRange = resource.requiredImageSubresourceRange();
     }
 
     vk::raii::ImageView ownedImageView(nullptr);
@@ -838,12 +840,7 @@ void PreparedExecution::Impl::insertInitialImageLayoutTransitions(vk::CommandBuf
     dependencyInfo.imageMemoryBarrierCount = static_cast<uint32_t>(imageBarriers.size());
     dependencyInfo.pImageMemoryBarriers = imageBarriers.data();
 
-    const auto *const dispatcher = sessionImpl.contextView.device.get().getDispatcher();
-    if (!dispatcher->vkCmdPipelineBarrier2) {
-        throw std::runtime_error("vkCmdPipelineBarrier2 is not available");
-    }
-    dispatcher->vkCmdPipelineBarrier2(static_cast<VkCommandBuffer>(commandBuffer),
-                                      reinterpret_cast<const VkDependencyInfo *>(&dependencyInfo));
+    recordPipelineBarrier(sessionImpl.contextView.device.get(), commandBuffer, dependencyInfo);
 }
 
 void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandBuffer,
@@ -970,12 +967,7 @@ void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandB
         dependencyInfo.pNext = &tensorDependencyInfo;
     }
 
-    const auto *const dispatcher = sessionImpl.contextView.device.get().getDispatcher();
-    if (!dispatcher->vkCmdPipelineBarrier2) {
-        throw std::runtime_error("vkCmdPipelineBarrier2 is not available");
-    }
-    dispatcher->vkCmdPipelineBarrier2(static_cast<VkCommandBuffer>(commandBuffer),
-                                      reinterpret_cast<const VkDependencyInfo *>(&dependencyInfo));
+    recordPipelineBarrier(sessionImpl.contextView.device.get(), commandBuffer, dependencyInfo);
 }
 
 /*******************************************************************************

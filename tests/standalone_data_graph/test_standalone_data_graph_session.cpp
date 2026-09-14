@@ -17,7 +17,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -244,19 +243,8 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RecordAddConstantInputWithCaller
     bindings.bindTensor(workload.resource(1), TensorBindingInfo{*outputTensor.tensor, boundMemoryInfo(outputTensor)});
 
     auto execution = session.prepare(bindings);
-    const vk::raii::CommandPool commandPool(device,
-                                            {vk::CommandPoolCreateFlagBits::eResetCommandBuffer, queueFamilyIndex});
-    auto commandBuffer =
-        std::move(device.allocateCommandBuffers({*commandPool, vk::CommandBufferLevel::ePrimary, 1}).front());
-    const vk::raii::Fence fence(device, vk::FenceCreateInfo{});
-
-    commandBuffer.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
-    execution.record(*commandBuffer);
-    commandBuffer.end();
-
-    const vk::SubmitInfo submitInfo({}, {}, *commandBuffer);
-    queue.submit(submitInfo, *fence);
-    ASSERT_EQ(device.waitForFences(*fence, true, std::numeric_limits<uint64_t>::max()), vk::Result::eSuccess);
+    recordAndSubmitCommands(device, queue, queueFamilyIndex,
+                            [&execution](vk::CommandBuffer commandBuffer) { execution.record(commandBuffer); });
 
     EXPECT_EQ(utils::readDeviceMemory<float>(device, boundMemoryInfo(outputTensor), Tensor::numElements(tensorShape)),
               expected);
@@ -284,19 +272,8 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RecordDataGraphWorkload) {
     bindings.bindTensor(workload.resource(1), TensorBindingInfo{*outputTensor.tensor});
 
     auto execution = session.prepare(bindings);
-    const vk::raii::CommandPool commandPool(device,
-                                            {vk::CommandPoolCreateFlagBits::eResetCommandBuffer, queueFamilyIndex});
-    auto commandBuffer =
-        std::move(device.allocateCommandBuffers({*commandPool, vk::CommandBufferLevel::ePrimary, 1}).front());
-    const vk::raii::Fence fence(device, vk::FenceCreateInfo{});
-
-    commandBuffer.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
-    execution.record(*commandBuffer);
-    commandBuffer.end();
-
-    const vk::SubmitInfo submitInfo({}, {}, *commandBuffer);
-    queue.submit(submitInfo, *fence);
-    ASSERT_EQ(device.waitForFences(*fence, true, std::numeric_limits<uint64_t>::max()), vk::Result::eSuccess);
+    recordAndSubmitCommands(device, queue, queueFamilyIndex,
+                            [&execution](vk::CommandBuffer commandBuffer) { execution.record(commandBuffer); });
 
     EXPECT_EQ(outputTensor.read(outputTensor.numElements()), expectedMaxpool(input, inputShape));
 }
@@ -351,17 +328,8 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RecordDataGraphRepeatedDifferent
         inputTensor.write(input);
         outputTensor.fill(0, outputTensor.numElements());
 
-        auto commandBuffer =
-            std::move(device.allocateCommandBuffers({*commandPool, vk::CommandBufferLevel::ePrimary, 1}).front());
-        const vk::raii::Fence fence(device, vk::FenceCreateInfo{});
-
-        commandBuffer.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
-        execution.record(*commandBuffer);
-        commandBuffer.end();
-
-        const vk::SubmitInfo submitInfo({}, {}, *commandBuffer);
-        queue.submit(submitInfo, *fence);
-        ASSERT_EQ(device.waitForFences(*fence, true, std::numeric_limits<uint64_t>::max()), vk::Result::eSuccess);
+        recordAndSubmitCommands(device, queue, *commandPool,
+                                [&execution](vk::CommandBuffer commandBuffer) { execution.record(commandBuffer); });
         EXPECT_EQ(outputTensor.read(outputTensor.numElements()), expectedMaxpool(input, inputShape));
     }
 }

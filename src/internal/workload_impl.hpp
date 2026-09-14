@@ -79,11 +79,6 @@ struct Resource {
         std::optional<SamplerConfig> samplerConfig;
     };
 
-    // Metadata helpers
-    static Role publicRoleForAccess(ResourceAccess access);
-    static ResourceAccess accessForRole(Role role);
-    vk::Extent3D imageExtent() const;
-
     std::string name;
     Role role = Role::Input;
     std::optional<vk::DescriptorType> descriptorType;
@@ -94,6 +89,15 @@ struct Resource {
     std::optional<uint32_t> aliasGroupId;
     std::variant<std::monostate, TensorMetadata, BufferMetadata, ImageMetadata> metadata;
     bool requiresBoundMemoryInfo = false;
+
+    // Role conversion
+    static Role publicRoleForAccess(ResourceAccess access);
+    static ResourceAccess accessForRole(Role role);
+
+    // Image resource queries
+    vk::Extent3D imageExtent() const;
+    vk::ImageLayout requiredImageLayout() const;
+    vk::ImageSubresourceRange requiredImageSubresourceRange() const;
 };
 
 inline const Resource::TensorMetadata &tensorMetadata(const Resource &resource) {

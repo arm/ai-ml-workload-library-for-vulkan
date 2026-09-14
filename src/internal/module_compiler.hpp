@@ -8,6 +8,7 @@
 #include "mlworkloadlib/workload.hpp"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace mlsdk::workloadlib::detail {
@@ -20,6 +21,7 @@ bool SourceModuleCompilerRegistration(ModuleCodeKind codeKind, SourceModuleCompi
 
 bool supportsGlslModules();
 bool supportsHlslModules();
+std::vector<std::string> moduleIncludeDirectoryStrings(const Module &module);
 void compileModuleToSpirv(Module &module, ExecutableKind executableKind);
 
 } // namespace mlsdk::workloadlib::detail

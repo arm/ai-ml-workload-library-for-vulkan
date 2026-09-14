@@ -12,7 +12,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -46,6 +45,8 @@ class WorkloadBuilder {
     void reserveResources(std::size_t count);
     uint32_t addResource(std::string name, const ResourceRequirements &requirements, Resource::Role role,
                          std::optional<uint32_t> aliasGroupId = std::nullopt);
+    void addPublicResourceBinding(uint32_t executableIndex, std::string name, const ResourceRequirements &requirements,
+                                  uint32_t set, uint32_t binding, ResourceAccess access);
     uint32_t addTensorResource(std::string name, Resource::Role role, std::optional<vk::DescriptorType> descriptorType,
                                vk::Format format, std::vector<int64_t> shape, std::vector<int64_t> stride,
                                vk::DeviceSize elementCount, std::optional<uint32_t> aliasGroupId,
@@ -69,9 +70,6 @@ class WorkloadBuilder {
      **************************************************************************/
 
     void reserveModules(std::size_t count);
-    uint32_t addModule(std::string name, std::string entryPoint, ModuleCodeKind codeKind, std::vector<uint32_t> code,
-                       std::string source = {}, std::string buildOptions = {},
-                       std::vector<std::filesystem::path> includeDirs = {});
     uint32_t addModule(ModuleImplementation implementation, std::string name, std::string entryPoint);
 
     /***************************************************************************

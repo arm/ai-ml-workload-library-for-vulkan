@@ -23,7 +23,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
-#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -35,26 +34,7 @@ using mlsdk::vgflib::GraphConstantBindingRef;
 using namespace mlsdk::workloadlib;
 using namespace mlsdk::workloadlib::test;
 
-const std::vector<GraphConstantBindingRef> noGraphConstants;
-
 class VgfSessionExecutionTest : public RuntimeSessionExecutionTest {};
-
-std::string makeMaxpoolVgf() {
-    const auto &code = assembleMaxpool16x16To8x8Spirv("maxpool_set0", {0, 0, 1, 1});
-    return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
-        const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::GRAPH, "maxpool", "main", code);
-        const auto input =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 16, 16, 16}, {});
-        const auto output =
-            encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 8, 8, 16}, {});
-        const auto inputBinding = encoder.AddBindingSlot(0, input);
-        const auto outputBinding = encoder.AddBindingSlot(1, output);
-        const auto inputSet = encoder.AddDescriptorSetInfo({inputBinding}, 0);
-        const auto outputSet = encoder.AddDescriptorSetInfo({outputBinding}, 1);
-        encoder.AddSegmentInfo(module, "maxpool_graph_segment", {inputSet, outputSet}, {inputBinding}, {outputBinding},
-                               noGraphConstants);
-    });
-}
 
 std::string makeConv2dRescaleConstantVgf(const std::vector<int8_t> &weights) {
     const auto &code = assembleConv2dRescaleConstantSpirv("conv2d_rescale_constant", {0, 0, 1, 1});
@@ -105,35 +85,6 @@ void fillFirstVgfConstantPayload(std::string &bytes, int8_t value) {
     std::fill_n(data + offset, payload.size(), static_cast<char>(value));
 }
 
-std::string makeTwoSegmentMaxpoolVgf() {
-    const auto &firstCode = assembleMaxpool16x16To8x8Spirv("maxpool_16x16_to_8x8", {0, 0, 0, 1});
-    const auto &secondCode = assembleMaxpool8x8To4x4Spirv("maxpool_8x8_to_4x4", {0, 0, 0, 1});
-    return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
-        const auto firstModule =
-            encoder.AddModule(mlsdk::vgflib::ModuleType::GRAPH, "maxpool_16x16_to_8x8", "main", firstCode);
-        const auto secondModule =
-            encoder.AddModule(mlsdk::vgflib::ModuleType::GRAPH, "maxpool_8x8_to_4x4", "main", secondCode);
-
-        const auto firstInput =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 16, 16, 16}, {});
-        const auto firstOutput =
-            encoder.AddIntermediateResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 8, 8, 16}, {});
-        const auto firstInputBinding = encoder.AddBindingSlot(0, firstInput);
-        const auto firstOutputBinding = encoder.AddBindingSlot(1, firstOutput);
-        const auto firstDescriptorSet = encoder.AddDescriptorSetInfo({firstInputBinding, firstOutputBinding});
-        encoder.AddSegmentInfo(firstModule, "first_graph_segment", {firstDescriptorSet}, {firstInputBinding},
-                               {firstOutputBinding}, noGraphConstants);
-
-        const auto secondOutput =
-            encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 4, 4, 16}, {});
-        const auto secondInputBinding = encoder.AddBindingSlot(0, firstOutput);
-        const auto secondOutputBinding = encoder.AddBindingSlot(1, secondOutput);
-        const auto secondDescriptorSet = encoder.AddDescriptorSetInfo({secondInputBinding, secondOutputBinding});
-        encoder.AddSegmentInfo(secondModule, "second_graph_segment", {secondDescriptorSet}, {secondInputBinding},
-                               {secondOutputBinding}, noGraphConstants);
-    });
-}
-
 std::string makeOutputBufferAliasedToIntermediateTensorVgf() {
     const auto &maxpoolCode = assembleMaxpool8x8To4x4Spirv("maxpool_8x8_to_4x4", {0, 0, 0, 1});
     const auto &addCode = assembleAddInt32BuffersSpirv();
@@ -172,27 +123,6 @@ std::string makeOutputBufferAliasedToIntermediateTensorVgf() {
     });
 }
 
-std::string makeAddInt32BuffersVgf() {
-    const auto &code = assembleAddInt32BuffersSpirv();
-    return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
-        const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "add_int32_buffers", "main", code);
-
-        const auto firstInput =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-        const auto secondInput =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-
-        const auto firstInputBinding = encoder.AddBindingSlot(0, firstInput);
-        const auto secondInputBinding = encoder.AddBindingSlot(1, secondInput);
-        const auto outputBinding = encoder.AddBindingSlot(2, output);
-        const auto inputSet = encoder.AddDescriptorSetInfo({firstInputBinding, secondInputBinding}, 0);
-        const auto outputSet = encoder.AddDescriptorSetInfo({outputBinding}, 1);
-        encoder.AddSegmentInfo(module, "add_int32_buffers_segment", {inputSet, outputSet},
-                               {firstInputBinding, secondInputBinding}, {outputBinding}, noGraphConstants, {10, 1, 1});
-    });
-}
-
 std::string makeGlslAddInt32BuffersVgf() {
     constexpr std::string_view source = R"(
 #version 450
@@ -214,20 +144,7 @@ void main() {
     return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
         const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "glsl_add_int32_buffers", "main",
                                               mlsdk::vgflib::ShaderType::GLSL, std::string(source));
-
-        const auto firstInput =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-        const auto secondInput =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-
-        const auto firstInputBinding = encoder.AddBindingSlot(0, firstInput);
-        const auto secondInputBinding = encoder.AddBindingSlot(1, secondInput);
-        const auto outputBinding = encoder.AddBindingSlot(2, output);
-        const auto inputSet = encoder.AddDescriptorSetInfo({firstInputBinding, secondInputBinding}, 0);
-        const auto outputSet = encoder.AddDescriptorSetInfo({outputBinding}, 1);
-        encoder.AddSegmentInfo(module, "glsl_add_int32_buffers_segment", {inputSet, outputSet},
-                               {firstInputBinding, secondInputBinding}, {outputBinding}, noGraphConstants, {10, 1, 1});
+        addInt32BuffersSegment(encoder, module, "glsl_add_int32_buffers_segment");
     });
 }
 
@@ -245,20 +162,7 @@ void main(uint3 id : SV_DispatchThreadID) {
     return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
         const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "hlsl_add_int32_buffers", "main",
                                               mlsdk::vgflib::ShaderType::HLSL, std::string(source));
-
-        const auto firstInput =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-        const auto secondInput =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-
-        const auto firstInputBinding = encoder.AddBindingSlot(0, firstInput);
-        const auto secondInputBinding = encoder.AddBindingSlot(1, secondInput);
-        const auto outputBinding = encoder.AddBindingSlot(2, output);
-        const auto inputSet = encoder.AddDescriptorSetInfo({firstInputBinding, secondInputBinding}, 0);
-        const auto outputSet = encoder.AddDescriptorSetInfo({outputBinding}, 1);
-        encoder.AddSegmentInfo(module, "hlsl_add_int32_buffers_segment", {inputSet, outputSet},
-                               {firstInputBinding, secondInputBinding}, {outputBinding}, noGraphConstants, {10, 1, 1});
+        addInt32BuffersSegment(encoder, module, "hlsl_add_int32_buffers_segment");
     });
 }
 
@@ -293,22 +197,8 @@ void main() {
     return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
         const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "add_int32_buffers", "main",
                                               mlsdk::vgflib::ShaderType::GLSL, source);
-
-        const auto firstInput =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-        const auto secondInput =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-
-        const auto firstInputBinding = encoder.AddBindingSlot(0, firstInput);
-        const auto secondInputBinding = encoder.AddBindingSlot(1, secondInput);
-        const auto outputBinding = encoder.AddBindingSlot(2, output);
-        const auto inputSet = encoder.AddDescriptorSetInfo({firstInputBinding, secondInputBinding}, 0);
-        const auto outputSet = encoder.AddDescriptorSetInfo({outputBinding}, 1);
         const auto pushConstantRange = encoder.AddPushConstRange(VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(int32_t));
-        encoder.AddSegmentInfo(module, "add_int32_buffers_segment", {inputSet, outputSet},
-                               {firstInputBinding, secondInputBinding}, {outputBinding}, noGraphConstants, {10, 1, 1},
-                               {pushConstantRange});
+        addInt32BuffersSegment(encoder, module, "add_int32_buffers_segment", {pushConstantRange});
     });
 }
 
@@ -342,20 +232,7 @@ std::string makeAddInt32BuffersWithExternalImageVgf() {
 std::string makePlaceholderAddInt32BuffersVgf() {
     return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
         const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "add_int32_buffers", "main");
-
-        const auto firstInput =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-        const auto secondInput =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-
-        const auto firstInputBinding = encoder.AddBindingSlot(0, firstInput);
-        const auto secondInputBinding = encoder.AddBindingSlot(1, secondInput);
-        const auto outputBinding = encoder.AddBindingSlot(2, output);
-        const auto inputSet = encoder.AddDescriptorSetInfo({firstInputBinding, secondInputBinding}, 0);
-        const auto outputSet = encoder.AddDescriptorSetInfo({outputBinding}, 1);
-        encoder.AddSegmentInfo(module, "add_int32_buffers_segment", {inputSet, outputSet},
-                               {firstInputBinding, secondInputBinding}, {outputBinding}, noGraphConstants, {10, 1, 1});
+        addInt32BuffersSegment(encoder, module, "add_int32_buffers_segment");
     });
 }
 
@@ -643,8 +520,7 @@ TEST_F(VgfSessionExecutionTest, RunComputeShaderSegment) {
 
     const std::vector<int32_t> firstInput = {1, 2, 3, 4, 5, -6, -7, 8, 9, 10};
     const std::vector<int32_t> secondInput = {10, 9, 8, 7, 6, 5, 4, -3, -2, -1};
-    std::vector<int32_t> expected(elements);
-    std::transform(firstInput.begin(), firstInput.end(), secondInput.begin(), expected.begin(), std::plus<>());
+    const auto expected = addVectors(firstInput, secondInput);
 
     firstInputBuffer.write(firstInput);
     secondInputBuffer.write(secondInput);
@@ -682,8 +558,7 @@ TEST_F(VgfSessionExecutionTest, RunGlslComputeShaderSegment) {
 
     const std::vector<int32_t> firstInput = {1, -2, 3, -4, 5, -6, 7, -8, 9, -10};
     const std::vector<int32_t> secondInput = {10, -9, 8, -7, 6, -5, 4, -3, 2, -1};
-    std::vector<int32_t> expected(elements);
-    std::transform(firstInput.begin(), firstInput.end(), secondInput.begin(), expected.begin(), std::plus<>());
+    const auto expected = addVectors(firstInput, secondInput);
 
     firstInputBuffer.write(firstInput);
     secondInputBuffer.write(secondInput);
@@ -721,8 +596,7 @@ TEST_F(VgfSessionExecutionTest, RunHlslComputeShaderSegment) {
 
     const std::vector<int32_t> firstInput = {10, 9, 8, 7, 6, -5, -4, -3, -2, -1};
     const std::vector<int32_t> secondInput = {-1, -2, -3, -4, -5, 6, 7, 8, 9, 10};
-    std::vector<int32_t> expected(elements);
-    std::transform(firstInput.begin(), firstInput.end(), secondInput.begin(), expected.begin(), std::plus<>());
+    const auto expected = addVectors(firstInput, secondInput);
 
     firstInputBuffer.write(firstInput);
     secondInputBuffer.write(secondInput);
@@ -756,8 +630,7 @@ TEST_F(VgfSessionExecutionTest, RunComputeShaderSegmentWithBoundPlaceholderModul
 
     const std::vector<int32_t> firstInput = {3, 1, 4, 1, 5, 9, 2, 6, 5, 3};
     const std::vector<int32_t> secondInput = {5, 8, 9, 7, 9, 3, 2, 3, 8, 4};
-    std::vector<int32_t> expected(elements);
-    std::transform(firstInput.begin(), firstInput.end(), secondInput.begin(), expected.begin(), std::plus<>());
+    const auto expected = addVectors(firstInput, secondInput);
 
     firstInputBuffer.write(firstInput);
     secondInputBuffer.write(secondInput);
@@ -840,8 +713,7 @@ TEST_F(VgfSessionExecutionTest, RecordComputeShaderSegment) {
 
     const std::vector<int32_t> firstInput = {2, 4, 6, 8, 10, -12, -14, 16, 18, 20};
     const std::vector<int32_t> secondInput = {3, -3, 5, -5, 7, -7, 11, -11, 13, -13};
-    std::vector<int32_t> expected(elements);
-    std::transform(firstInput.begin(), firstInput.end(), secondInput.begin(), expected.begin(), std::plus<>());
+    const auto expected = addVectors(firstInput, secondInput);
 
     firstInputBuffer.write(firstInput);
     secondInputBuffer.write(secondInput);
@@ -856,19 +728,8 @@ TEST_F(VgfSessionExecutionTest, RecordComputeShaderSegment) {
     bindings.bindBuffer(workload.resource(2), BufferBindingInfo{*outputBuffer.buffer});
 
     auto execution = session.prepare(bindings);
-    const vk::raii::CommandPool commandPool(device,
-                                            {vk::CommandPoolCreateFlagBits::eResetCommandBuffer, queueFamilyIndex});
-    auto commandBuffer =
-        std::move(device.allocateCommandBuffers({*commandPool, vk::CommandBufferLevel::ePrimary, 1}).front());
-    const vk::raii::Fence fence(device, vk::FenceCreateInfo{});
-
-    commandBuffer.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
-    execution.record(*commandBuffer);
-    commandBuffer.end();
-
-    const vk::SubmitInfo submitInfo({}, {}, *commandBuffer);
-    queue.submit(submitInfo, *fence);
-    ASSERT_EQ(device.waitForFences(*fence, true, std::numeric_limits<uint64_t>::max()), vk::Result::eSuccess);
+    recordAndSubmitCommands(device, queue, queueFamilyIndex,
+                            [&execution](vk::CommandBuffer commandBuffer) { execution.record(commandBuffer); });
 
     EXPECT_EQ(outputBuffer.read(elements), expected);
 }
@@ -888,8 +749,7 @@ TEST_F(VgfSessionExecutionTest, RunComputeShaderSegmentWithExternalImageBinding)
 
     const std::vector<int32_t> firstInput = {1, 2, 3, 4, 5, -6, -7, 8, 9, 10};
     const std::vector<int32_t> secondInput = {10, 9, 8, 7, 6, 5, 4, -3, -2, -1};
-    std::vector<int32_t> expected(elements);
-    std::transform(firstInput.begin(), firstInput.end(), secondInput.begin(), expected.begin(), std::plus<>());
+    const auto expected = addVectors(firstInput, secondInput);
 
     firstInputBuffer.write(firstInput);
     secondInputBuffer.write(secondInput);
@@ -1030,7 +890,7 @@ TEST_F(VgfSessionExecutionTest, RunIndependentIntermediateAliasGroups) {
 }
 
 TEST_F(VgfSessionExecutionTest, RunMaxpoolDataVgf) {
-    const auto bytes = makeMaxpoolVgf();
+    const auto bytes = makeMaxpool16x16To8x8Vgf();
     auto workload = Workload::fromVGF(bytes.data(), bytes.size());
     auto context = wrappedContext();
 
@@ -1135,7 +995,7 @@ TEST_F(VgfSessionExecutionTest, RunMemoryVgfBorrowsConstantPayload) {
 }
 
 TEST_F(VgfSessionExecutionTest, RunMaxpoolFileVgf) {
-    const auto bytes = makeMaxpoolVgf();
+    const auto bytes = makeMaxpool16x16To8x8Vgf();
     const TempFolder tempFolder("mlworkloadlib_vgf_session");
     const auto path = tempFolder.relative("full_maxpool.vgf");
     {
@@ -1166,7 +1026,7 @@ TEST_F(VgfSessionExecutionTest, RunMaxpoolFileVgf) {
 }
 
 TEST_F(VgfSessionExecutionTest, RunMaxpoolRepeatedDifferentInput) {
-    const auto bytes = makeMaxpoolVgf();
+    const auto bytes = makeMaxpool16x16To8x8Vgf();
     auto workload = Workload::fromVGF(bytes.data(), bytes.size());
     auto context = wrappedContext();
     const Tensor inputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 16, 16, 16});
@@ -1245,15 +1105,4 @@ TEST_P(VgfAliasExecutionTest, PrepareRequiresBoundMemoryInfo) {
     runAliasCase(workload, GetParam(), false);
 }
 
-INSTANTIATE_TEST_SUITE_P(AliasCases, VgfAliasExecutionTest,
-                         testing::Values(AliasCase{"OutputBufferAliasedToIntermediateBuffer",
-                                                   AliasScenario::OutputBufferAliasedToIntermediateBuffer, 2, 5},
-                                         AliasCase{"OutputBufferAliasedToIntermediateTensor",
-                                                   AliasScenario::OutputBufferAliasedToIntermediateTensor, 2, 4},
-                                         AliasCase{"OutputTensorAliasedToIntermediateBuffer",
-                                                   AliasScenario::OutputTensorAliasedToIntermediateBuffer, 1, 3},
-                                         AliasCase{"OutputTensorAliasedToIntermediateTensor",
-                                                   AliasScenario::OutputTensorAliasedToIntermediateTensor, 1, 2},
-                                         AliasCase{"OutputImageAliasedToIntermediateImage",
-                                                   AliasScenario::OutputImageAliasedToIntermediateImage, 1, 4}),
-                         aliasCaseName);
+INSTANTIATE_TEST_SUITE_P(AliasCases, VgfAliasExecutionTest, testing::ValuesIn(aliasCases), aliasCaseName);

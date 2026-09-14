@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <ostream>
@@ -37,6 +38,14 @@ struct AliasCase {
     AliasScenario scenario;
     uint32_t executableCount;
     uint32_t resourceCount;
+};
+
+inline constexpr std::array aliasCases = {
+    AliasCase{"OutputBufferAliasedToIntermediateBuffer", AliasScenario::OutputBufferAliasedToIntermediateBuffer, 2, 5},
+    AliasCase{"OutputBufferAliasedToIntermediateTensor", AliasScenario::OutputBufferAliasedToIntermediateTensor, 2, 4},
+    AliasCase{"OutputTensorAliasedToIntermediateBuffer", AliasScenario::OutputTensorAliasedToIntermediateBuffer, 1, 3},
+    AliasCase{"OutputTensorAliasedToIntermediateTensor", AliasScenario::OutputTensorAliasedToIntermediateTensor, 1, 2},
+    AliasCase{"OutputImageAliasedToIntermediateImage", AliasScenario::OutputImageAliasedToIntermediateImage, 1, 4},
 };
 
 inline std::string aliasCaseName(const testing::TestParamInfo<AliasCase> &info) { return info.param.name; }

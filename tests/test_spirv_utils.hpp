@@ -52,10 +52,17 @@ inline std::vector<uint32_t> assembleSpirv(std::string_view text) {
     return spirvModule;
 }
 
+inline std::string readSpvasmFile(const char *path) {
+    std::ifstream file(path);
+    if (!file) {
+        throw std::runtime_error("Failed to open SPIR-V assembly test asset " + std::string(path));
+    }
+    return {std::istreambuf_iterator<char>(file), {}};
+}
+
 inline std::vector<uint32_t> assembleGraphSpirvFromTemplate(std::string_view name, const char *templatePath,
                                                             GraphSpvasmBindings bindings) {
-    std::ifstream templateFile(templatePath);
-    std::string spvasm((std::istreambuf_iterator<char>(templateFile)), {});
+    auto spvasm = readSpvasmFile(templatePath);
     const auto replace = [&spvasm](std::string_view from, std::string_view to) {
         std::size_t pos = 0;
         while ((pos = spvasm.find(from, pos)) != std::string::npos) {
@@ -84,9 +91,7 @@ inline std::vector<uint32_t> assembleMaxpool8x8To4x4Spirv(std::string_view name,
 }
 
 inline std::vector<uint32_t> assembleAddInt32BuffersSpirv() {
-    std::ifstream templateFile(ML_WORKLOAD_LIB_ADD_INT32_BUFFERS_SPVASM);
-    const std::string spvasm((std::istreambuf_iterator<char>(templateFile)), {});
-    return assembleSpirv(spvasm);
+    return assembleSpirv(readSpvasmFile(ML_WORKLOAD_LIB_ADD_INT32_BUFFERS_SPVASM));
 }
 
 inline std::vector<uint32_t> assembleAddF32ConstantSpirv(std::string_view name, GraphSpvasmBindings bindings) {
@@ -94,9 +99,7 @@ inline std::vector<uint32_t> assembleAddF32ConstantSpirv(std::string_view name, 
 }
 
 inline std::vector<uint32_t> assembleArshiftSpecBoolSpirv() {
-    std::ifstream templateFile(ML_WORKLOAD_LIB_ARSHIFT_SPECBOOL_SPVASM);
-    const std::string spvasm((std::istreambuf_iterator<char>(templateFile)), {});
-    return assembleSpirv(spvasm);
+    return assembleSpirv(readSpvasmFile(ML_WORKLOAD_LIB_ARSHIFT_SPECBOOL_SPVASM));
 }
 
 inline std::vector<uint32_t> assembleConv2dRescaleConstantSpirv(std::string_view name, GraphSpvasmBindings bindings) {

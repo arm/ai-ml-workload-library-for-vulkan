@@ -146,82 +146,58 @@ if(ML_WORKLOAD_LIB_BUILD_SHARED)
     set_target_properties(mlworkloadlib_shared PROPERTIES OUTPUT_NAME mlworkloadlib)
 endif()
 
-if(ML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT)
-    add_library(mlworkloadlib_glsl_glslang_objects OBJECT src/internal/glsl_compiler.cpp)
+function(mlworkloadlib_add_source_module_backend target_name source)
+    set(object_target "${target_name}_objects")
+    add_library(${object_target} OBJECT ${source})
 
-    target_include_directories(mlworkloadlib_glsl_glslang_objects
+    target_include_directories(${object_target}
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
 
-    target_link_libraries(mlworkloadlib_glsl_glslang_objects
+    target_link_libraries(${object_target}
         PRIVATE
             mlworkloadlib
-            "$<BUILD_LOCAL_INTERFACE:glslang::glslang>"
-            "$<BUILD_LOCAL_INTERFACE:glslang::glslang-default-resource-limits>"
-            "$<BUILD_LOCAL_INTERFACE:glslang::SPIRV>"
+            ${ARGN}
     )
 
-    target_compile_options(mlworkloadlib_glsl_glslang_objects PRIVATE ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS})
+    target_compile_options(${object_target} PRIVATE ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS})
 
-    add_library(mlworkloadlib_glsl_glslang STATIC $<TARGET_OBJECTS:mlworkloadlib_glsl_glslang_objects>)
+    add_library(${target_name} STATIC $<TARGET_OBJECTS:${object_target}>)
 
-    target_sources(mlworkloadlib_glsl_glslang INTERFACE $<TARGET_OBJECTS:mlworkloadlib_glsl_glslang_objects>)
+    target_sources(${target_name} INTERFACE $<TARGET_OBJECTS:${object_target}>)
 
-    target_include_directories(mlworkloadlib_glsl_glslang
+    target_include_directories(${target_name}
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
-    target_link_libraries(mlworkloadlib_glsl_glslang
+    target_link_libraries(${target_name}
         PUBLIC
             mlworkloadlib
-            "$<BUILD_LOCAL_INTERFACE:glslang::glslang>"
-            "$<BUILD_LOCAL_INTERFACE:glslang::glslang-default-resource-limits>"
-            "$<BUILD_LOCAL_INTERFACE:glslang::SPIRV>"
+            ${ARGN}
     )
 
-    target_compile_options(mlworkloadlib_glsl_glslang PRIVATE ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS})
+    target_compile_options(${target_name} PRIVATE ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS})
+endfunction()
+
+if(ML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT)
+    mlworkloadlib_add_source_module_backend(mlworkloadlib_glsl_glslang src/internal/glsl_compiler.cpp
+        "$<BUILD_LOCAL_INTERFACE:glslang::glslang>"
+        "$<BUILD_LOCAL_INTERFACE:glslang::glslang-default-resource-limits>"
+        "$<BUILD_LOCAL_INTERFACE:glslang::SPIRV>"
+    )
 endif()
 
 if(ML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT)
-    add_library(mlworkloadlib_hlsl_dxc_objects OBJECT src/internal/hlsl_compiler.cpp)
-
-    target_include_directories(mlworkloadlib_hlsl_dxc_objects
-        PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/include
-            ${CMAKE_CURRENT_SOURCE_DIR}/src
-    )
-
-    target_link_libraries(mlworkloadlib_hlsl_dxc_objects
-        PRIVATE
-            mlworkloadlib
-            mlworkloadlib_dxc
+    mlworkloadlib_add_source_module_backend(mlworkloadlib_hlsl_dxc src/internal/hlsl_compiler.cpp
+        mlworkloadlib_dxc
     )
 
     target_compile_definitions(mlworkloadlib_hlsl_dxc_objects PRIVATE ML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT)
-    target_compile_options(mlworkloadlib_hlsl_dxc_objects PRIVATE ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS})
-
-    add_library(mlworkloadlib_hlsl_dxc STATIC $<TARGET_OBJECTS:mlworkloadlib_hlsl_dxc_objects>)
-
-    target_sources(mlworkloadlib_hlsl_dxc INTERFACE $<TARGET_OBJECTS:mlworkloadlib_hlsl_dxc_objects>)
-
-    target_include_directories(mlworkloadlib_hlsl_dxc
-        PUBLIC
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    )
-
-    target_link_libraries(mlworkloadlib_hlsl_dxc
-        PUBLIC
-            mlworkloadlib
-            mlworkloadlib_dxc
-    )
-
     target_compile_definitions(mlworkloadlib_hlsl_dxc INTERFACE ML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT)
-    target_compile_options(mlworkloadlib_hlsl_dxc PRIVATE ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS})
 endif()
 
 add_subdirectory(utils)

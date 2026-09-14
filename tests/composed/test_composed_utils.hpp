@@ -12,22 +12,14 @@
 
 #ifdef ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
 #    include "vgf/test_vgf_utils.hpp"
-
-#    include "vgf/encoder.hpp"
 #endif
 
 #include <vulkan/vulkan_core.h>
 
 #include <cstdint>
-#include <string>
-#include <string_view>
 #include <vector>
 
 namespace mlsdk::workloadlib::test {
-
-#ifdef ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
-inline const std::vector<mlsdk::vgflib::GraphConstantBindingRef> noGraphConstants;
-#endif
 
 inline DispatchShape dispatchForNhwcTensor(const std::vector<int64_t> &shape) {
     return {static_cast<uint32_t>(shape.at(1)), static_cast<uint32_t>(shape.at(2)), static_cast<uint32_t>(shape.at(3))};
@@ -108,91 +100,5 @@ inline DataGraphDescription makeMaxpool8x8To4x4Description() {
     };
     return description;
 }
-
-#ifdef ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
-inline std::string makeMaxpool16x16To8x8Vgf() {
-    const auto code = assembleMaxpool16x16To8x8Spirv("composed_vgf_maxpool_16x16_to_8x8", {0, 0, 1, 1});
-    return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
-        const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::GRAPH, "maxpool_16x16_to_8x8", "main", code);
-        const auto input =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 16, 16, 16}, {});
-        const auto output =
-            encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 8, 8, 16}, {});
-        const auto inputBinding = encoder.AddBindingSlot(0, input);
-        const auto outputBinding = encoder.AddBindingSlot(1, output);
-        const auto inputSet = encoder.AddDescriptorSetInfo({inputBinding}, 0);
-        const auto outputSet = encoder.AddDescriptorSetInfo({outputBinding}, 1);
-        encoder.AddSegmentInfo(module, "maxpool_graph_segment", {inputSet, outputSet}, {inputBinding}, {outputBinding},
-                               noGraphConstants);
-    });
-}
-
-inline std::string makeMaxpool8x8To4x4Vgf() {
-    const auto code = assembleMaxpool8x8To4x4Spirv("composed_vgf_maxpool_8x8_to_4x4", {0, 0, 1, 1});
-    return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
-        const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::GRAPH, "maxpool_8x8_to_4x4", "main", code);
-        const auto input =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 8, 8, 16}, {});
-        const auto output =
-            encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 4, 4, 16}, {});
-        const auto inputBinding = encoder.AddBindingSlot(0, input);
-        const auto outputBinding = encoder.AddBindingSlot(1, output);
-        const auto inputSet = encoder.AddDescriptorSetInfo({inputBinding}, 0);
-        const auto outputSet = encoder.AddDescriptorSetInfo({outputBinding}, 1);
-        encoder.AddSegmentInfo(module, "maxpool_graph_segment", {inputSet, outputSet}, {inputBinding}, {outputBinding},
-                               noGraphConstants);
-    });
-}
-
-inline std::string makeTwoSegmentMaxpoolVgf() {
-    const auto firstCode = assembleMaxpool16x16To8x8Spirv("composed_vgf_first_maxpool", {0, 0, 0, 1});
-    const auto secondCode = assembleMaxpool8x8To4x4Spirv("composed_vgf_second_maxpool", {0, 0, 0, 1});
-    return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
-        const auto firstModule =
-            encoder.AddModule(mlsdk::vgflib::ModuleType::GRAPH, "maxpool_16x16_to_8x8", "main", firstCode);
-        const auto secondModule =
-            encoder.AddModule(mlsdk::vgflib::ModuleType::GRAPH, "maxpool_8x8_to_4x4", "main", secondCode);
-
-        const auto input =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 16, 16, 16}, {});
-        const auto intermediate =
-            encoder.AddIntermediateResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 8, 8, 16}, {});
-        const auto output =
-            encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 4, 4, 16}, {});
-
-        const auto firstInputBinding = encoder.AddBindingSlot(0, input);
-        const auto firstOutputBinding = encoder.AddBindingSlot(1, intermediate);
-        const auto firstDescriptorSet = encoder.AddDescriptorSetInfo({firstInputBinding, firstOutputBinding}, 0);
-        encoder.AddSegmentInfo(firstModule, "first_graph_segment", {firstDescriptorSet}, {firstInputBinding},
-                               {firstOutputBinding}, noGraphConstants);
-
-        const auto secondInputBinding = encoder.AddBindingSlot(0, intermediate);
-        const auto secondOutputBinding = encoder.AddBindingSlot(1, output);
-        const auto secondDescriptorSet = encoder.AddDescriptorSetInfo({secondInputBinding, secondOutputBinding}, 0);
-        encoder.AddSegmentInfo(secondModule, "second_graph_segment", {secondDescriptorSet}, {secondInputBinding},
-                               {secondOutputBinding}, noGraphConstants);
-    });
-}
-
-inline std::string makeAddInt32BuffersVgf() {
-    const auto code = assembleAddInt32BuffersSpirv();
-    return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
-        const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "add_int32_buffers", "main", code);
-        const auto firstInput =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-        const auto secondInput =
-            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-
-        const auto firstInputBinding = encoder.AddBindingSlot(0, firstInput);
-        const auto secondInputBinding = encoder.AddBindingSlot(1, secondInput);
-        const auto outputBinding = encoder.AddBindingSlot(2, output);
-        const auto inputSet = encoder.AddDescriptorSetInfo({firstInputBinding, secondInputBinding}, 0);
-        const auto outputSet = encoder.AddDescriptorSetInfo({outputBinding}, 1);
-        encoder.AddSegmentInfo(module, "add_int32_buffers_segment", {inputSet, outputSet},
-                               {firstInputBinding, secondInputBinding}, {outputBinding}, noGraphConstants, {10, 1, 1});
-    });
-}
-#endif
 
 } // namespace mlsdk::workloadlib::test
