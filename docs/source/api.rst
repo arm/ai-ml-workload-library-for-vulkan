@@ -7,4 +7,3 @@ API reference
 .. doxygennamespace:: mlsdk::workloadlib
     :project: MLSDK
     :members:
-    :protected-members:

@@ -16,31 +16,49 @@ namespace mlsdk::workloadlib {
 class PreparedExecution;
 class Session;
 
-// Move-only resource bindings for a configured Session. Moving transfers the
-// recorded bindings and Session association; the moved-from BindingSet is
-// invalid. Session::prepare() snapshots the bindings. Bound Vulkan resources
-// must remain alive until submitted work completes.
+/**
+ * @brief Move-only resource bindings for a configured Session.
+ *
+ * Session::prepare() snapshots the bindings. Bound Vulkan objects are borrowed
+ * and must remain valid until submitted work completes.
+ */
 class BindingSet {
   public:
     /***************************************************************************
      * Lifetime
      **************************************************************************/
 
+    /** @brief Destroys the binding collection without destroying bound Vulkan objects. */
     ~BindingSet();
 
     BindingSet(const BindingSet &) = delete;
     BindingSet &operator=(const BindingSet &) = delete;
+
+    /** @brief Transfers the bindings and Session association from another instance. */
     BindingSet(BindingSet &&) noexcept;
+
+    /** @brief Replaces this instance with the bindings and Session association from another instance. */
     BindingSet &operator=(BindingSet &&) noexcept;
 
     /***************************************************************************
      * Resource binding
      **************************************************************************/
 
+    /** @brief Binds a tensor, replacing any binding for the same resource. */
     void bindTensor(ResourceView resource, TensorBindingInfo bindingInfo);
+
+    /** @brief Binds a storage buffer, replacing any binding for the same resource. */
     void bindBuffer(ResourceView resource, BufferBindingInfo bindingInfo);
+
+    /** @brief Binds an image, replacing any binding for the same resource. */
     void bindImage(ResourceView resource, ImageBindingInfo bindingInfo);
 
+    /**
+     * @brief Copies the workload push-constant payload into this binding set.
+     *
+     * @p size must match the Workload requirement. @p data may be null only
+     * when @p size is zero and does not need to remain valid after this call.
+     */
     void bindPushConstants(const void *data, std::size_t size);
 
   private:
