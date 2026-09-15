@@ -14,32 +14,38 @@ namespace mlsdk::workloadlib {
  * Binding metadata
  *******************************************************************************/
 
-// Memory backing information for an externally supplied Vulkan resource.
-// Required only when aliasing or runtime-created peer resources need compatible
-// memory.
+/**
+ * @brief Non-owning memory information for a bound Vulkan resource.
+ *
+ * Required when ResourceRequirementsView::requiresBoundMemoryInfo() is true.
+ */
 struct BoundMemoryInfo {
     vk::DeviceMemory memory = nullptr;
     vk::DeviceSize offset = 0;
     vk::DeviceSize size = 0;
 };
 
-// Tensor handle and optional memory information for tensor binding.
+/** @brief Tensor handle and optional memory information for tensor binding. */
 struct TensorBindingInfo {
     vk::TensorARM tensor = nullptr;
     BoundMemoryInfo memory{};
 };
 
-// Buffer handle and optional memory information for storage-buffer binding.
+/** @brief Buffer handle and optional memory information for storage-buffer binding. */
 struct BufferBindingInfo {
     vk::Buffer buffer = nullptr;
     BoundMemoryInfo memory{};
 };
 
-// Image descriptor and optional memory information for image binding. The
-// subresource range must match the image requirements for the bound resource.
-// If layout is set, PreparedExecution treats it as the current image layout and
-// records the transition to the workload-required descriptor layout before first
-// use. Otherwise image layout is caller-managed.
+/**
+ * @brief Image descriptor and optional memory information for image binding.
+ *
+ * The subresource range must match
+ * ImageRequirementsView::requiredSubresourceRange(). If @ref layout has a
+ * value, PreparedExecution transitions the image from that layout to
+ * ImageRequirementsView::requiredLayout() before its first workload use. If it
+ * has no value, image layout transitions remain the caller's responsibility.
+ */
 struct ImageBindingInfo {
     vk::Image image = nullptr;
     BoundMemoryInfo memory{};

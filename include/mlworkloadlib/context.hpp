@@ -23,8 +23,14 @@ class Session;
  * Context metadata
  *******************************************************************************/
 
-// Non-owning Vulkan object bundle used by Context::wrap().
+/**
+ * @brief Application-owned Vulkan objects that can be borrowed by a Context.
+ *
+ * The objects must belong to the same device and remain valid while used by
+ * the Context or its dependent objects.
+ */
 struct ContextView {
+    /** @brief Constructs a view over caller-owned Vulkan objects. */
     ContextView(const vk::raii::Instance &instance, const vk::raii::PhysicalDevice &physicalDevice,
                 const vk::raii::Device &device, uint32_t queueFamilyIndex, const vk::raii::Queue &queue)
         : instance(instance), physicalDevice(physicalDevice), device(device), queue(queue),
@@ -37,8 +43,17 @@ struct ContextView {
     uint32_t queueFamilyIndex = 0;
 };
 
+/**
+ * @brief Additional requirements for a runtime-owned Context.
+ *
+ * Context::create() combines these requirements with the extensions and
+ * features required by the library itself. Extension names and the feature
+ * chain are borrowed for the duration of the call. These requirements do not
+ * apply to Context::wrap().
+ */
 struct RuntimeContextDeviceRequirements {
     std::vector<const char *> requiredDeviceExtensions;
+
     void *deviceFeaturePNext = nullptr;
 };
 
@@ -46,14 +61,25 @@ struct RuntimeContextDeviceRequirements {
  * Runtime-owned allocations
  *******************************************************************************/
 
-// Runtime-owned resource allocation and backing memory.
+/**
+ * @brief Base class for a Vulkan resource and memory owned by the runtime.
+ *
+ * Allocations are move-only. Destroying an allocation releases its resource
+ * and backing memory; therefore it must outlive any BindingSet or
+ * PreparedExecution that borrows its handles.
+ */
 class RuntimeAllocation {
   public:
+    /** @brief Returns the resource's backing-memory range. */
     BoundMemoryInfo memory() const;
 
     RuntimeAllocation(const RuntimeAllocation &) = delete;
     RuntimeAllocation &operator=(const RuntimeAllocation &) = delete;
+
+    /** @brief Transfers ownership from another allocation. */
     RuntimeAllocation(RuntimeAllocation &&) noexcept;
+
+    /** @brief Replaces this allocation with ownership transferred from another allocation. */
     RuntimeAllocation &operator=(RuntimeAllocation &&) noexcept;
 
   protected:
@@ -73,9 +99,10 @@ class RuntimeAllocation {
     std::unique_ptr<Impl> impl_;
 };
 
-// RAII tensor and backing memory allocated by a runtime-owned Context.
+/** @brief Runtime-owned tensor and its backing memory. */
 class TensorAllocation final : public RuntimeAllocation {
   public:
+    /** @brief Returns the owned tensor handle. */
     vk::TensorARM handle() const;
 
   private:
@@ -93,9 +120,10 @@ class TensorAllocation final : public RuntimeAllocation {
     const Impl *tensorAllocationImpl() const noexcept;
 };
 
-// RAII buffer and backing memory allocated by a runtime-owned Context.
+/** @brief Runtime-owned storage buffer and its backing memory. */
 class BufferAllocation final : public RuntimeAllocation {
   public:
+    /** @brief Returns the owned buffer handle. */
     vk::Buffer handle() const;
 
   private:
@@ -113,11 +141,18 @@ class BufferAllocation final : public RuntimeAllocation {
     const Impl *bufferAllocationImpl() const noexcept;
 };
 
-// RAII image, view, and backing memory allocated by a runtime-owned Context.
+/** @brief Runtime-owned image, image view, and backing memory. */
 class ImageAllocation final : public RuntimeAllocation {
   public:
+    /** @brief Returns the owned image handle. */
     vk::Image handle() const;
 
+    /**
+     * @brief Returns binding information that borrows this allocation.
+     *
+     * The returned handles remain valid only while this allocation remains alive
+     * and has not been moved from.
+     */
     ImageBindingInfo binding() const;
 
   private:
@@ -135,19 +170,29 @@ class ImageAllocation final : public RuntimeAllocation {
     const Impl *imageAllocationImpl() const noexcept;
 };
 
-// Vulkan context used by the runtime.
+/**
+ * @brief Provides the Vulkan device and queue used by workload sessions.
+ *
+ * A Context either owns objects created by create() or borrows objects passed
+ * to wrap(). It must outlive dependent Sessions and allocations.
+ */
 class Context {
   public:
     /***************************************************************************
      * Creation and lifetime
      **************************************************************************/
 
-    // Create a runtime-owned Vulkan context.
+    /** @brief Creates a Context that owns its Vulkan instance, device, and queue. */
     static Context create(const RuntimeContextDeviceRequirements &deviceRequirements = {});
 
-    // Wrap caller-owned Vulkan objects without taking ownership.
+    /**
+     * @brief Creates a Context that borrows application-owned Vulkan objects.
+     *
+     * Enabled extensions and features are not validated.
+     */
     static Context wrap(ContextView contextView);
 
+    /** @brief Destroys owned Vulkan objects or releases references to wrapped objects. */
     ~Context();
 
     Context(const Context &) = delete;
@@ -159,16 +204,20 @@ class Context {
      * Metadata
      **************************************************************************/
 
-    // Return borrowed Vulkan objects used by this Context.
+    /** @brief Returns a non-owning view of this Context's Vulkan objects. */
     ContextView contextView() const;
 
     /***************************************************************************
      * Runtime-owned allocation
      **************************************************************************/
 
-    // Allocate workload-compatible runtime-owned resources.
+    /** @brief Allocates a host-visible tensor compatible with a workload resource. */
     TensorAllocation createTensor(ResourceView resource) const;
+
+    /** @brief Allocates a host-visible buffer compatible with a workload resource. */
     BufferAllocation createBuffer(ResourceView resource) const;
+
+    /** @brief Allocates a device-local image compatible with a workload resource. */
     ImageAllocation createImage(ResourceView resource) const;
 
   private:

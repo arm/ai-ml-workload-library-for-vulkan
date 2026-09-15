@@ -21,15 +21,22 @@ namespace mlsdk::workloadlib {
  * Session
  *******************************************************************************/
 
-// Configured runtime state for a Workload on a Context.
+/**
+ * @brief Configured runtime state for a Workload on a Context.
+ *
+ * Context and Workload are borrowed and must outlive the Session. Bind any
+ * placeholder modules before calling configure().
+ */
 class Session final {
   public:
     /***************************************************************************
      * Creation and lifetime
      **************************************************************************/
 
+    /** @brief Creates an unconfigured Session for a Workload and Context. */
     Session(Context &context, const Workload &workload);
 
+    /** @brief Releases pipelines, command state, and other device-specific session state. */
     ~Session();
 
     Session(const Session &) = delete;
@@ -41,20 +48,20 @@ class Session final {
      * Configuration
      **************************************************************************/
 
-    // Provide implementation for a workload module with missing code.
+    /** @brief Supplies or replaces the implementation for a placeholder module. */
     void bindModule(PlaceholderModuleView placeholderModule, ModuleImplementation implementation);
 
-    // Build reusable device-specific state for this session.
+    /** @brief Builds reusable device-specific state for every executable. */
     void configure();
 
     /***************************************************************************
      * Factories
      **************************************************************************/
 
-    // Create mutable resource bindings for this session.
+    /** @brief Creates an empty BindingSet associated with this Session. */
     BindingSet createBindingSet();
 
-    // Snapshot bindings and create a prepared execution.
+    /** @brief Validates and snapshots bindings for execution. */
     PreparedExecution prepare(const BindingSet &bindings);
 
   private:

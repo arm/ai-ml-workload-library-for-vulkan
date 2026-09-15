@@ -13,28 +13,43 @@ namespace mlsdk::workloadlib {
 
 class Session;
 
-// Prepared binding snapshot that can run directly or record into a command buffer.
+/**
+ * @brief Prepared binding snapshot that can run or record a workload.
+ *
+ * The Session and bound Vulkan objects must remain valid until submitted work
+ * completes. PreparedExecution is move-only.
+ */
 class PreparedExecution {
   public:
     /***************************************************************************
      * Lifetime
      **************************************************************************/
 
+    /** @brief Releases descriptor state and runtime-created execution resources. */
     ~PreparedExecution();
 
     PreparedExecution(const PreparedExecution &) = delete;
     PreparedExecution &operator=(const PreparedExecution &) = delete;
+
+    /** @brief Transfers the prepared state from another instance. */
     PreparedExecution(PreparedExecution &&) noexcept;
+
+    /** @brief Replaces this object with prepared state transferred from another instance. */
     PreparedExecution &operator=(PreparedExecution &&) noexcept;
 
     /***************************************************************************
      * Execution
      **************************************************************************/
 
-    // Record, submit, and wait using runtime-owned command-buffer state.
+    /** @brief Records, submits, and waits for one workload execution. */
     void run();
 
-    // Record workload commands into a caller-owned command buffer.
+    /**
+     * @brief Records workload commands into a caller-owned command buffer.
+     *
+     * @p commandBuffer must be recording and compatible with the Context queue
+     * family. The caller ends, submits, and synchronizes the command buffer.
+     */
     void record(vk::CommandBuffer commandBuffer);
 
   private:
