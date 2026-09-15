@@ -26,9 +26,6 @@
 
 namespace mlsdk::workloadlib {
 
-namespace utils = detail::utils;
-namespace vulkan_helpers = detail::vulkan_helpers;
-
 using DescriptorBinding = detail::DescriptorBinding;
 using Resource = detail::Resource;
 
@@ -156,6 +153,16 @@ namespace {
  * Internal helpers
  *******************************************************************************/
 
+template <typename Container, typename Predicate>
+std::optional<std::reference_wrapper<const typename Container::value_type>> findRefIf(const Container &container,
+                                                                                      Predicate predicate) {
+    const auto it = std::find_if(container.begin(), container.end(), predicate);
+    if (it == container.end()) {
+        return std::nullopt;
+    }
+    return std::cref(*it);
+}
+
 void waitForFence(const vk::raii::Device &device, const vk::raii::Fence &fence) {
     const auto result = device.waitForFences(*fence, true, std::numeric_limits<uint64_t>::max());
     if (result != vk::Result::eSuccess) {
@@ -185,12 +192,13 @@ vk::SamplerCreateInfo makeSamplerCreateInfo(const Resource::ImageMetadata::Sampl
 vk::ImageSubresourceRange defaultImageSubresourceRange() { return {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}; }
 
 vk::ImageLayout requiredImageLayout(const Workload &workload, const DescriptorBinding &descBinding) {
-    const auto &resource = workloadImpl(workload).resources.at(descBinding.resourceIndex);
+    const auto &workloadState = workloadImpl(workload);
+    const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
     const auto layout = detail::imageMetadata(resource).layout;
     if (layout != vk::ImageLayout::eUndefined) {
         return layout;
     }
-    return vulkan_helpers::imageLayout(utils::descriptorType(workload, descBinding));
+    return detail::imageLayout(workloadState.descriptorTypeForBinding(descBinding));
 }
 
 template <typename RuntimeResource>
@@ -216,8 +224,8 @@ void bindResourceMemory(const ContextView &contextView, RuntimeResource &resourc
 
 vk::raii::DeviceMemory allocateDeviceLocalMemory(const ContextView &contextView,
                                                  const vk::MemoryRequirements &memoryRequirements) {
-    const auto memoryType = vulkan_helpers::findMemoryType(
-        contextView.physicalDevice.get(), memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    const auto memoryType = detail::findMemoryType(contextView.physicalDevice.get(), memoryRequirements.memoryTypeBits,
+                                                   vk::MemoryPropertyFlagBits::eDeviceLocal);
     return {contextView.device.get(), vk::MemoryAllocateInfo(memoryRequirements.size, memoryType)};
 }
 
@@ -226,11 +234,12 @@ vk::raii::DeviceMemory allocateDeviceLocalMemory(const ContextView &contextView,
  *******************************************************************************/
 
 DescriptorBinding descBindingForResource(const Workload &workload, uint32_t resourceIndex) {
-    const auto &resource = workloadImpl(workload).resources.at(resourceIndex);
+    const auto &workloadState = workloadImpl(workload);
+    const auto &resource = workloadState.resources.at(resourceIndex);
     if (!resource.descriptorType.has_value()) {
         throw std::runtime_error("Public resource has no descriptor type");
     }
-    return {resourceIndex, 0, 0, utils::resourceAccess(workload, resourceIndex)};
+    return {resourceIndex, 0, 0, workloadState.resourceAccess(resourceIndex)};
 }
 
 void validateBoundMemoryInfo(const Workload &workload, uint32_t resourceIndex, BoundMemoryInfo boundMemInfo) {
@@ -244,11 +253,11 @@ void validateBoundMemoryInfo(const Workload &workload, uint32_t resourceIndex, B
 template <typename BoundResources>
 const typename BoundResources::value_type &findBoundResource(const BoundResources &boundResources,
                                                              uint32_t resourceIndex, ResourceKind resourceKind) {
-    const auto boundResource = utils::findRefIf(boundResources, [resourceIndex](const auto &resource) {
+    const auto boundResource = findRefIf(boundResources, [resourceIndex](const auto &resource) {
         return resource.descBinding.resourceIndex == resourceIndex;
     });
     if (!boundResource.has_value()) {
-        throw std::runtime_error("No " + std::string(utils::resourceKindName(resourceKind)) +
+        throw std::runtime_error("No " + std::string(detail::resourceKindName(resourceKind)) +
                                  " bound for workload resource " + std::to_string(resourceIndex));
     }
     return boundResource->get();
@@ -272,19 +281,21 @@ vk::raii::TensorARM createIntermediateTensor(const Workload &workload, const Con
 vk::raii::Buffer createIntermediateBuffer(const Workload &workload, const ContextView &contextView,
                                           const DescriptorBinding &descBinding) {
     const auto &resource = workloadImpl(workload).resources.at(descBinding.resourceIndex);
-    const vk::BufferCreateInfo createInfo({}, vulkan_helpers::resourceByteSize(resource),
-                                          vk::BufferUsageFlagBits::eStorageBuffer);
+    const auto byteSize = detail::storageBufferByteSize(detail::bufferMetadata(resource).byteSize, resource.format,
+                                                        resource.shape, resource.stride);
+    const vk::BufferCreateInfo createInfo({}, byteSize, vk::BufferUsageFlagBits::eStorageBuffer);
     return {contextView.device.get(), createInfo};
 }
 
 vk::raii::Image createIntermediateImage(const Workload &workload, const ContextView &contextView,
                                         const DescriptorBinding &descBinding, bool forAliasing) {
-    const auto &resource = workloadImpl(workload).resources.at(descBinding.resourceIndex);
-    const auto descriptorType = utils::descriptorType(workload, descBinding);
-    const vk::ImageCreateInfo createInfo(
-        {}, vk::ImageType::e2D, resource.format, vulkan_helpers::imageExtentFromMetadata(resource), 1, 1,
-        vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal, vulkan_helpers::imageUsage(descriptorType, forAliasing),
-        vk::SharingMode::eExclusive, {}, vk::ImageLayout::eUndefined);
+    const auto &workloadState = workloadImpl(workload);
+    const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
+    const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
+    const vk::ImageCreateInfo createInfo({}, vk::ImageType::e2D, resource.format, resource.imageExtent(), 1, 1,
+                                         vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal,
+                                         detail::imageUsage(descriptorType, forAliasing), vk::SharingMode::eExclusive,
+                                         {}, vk::ImageLayout::eUndefined);
     return {contextView.device.get(), createInfo};
 }
 
@@ -361,7 +372,7 @@ void PreparedExecution::Impl::addBindingSetResources(const BindingSet::Impl &bin
 }
 
 void PreparedExecution::Impl::addBoundPushConstants(const BindingSet::Impl &bindingState) {
-    const auto requiredSize = utils::requiredPushConstantSize(sessionImpl.workload);
+    const auto requiredSize = workloadImpl(sessionImpl.workload).requiredPushConstantSize();
     const auto providedSize = bindingState.pushConstants.size();
     if (providedSize == requiredSize) {
         pushConstants = bindingState.pushConstants;
@@ -387,9 +398,9 @@ void PreparedExecution::Impl::addBoundBuffer(BufferBindingInfo bufferBindingInfo
 }
 
 void PreparedExecution::Impl::addBoundImage(ImageBindingInfo imageBindingInfo, DescriptorBinding descBinding) {
-    const auto &resource = workloadImpl(sessionImpl.workload).resources.at(descBinding.resourceIndex);
-    vulkan_helpers::validateImageFormat(resource.format);
-    const auto descriptorType = utils::descriptorType(sessionImpl.workload, descBinding);
+    const auto &workloadState = workloadImpl(sessionImpl.workload);
+    const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
+    const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
 
     auto subresourceRange = imageBindingInfo.subresourceRange;
     if (!subresourceRange.aspectMask) {
@@ -424,8 +435,9 @@ void PreparedExecution::Impl::addBoundImage(ImageBindingInfo imageBindingInfo, D
 
 void PreparedExecution::Impl::resolveUnaliasedIntermediateAllocations(
     const std::vector<DescriptorBinding> &descBindings) {
+    const auto &workloadState = workloadImpl(sessionImpl.workload);
     for (const auto &descBinding : descBindings) {
-        const auto descriptorType = utils::descriptorType(sessionImpl.workload, descBinding);
+        const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
         switch (descriptorType) {
         case vk::DescriptorType::eTensorARM:
             resolveUnaliasedIntermediateTensor(descBinding);
@@ -502,7 +514,7 @@ PreparedExecution::Impl::findExistingAliasGroupBindings(uint32_t aliasGroupId) c
     const auto &workload = sessionImpl.workload;
     const auto findBoundResourceInAliasGroup = [&workload, aliasGroupId](auto &existingBinding,
                                                                          const auto &boundResources) {
-        existingBinding = utils::findRefIf(boundResources, [&workload, aliasGroupId](const auto &boundResource) {
+        existingBinding = findRefIf(boundResources, [&workload, aliasGroupId](const auto &boundResource) {
             const auto &resource = workloadImpl(workload).resources.at(boundResource.descBinding.resourceIndex);
             return resource.aliasGroupId.has_value() && *resource.aliasGroupId == aliasGroupId;
         });
@@ -527,8 +539,9 @@ PreparedExecution::Impl::findExistingAliasGroupBindings(uint32_t aliasGroupId) c
 void PreparedExecution::Impl::resolveAliasGroupBinding(const DescriptorBinding &descBinding,
                                                        const ExistingAliasGroupBindings &existingBindings,
                                                        PendingAliasGroupAllocation &pendingAllocation) {
-    const auto &resource = workloadImpl(sessionImpl.workload).resources.at(descBinding.resourceIndex);
-    const auto descriptorType = utils::descriptorType(sessionImpl.workload, descBinding);
+    const auto &workloadState = workloadImpl(sessionImpl.workload);
+    const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
+    const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
     if (resource.role != Resource::Role::Intermediate) {
         addExistingAliasBinding(descBinding, descriptorType, existingBindings);
         return;
@@ -698,7 +711,7 @@ void PreparedExecution::Impl::createDescriptorSets() {
         std::map<vk::DescriptorType, uint32_t> descriptorCounts;
         const auto &executable = workloadState.executables.at(executableState.executableIndex);
         for (const auto &descBinding : executable.bindings) {
-            ++descriptorCounts[utils::descriptorType(sessionImpl.workload, descBinding)];
+            ++descriptorCounts[workloadState.descriptorTypeForBinding(descBinding)];
         }
         std::vector<vk::DescriptorPoolSize> poolSizes;
         poolSizes.reserve(descriptorCounts.size());
@@ -709,7 +722,7 @@ void PreparedExecution::Impl::createDescriptorSets() {
             vk::raii::DescriptorPool(sessionImpl.contextView.device.get(),
                                      {vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
                                       static_cast<uint32_t>(executableState.descriptorSetLayouts.size()), poolSizes});
-        const auto descriptorSetLayouts = vulkan_helpers::rawLayouts(executableState.descriptorSetLayouts);
+        const auto descriptorSetLayouts = detail::rawDescriptorSetLayouts(executableState.descriptorSetLayouts);
         const vk::DescriptorSetAllocateInfo allocateInfo(*descriptors.descriptorPool, descriptorSetLayouts);
         descriptors.descriptorSets = sessionImpl.contextView.device.get().allocateDescriptorSets(allocateInfo);
     }
@@ -723,7 +736,7 @@ void PreparedExecution::Impl::writeDescriptors() const {
         const auto &executable = workloadState.executables.at(executableState.executableIndex);
 
         for (const auto &descBinding : executable.bindings) {
-            const auto descriptorType = utils::descriptorType(sessionImpl.workload, descBinding);
+            const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
             switch (descriptorType) {
             case vk::DescriptorType::eTensorARM: {
                 const auto &tensor = findBoundResource(boundTensors, descBinding.resourceIndex, ResourceKind::Tensor);
@@ -803,9 +816,9 @@ void PreparedExecution::Impl::insertInitialImageLayoutTransitions(vk::CommandBuf
         imageBarrier.srcAccessMask =
             oldLayout == vk::ImageLayout::eUndefined ? vk::AccessFlags2{} : vk::AccessFlagBits2::eMemoryWrite;
         const auto firstConsumerType = workloadState.executables.at(firstConsumerExecutableIt->executableIndex).type;
-        const auto descriptorType = utils::descriptorType(sessionImpl.workload, boundImage.descBinding);
-        imageBarrier.dstStageMask = vulkan_helpers::pipelineStage(firstConsumerType);
-        imageBarrier.dstAccessMask = vulkan_helpers::imageAccess(firstConsumerType, descriptorType);
+        const auto descriptorType = workloadState.descriptorTypeForBinding(boundImage.descBinding);
+        imageBarrier.dstStageMask = detail::pipelineStage(firstConsumerType);
+        imageBarrier.dstAccessMask = detail::imageAccess(firstConsumerType, descriptorType);
         imageBarrier.oldLayout = oldLayout;
         imageBarrier.newLayout = descriptorLayout;
         imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -867,11 +880,10 @@ void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandB
             }
 
             vk::MemoryBarrier2 memoryBarrier;
-            memoryBarrier.srcStageMask = vulkan_helpers::pipelineStage(producerType);
-            memoryBarrier.srcAccessMask = vulkan_helpers::writeAccess(producerType);
-            memoryBarrier.dstStageMask = vulkan_helpers::pipelineStage(consumerType);
-            memoryBarrier.dstAccessMask =
-                vulkan_helpers::readAccess(consumerType) | vulkan_helpers::writeAccess(consumerType);
+            memoryBarrier.srcStageMask = detail::pipelineStage(producerType);
+            memoryBarrier.srcAccessMask = detail::writeAccess(producerType);
+            memoryBarrier.dstStageMask = detail::pipelineStage(consumerType);
+            memoryBarrier.dstAccessMask = detail::readAccess(consumerType) | detail::writeAccess(consumerType);
 
             memoryBarriers.push_back(memoryBarrier);
             barrierAliasGroupIds.push_back(*resource.aliasGroupId);
@@ -879,16 +891,15 @@ void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandB
         }
 
         // Resource-specific barrier
-        const auto descriptorType = utils::descriptorType(sessionImpl.workload, producerBinding);
+        const auto descriptorType = workloadState.descriptorTypeForBinding(producerBinding);
         switch (descriptorType) {
         case vk::DescriptorType::eTensorARM: {
             const auto &tensor = findBoundResource(boundTensors, producerBinding.resourceIndex, ResourceKind::Tensor);
             vk::TensorMemoryBarrierARM tensorBarrier;
-            tensorBarrier.srcStageMask = vulkan_helpers::pipelineStage(producerType);
-            tensorBarrier.srcAccessMask = vulkan_helpers::writeAccess(producerType);
-            tensorBarrier.dstStageMask = vulkan_helpers::pipelineStage(consumerType);
-            tensorBarrier.dstAccessMask =
-                vulkan_helpers::readAccess(consumerType) | vulkan_helpers::writeAccess(consumerType);
+            tensorBarrier.srcStageMask = detail::pipelineStage(producerType);
+            tensorBarrier.srcAccessMask = detail::writeAccess(producerType);
+            tensorBarrier.dstStageMask = detail::pipelineStage(consumerType);
+            tensorBarrier.dstAccessMask = detail::readAccess(consumerType) | detail::writeAccess(consumerType);
             tensorBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             tensorBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             tensorBarrier.tensor = tensor.tensor;
@@ -901,11 +912,10 @@ void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandB
             const auto &buffer =
                 findBoundResource(boundBuffers, producerBinding.resourceIndex, ResourceKind::StorageBuffer);
             vk::BufferMemoryBarrier2 bufferBarrier;
-            bufferBarrier.srcStageMask = vulkan_helpers::pipelineStage(producerType);
-            bufferBarrier.srcAccessMask = vulkan_helpers::writeAccess(producerType);
-            bufferBarrier.dstStageMask = vulkan_helpers::pipelineStage(consumerType);
-            bufferBarrier.dstAccessMask =
-                vulkan_helpers::readAccess(consumerType) | vulkan_helpers::writeAccess(consumerType);
+            bufferBarrier.srcStageMask = detail::pipelineStage(producerType);
+            bufferBarrier.srcAccessMask = detail::writeAccess(producerType);
+            bufferBarrier.dstStageMask = detail::pipelineStage(consumerType);
+            bufferBarrier.dstAccessMask = detail::readAccess(consumerType) | detail::writeAccess(consumerType);
             bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             bufferBarrier.buffer = buffer.buffer;
@@ -921,11 +931,10 @@ void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandB
             const auto &image = findBoundResource(boundImages, producerBinding.resourceIndex, ResourceKind::Image);
             const auto descriptorLayout = requiredImageLayout(sessionImpl.workload, producerBinding);
             vk::ImageMemoryBarrier2 imageBarrier;
-            imageBarrier.srcStageMask = vulkan_helpers::pipelineStage(producerType);
-            imageBarrier.srcAccessMask = vulkan_helpers::writeAccess(producerType);
-            imageBarrier.dstStageMask = vulkan_helpers::pipelineStage(consumerType);
-            imageBarrier.dstAccessMask =
-                vulkan_helpers::readAccess(consumerType) | vulkan_helpers::writeAccess(consumerType);
+            imageBarrier.srcStageMask = detail::pipelineStage(producerType);
+            imageBarrier.srcAccessMask = detail::writeAccess(producerType);
+            imageBarrier.dstStageMask = detail::pipelineStage(consumerType);
+            imageBarrier.dstAccessMask = detail::readAccess(consumerType) | detail::writeAccess(consumerType);
             imageBarrier.oldLayout = descriptorLayout;
             imageBarrier.newLayout = descriptorLayout;
             imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -994,7 +1003,7 @@ void PreparedExecution::Impl::record(vk::CommandBuffer commandBuffer) {
         const auto &executableState = sessionState.executableStates[executableIndex];
         const auto &executable = workloadState.executables.at(executableState.executableIndex);
         const auto &descriptors = descriptorSetStates[executableIndex];
-        const auto pipelineBindPoint = vulkan_helpers::bindPoint(executable.type);
+        const auto pipelineBindPoint = detail::pipelineBindPoint(executable.type);
         for (uint32_t set = 0; set < static_cast<uint32_t>(descriptors.descriptorSets.size()); ++set) {
             auto *const descriptorSet = static_cast<VkDescriptorSet>(*descriptors.descriptorSets[set]);
             dispatcher->vkCmdBindDescriptorSets(

@@ -8,75 +8,16 @@
 
 #include "mlworkloadlib/binding_types.hpp"
 
-#include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
 namespace mlsdk::workloadlib::test {
-
-/*******************************************************************************
- * Mapped device memory helpers
- *******************************************************************************/
-
-class MappedDeviceMemory {
-  public:
-    MappedDeviceMemory(const vk::raii::Device &device, BoundMemoryInfo memory) : device_(device), memory_(memory) {
-        const auto mapResult = static_cast<vk::Result>(device_.getDispatcher()->vkMapMemory(
-            static_cast<VkDevice>(*device_), static_cast<VkDeviceMemory>(memory_.memory), memory_.offset, memory_.size,
-            0, &data_));
-        if (mapResult != vk::Result::eSuccess) {
-            throw std::runtime_error("vkMapMemory failed");
-        }
-    }
-
-    ~MappedDeviceMemory() {
-        device_.getDispatcher()->vkUnmapMemory(static_cast<VkDevice>(*device_),
-                                               static_cast<VkDeviceMemory>(memory_.memory));
-    }
-
-    MappedDeviceMemory(const MappedDeviceMemory &) = delete;
-    MappedDeviceMemory &operator=(const MappedDeviceMemory &) = delete;
-    MappedDeviceMemory(MappedDeviceMemory &&) = delete;
-    MappedDeviceMemory &operator=(MappedDeviceMemory &&) = delete;
-
-    void *data() const noexcept { return data_; }
-
-  private:
-    const vk::raii::Device &device_;
-    BoundMemoryInfo memory_;
-    void *data_ = nullptr;
-};
-
-inline void validateMappedMemoryAccess(BoundMemoryInfo memory, vk::DeviceSize byteSize, const char *errorMessage) {
-    if (memory.memory == nullptr || byteSize > memory.size) {
-        throw std::runtime_error(errorMessage);
-    }
-}
-
-template <typename T>
-inline void writeMappedMemory(const vk::raii::Device &device, BoundMemoryInfo memory, const std::vector<T> &values) {
-    const auto byteSize = static_cast<vk::DeviceSize>(values.size() * sizeof(T));
-    validateMappedMemoryAccess(memory, byteSize, "Mapped memory write exceeds allocation size");
-    const MappedDeviceMemory mappedMemory(device, memory);
-    std::memset(mappedMemory.data(), 0, static_cast<std::size_t>(memory.size));
-    std::copy(values.begin(), values.end(), static_cast<T *>(mappedMemory.data()));
-}
-
-template <typename T>
-inline std::vector<T> readMappedMemory(const vk::raii::Device &device, BoundMemoryInfo memory, std::size_t elements) {
-    const auto byteSize = static_cast<vk::DeviceSize>(elements * sizeof(T));
-    validateMappedMemoryAccess(memory, byteSize, "Mapped memory read exceeds allocation size");
-    const MappedDeviceMemory mappedMemory(device, memory);
-    const auto *begin = static_cast<const T *>(mappedMemory.data());
-    return {begin, begin + elements};
-}
 
 /*******************************************************************************
  * Vulkan test resources
@@ -95,7 +36,7 @@ struct Tensor {
         const auto memoryRequirements =
             device.getTensorMemoryRequirementsARM(vk::TensorMemoryRequirementsInfoARM(*tensor));
         memorySize = memoryRequirements.memoryRequirements.size;
-        const auto memoryType = detail::vulkan_helpers::findMemoryType(
+        const auto memoryType = detail::findMemoryType(
             physicalDevice, memoryRequirements.memoryRequirements.memoryTypeBits,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
         memory = vk::raii::DeviceMemory(device, {memorySize, memoryType});
@@ -105,7 +46,7 @@ struct Tensor {
     std::size_t numElements() const { return Tensor::numElements(shape); }
 
     static std::size_t numElements(const std::vector<int64_t> &shape) {
-        return static_cast<std::size_t>(detail::utils::elementCount(shape));
+        return static_cast<std::size_t>(detail::elementCount(shape));
     }
 
     void fill(int8_t value, std::size_t elements) const {
@@ -141,9 +82,9 @@ struct Buffer {
         : buffer(device, vk::BufferCreateInfo({}, size, vk::BufferUsageFlagBits::eStorageBuffer)) {
         const auto memoryRequirements = buffer.getMemoryRequirements();
         memorySize = memoryRequirements.size;
-        const auto memoryType = detail::vulkan_helpers::findMemoryType(
-            physicalDevice, memoryRequirements.memoryTypeBits,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+        const auto memoryType = detail::findMemoryType(physicalDevice, memoryRequirements.memoryTypeBits,
+                                                       vk::MemoryPropertyFlagBits::eHostVisible |
+                                                           vk::MemoryPropertyFlagBits::eHostCoherent);
         memory = vk::raii::DeviceMemory(device, {memorySize, memoryType});
         buffer.bindMemory(*memory, 0);
     }
@@ -176,8 +117,8 @@ struct Image {
                                             vk::SharingMode::eExclusive)) {
         const auto memoryRequirements = image.getMemoryRequirements();
         memorySize = memoryRequirements.size;
-        const auto memoryType = detail::vulkan_helpers::findMemoryType(
-            physicalDevice, memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+        const auto memoryType = detail::findMemoryType(physicalDevice, memoryRequirements.memoryTypeBits,
+                                                       vk::MemoryPropertyFlagBits::eDeviceLocal);
         memory = vk::raii::DeviceMemory(device, {memorySize, memoryType});
         image.bindMemory(*memory, 0);
 

@@ -17,8 +17,6 @@
 
 namespace mlsdk::workloadlib {
 
-namespace utils = detail::utils;
-
 namespace {
 
 /*******************************************************************************
@@ -36,8 +34,8 @@ void validateBindingResource(const Workload &sessionWorkload, const Workload *re
     }
     if (resourceKind != expectedKind) {
         throw std::runtime_error(bindingError(
-            bindingKind, "workload resource kind " + std::string(utils::resourceKindName(resourceKind)) +
-                             " does not match expected " + std::string(utils::resourceKindName(expectedKind))));
+            bindingKind, "workload resource kind " + std::string(detail::resourceKindName(resourceKind)) +
+                             " does not match expected " + std::string(detail::resourceKindName(expectedKind))));
     }
 }
 
@@ -136,7 +134,7 @@ void BindingSet::bindPushConstants(const void *data, std::size_t size) {
         throw std::runtime_error("Push constant payload is null");
     }
 
-    const auto requiredSize = detail::utils::requiredPushConstantSize(bindingSetState->workload);
+    const auto requiredSize = workloadImpl(bindingSetState->workload).requiredPushConstantSize();
     if (size != requiredSize) {
         throw std::runtime_error("Push constant payload size does not match workload requirements");
     }

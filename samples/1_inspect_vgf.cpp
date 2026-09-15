@@ -5,56 +5,21 @@
 
 #include "sample_utils.hpp"
 
+#include "mlworkloadlib_utils/workload_metadata.hpp"
+
 #include <exception>
 #include <iostream>
-#include <string_view>
 
 namespace {
 
 using namespace mlsdk::workloadlib;
 using namespace mlsdk::workloadlib::samples;
 
-std::string_view resourceKindName(ResourceKind kind) {
-    switch (kind) {
-    case ResourceKind::Tensor:
-        return "tensor";
-    case ResourceKind::StorageBuffer:
-        return "storage buffer";
-    case ResourceKind::Image:
-        return "image";
-    case ResourceKind::Unknown:
-        return "unknown";
-    }
-    return "unknown";
-}
-
-std::string_view accessName(ResourceAccess access) {
-    switch (access) {
-    case ResourceAccess::Read:
-        return "read";
-    case ResourceAccess::Write:
-        return "write";
-    case ResourceAccess::ReadWrite:
-        return "read/write";
-    }
-    return "unknown";
-}
-
-std::string_view executableKindName(ExecutableKind kind) {
-    switch (kind) {
-    case ExecutableKind::Graph:
-        return "data graph";
-    case ExecutableKind::Compute:
-        return "compute";
-    }
-    return "unknown";
-}
-
 // [resource-inspection-begin]
 void printResource(ResourceView resource) {
     const auto requirements = resource.requirements();
-    std::cout << "  [" << resource.index() << "] " << resource.name() << ": " << resourceKindName(requirements.kind())
-              << ", " << accessName(resource.access());
+    std::cout << "  [" << resource.index() << "] " << resource.name() << ": "
+              << utils::resourceKindName(requirements.kind()) << ", " << utils::accessName(resource.access());
 
     switch (requirements.kind()) {
     case ResourceKind::Tensor: {
@@ -85,13 +50,13 @@ void printResource(ResourceView resource) {
 void printExecutable(ExecutableView executable) {
     const auto module = executable.module();
     std::cout << "  [" << executable.index() << "] " << executable.name() << ": "
-              << executableKindName(executable.type()) << ", module=" << module.name()
+              << utils::executableKindName(executable.type()) << ", module=" << module.name()
               << ", entry-point=" << module.entryPoint() << '\n';
 
     for (uint32_t i = 0; i < executable.interfaceDescriptorBindingCount(); ++i) {
         const auto binding = executable.interfaceDescriptorBinding(i);
         std::cout << "      set=" << binding.set << ", binding=" << binding.binding
-                  << ", resource=" << binding.resourceIndex << ", access=" << accessName(binding.access) << '\n';
+                  << ", resource=" << binding.resourceIndex << ", access=" << utils::accessName(binding.access) << '\n';
     }
 }
 // [executable-inspection-end]

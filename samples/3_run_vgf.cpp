@@ -8,6 +8,7 @@
 #include "mlworkloadlib/context.hpp"
 #include "mlworkloadlib/session.hpp"
 #include "mlworkloadlib/workload.hpp"
+#include "mlworkloadlib_utils/mapped_device_memory.hpp"
 
 #include <exception>
 #include <iostream>
@@ -39,14 +40,14 @@ RuntimeResources bindRuntimeResources(Context &context, const Workload &workload
         switch (requirements.kind()) {
         case ResourceKind::Tensor: {
             auto allocation = context.createTensor(resource);
-            clearMemory(contextView.device, allocation.memory());
+            utils::clearDeviceMemory(contextView.device, allocation.memory());
             bindings.bindTensor(resource, {allocation.handle(), allocation.memory()});
             allocations.tensors.push_back(std::move(allocation));
             break;
         }
         case ResourceKind::StorageBuffer: {
             auto allocation = context.createBuffer(resource);
-            clearMemory(contextView.device, allocation.memory());
+            utils::clearDeviceMemory(contextView.device, allocation.memory());
             bindings.bindBuffer(resource, {allocation.handle(), allocation.memory()});
             allocations.buffers.push_back(std::move(allocation));
             break;

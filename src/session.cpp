@@ -18,9 +18,6 @@
 
 namespace mlsdk::workloadlib {
 
-namespace utils = detail::utils;
-namespace vulkan_helpers = detail::vulkan_helpers;
-
 using DescriptorBinding = detail::DescriptorBinding;
 using Executable = detail::Executable;
 using Module = detail::Module;
@@ -93,12 +90,14 @@ void validateExecutableBindings(const Workload &workload, const Executable &exec
 
     const auto &workloadState = workloadImpl(workload);
     for (const auto &descBinding : executable.bindings) {
-        const auto descriptorType = utils::descriptorType(workload, descBinding);
+        const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
         validateSupportedDescriptorType(descriptorType);
         if (descriptorType == vk::DescriptorType::eCombinedImageSampler ||
             descriptorType == vk::DescriptorType::eStorageImage) {
             const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
-            vulkan_helpers::validateImageFormat(resource.format);
+            if (resource.format != vk::Format::eR8G8B8A8Snorm) {
+                throw std::runtime_error("Session only supports eR8G8B8A8Snorm image resources");
+            }
         }
     }
 }
@@ -111,7 +110,7 @@ void populateDataGraphResources(DataGraphPipelineCreateStorage &storage, const E
     storage.resourceInfos.reserve(executable.bindings.size());
     for (const auto &descBinding : executable.bindings) {
         const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
-        const auto descriptorType = utils::descriptorType(workload, descBinding);
+        const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
         const auto tensorTiling = descriptorType == vk::DescriptorType::eCombinedImageSampler ||
                                           descriptorType == vk::DescriptorType::eStorageImage
                                       ? vk::TensorTilingARM::eOptimal
@@ -121,7 +120,7 @@ void populateDataGraphResources(DataGraphPipelineCreateStorage &storage, const E
             resource.stride.empty() ? nullptr : resource.stride.data(), vk::TensorUsageFlagBitsARM::eDataGraph);
         if (descriptorType == vk::DescriptorType::eCombinedImageSampler ||
             descriptorType == vk::DescriptorType::eStorageImage) {
-            storage.imageLayouts.emplace_back(vulkan_helpers::imageLayout(descriptorType),
+            storage.imageLayouts.emplace_back(detail::imageLayout(descriptorType),
                                               &storage.resourceTensorDescriptions.back());
             storage.resourceInfos.emplace_back(descBinding.set, descBinding.binding, 0, &storage.imageLayouts.back());
         } else {
@@ -143,10 +142,10 @@ void populateDataGraphConstants(DataGraphPipelineCreateStorage &storage, const E
         const auto &constant = workloadState.constants.at(workloadConstantIndex);
         const auto &resource = workloadState.resources.at(constant.resourceIndex);
         void *pNext = nullptr;
-        if (!utils::isSparsityDimensionValid(constant.sparsityDimension)) {
+        if (constant.sparsityDimension < detail::Constant::unspecifiedSparsityDimension) {
             throw std::runtime_error("Graph constant has invalid sparsity dimension");
         }
-        if (utils::isSparsityDimensionSpecified(constant.sparsityDimension)) {
+        if (constant.hasSparsity()) {
             constexpr uint32_t zeroCount = 2;
             constexpr uint32_t groupSize = 4;
             storage.sparsityInfos.emplace_back(static_cast<uint32_t>(constant.sparsityDimension), zeroCount, groupSize,
@@ -190,13 +189,23 @@ Module moduleForExecutable(const Workload &workload, const std::map<uint32_t, Mo
 template <typename ExecutableState>
 void createDescriptorSetLayouts(ExecutableState &executableState, const std::vector<DescriptorBinding> &descBindings,
                                 const Workload &workload, const ContextView &contextView) {
-    const auto descBindingSets = vulkan_helpers::splitBindingsBySet(descBindings);
+    const auto &workloadState = workloadImpl(workload);
+    const auto descBindingSets = [&descBindings] {
+        std::vector<std::vector<DescriptorBinding>> sets;
+        for (const auto &descBinding : descBindings) {
+            while (sets.size() <= descBinding.set) {
+                sets.emplace_back();
+            }
+            sets[descBinding.set].push_back(descBinding);
+        }
+        return sets;
+    }();
     executableState.descriptorSetLayouts.reserve(descBindingSets.size());
     for (const auto &setDescBindings : descBindingSets) {
         std::vector<vk::DescriptorSetLayoutBinding> layoutBindings;
         layoutBindings.reserve(setDescBindings.size());
         for (const auto &descBinding : setDescBindings) {
-            layoutBindings.emplace_back(descBinding.binding, utils::descriptorType(workload, descBinding), 1,
+            layoutBindings.emplace_back(descBinding.binding, workloadState.descriptorTypeForBinding(descBinding), 1,
                                         vk::ShaderStageFlagBits::eAll);
         }
         executableState.descriptorSetLayouts.emplace_back(contextView.device.get(),
@@ -219,7 +228,7 @@ void validatePushConstantRanges(const Executable &executable) {
 template <typename ExecutableState>
 void createPipelineLayout(ExecutableState &executableState, const Executable &executable,
                           const ContextView &contextView) {
-    const auto descriptorSetLayouts = vulkan_helpers::rawLayouts(executableState.descriptorSetLayouts);
+    const auto descriptorSetLayouts = detail::rawDescriptorSetLayouts(executableState.descriptorSetLayouts);
     validatePushConstantRanges(executable);
     const vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, descriptorSetLayouts,
                                                                 executable.pushConstantRanges);
@@ -270,9 +279,9 @@ allocateDataGraphSessionMemory(ExecutableState &executableState, const ContextVi
                 continue;
             }
 
-            const auto memoryType = vulkan_helpers::findMemoryType(contextView.physicalDevice.get(),
-                                                                   memReqs.memoryRequirements.memoryTypeBits,
-                                                                   vk::MemoryPropertyFlagBits::eDeviceLocal);
+            const auto memoryType =
+                detail::findMemoryType(contextView.physicalDevice.get(), memReqs.memoryRequirements.memoryTypeBits,
+                                       vk::MemoryPropertyFlagBits::eDeviceLocal);
             const vk::MemoryAllocateInfo allocateInfo(memReqs.memoryRequirements.size, memoryType);
             executableState.sessionMemory.emplace_back(contextView.device.get(), allocateInfo);
             bindInfos.emplace_back(*executableState.graphSession, bindPointRequirement.bindPoint, objectIndex,

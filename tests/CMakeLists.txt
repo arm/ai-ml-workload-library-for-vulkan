@@ -16,12 +16,10 @@ add_executable(mlworkloadlib_tests
     standalone_data_graph/test_standalone_data_graph_utils.hpp
     standalone_data_graph/test_standalone_data_graph_workload.cpp
     test_alias_execution.hpp
-    test_common_utils.hpp
+    test_array_view.cpp
     test_expected_results.hpp
-    test_public_utils.cpp
     test_resource_requirements.hpp
     test_spirv_utils.hpp
-    test_utils.hpp
     test_vulkan_fixture.hpp
     test_vulkan_resources.hpp
     vgf/test_vgf_session.cpp
@@ -39,6 +37,7 @@ target_link_libraries(mlworkloadlib_tests PRIVATE
     SPIRV-Tools-static
     VGF::vgf
     mlworkloadlib
+    mlworkloadlib_internal_utils
 )
 
 target_compile_definitions(mlworkloadlib_tests PRIVATE

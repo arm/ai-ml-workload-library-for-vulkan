@@ -4,18 +4,17 @@
  */
 #pragma once
 
-#include "mlworkloadlib/binding_types.hpp"
 #include "mlworkloadlib/workload.hpp"
+#include "mlworkloadlib_utils/mapped_device_memory.hpp"
+#include "mlworkloadlib_utils/workload_metadata.hpp"
 
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
 
 #include <vgf/encoder.hpp>
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -24,73 +23,6 @@
 #include <vector>
 
 namespace mlsdk::workloadlib::samples {
-
-class MappedMemory {
-  public:
-    MappedMemory(const vk::raii::Device &device, BoundMemoryInfo memory) : device_(device), memory_(memory) {
-        const auto result = static_cast<vk::Result>(device_.getDispatcher()->vkMapMemory(
-            static_cast<VkDevice>(*device_), static_cast<VkDeviceMemory>(memory_.memory), memory_.offset, memory_.size,
-            0, &data_));
-        if (result != vk::Result::eSuccess) {
-            throw std::runtime_error("vkMapMemory failed");
-        }
-    }
-
-    ~MappedMemory() {
-        device_.getDispatcher()->vkUnmapMemory(static_cast<VkDevice>(*device_),
-                                               static_cast<VkDeviceMemory>(memory_.memory));
-    }
-
-    MappedMemory(const MappedMemory &) = delete;
-    MappedMemory &operator=(const MappedMemory &) = delete;
-    MappedMemory(MappedMemory &&) = delete;
-    MappedMemory &operator=(MappedMemory &&) = delete;
-
-    void *data() const noexcept { return data_; }
-
-  private:
-    const vk::raii::Device &device_;
-    BoundMemoryInfo memory_;
-    void *data_ = nullptr;
-};
-
-inline void clearMemory(const vk::raii::Device &device, BoundMemoryInfo memory) {
-    if (memory.memory == nullptr) {
-        throw std::runtime_error("Cannot map a null memory allocation");
-    }
-    const MappedMemory mapped(device, memory);
-    std::memset(mapped.data(), 0, static_cast<std::size_t>(memory.size));
-}
-
-template <typename T>
-void writeMemory(const vk::raii::Device &device, BoundMemoryInfo memory, const std::vector<T> &values) {
-    const auto byteSize = static_cast<vk::DeviceSize>(values.size() * sizeof(T));
-    if (memory.memory == nullptr || byteSize > memory.size) {
-        throw std::runtime_error("Mapped memory write exceeds allocation size");
-    }
-    const MappedMemory mapped(device, memory);
-    std::copy(values.begin(), values.end(), static_cast<T *>(mapped.data()));
-}
-
-template <typename T>
-std::vector<T> readMemory(const vk::raii::Device &device, BoundMemoryInfo memory, std::size_t elementCount) {
-    const auto byteSize = static_cast<vk::DeviceSize>(elementCount * sizeof(T));
-    if (memory.memory == nullptr || byteSize > memory.size) {
-        throw std::runtime_error("Mapped memory read exceeds allocation size");
-    }
-    const MappedMemory mapped(device, memory);
-    const auto *first = static_cast<const T *>(mapped.data());
-    return {first, first + elementCount};
-}
-
-inline ResourceRequirements bufferRequirements(vk::DeviceSize byteSize) {
-    ResourceRequirements requirements;
-    requirements.kind = ResourceKind::StorageBuffer;
-    requirements.descriptorType = vk::DescriptorType::eStorageBuffer;
-    requirements.buffer.byteSize = byteSize;
-    requirements.buffer.usage = vk::BufferUsageFlagBits::eStorageBuffer;
-    return requirements;
-}
 
 inline constexpr std::string_view addBuffersGlsl = R"(
 #version 450
@@ -115,9 +47,9 @@ inline ComputeShaderDescription addBuffersDescription(std::size_t elementCount) 
 
     const auto byteSize = static_cast<vk::DeviceSize>(elementCount * sizeof(int32_t));
     description.resources = {
-        {"lhs", 0, 0, ResourceAccess::Read, bufferRequirements(byteSize)},
-        {"rhs", 0, 1, ResourceAccess::Read, bufferRequirements(byteSize)},
-        {"output", 0, 2, ResourceAccess::Write, bufferRequirements(byteSize)},
+        {"lhs", 0, 0, ResourceAccess::Read, utils::bufferRequirements(byteSize)},
+        {"rhs", 0, 1, ResourceAccess::Read, utils::bufferRequirements(byteSize)},
+        {"output", 0, 2, ResourceAccess::Write, utils::bufferRequirements(byteSize)},
     };
     return description;
 }

@@ -5,7 +5,8 @@
 
 #pragma once
 
-#include "test_utils.hpp"
+#include "test_resource_requirements.hpp"
+#include "test_spirv_utils.hpp"
 #include "vgf/test_vgf_utils.hpp"
 
 #include "mlworkloadlib/workload.hpp"
@@ -52,9 +53,9 @@ void main() {
     description.entryPoint = "main";
     description.dispatch = dispatchForNhwcTensor(shape);
     description.resources = {
-        {"first_input", 0, 0, ResourceAccess::Read, makeTensorRequirements(vk::Format::eR8Sint, shape)},
-        {"second_input", 0, 2, ResourceAccess::Read, makeTensorRequirements(vk::Format::eR8Sint, shape)},
-        {"output", 0, 3, ResourceAccess::Write, makeTensorRequirements(vk::Format::eR8Sint, std::move(shape))},
+        {"first_input", 0, 0, ResourceAccess::Read, tensorRequirements(vk::Format::eR8Sint, shape)},
+        {"second_input", 0, 2, ResourceAccess::Read, tensorRequirements(vk::Format::eR8Sint, shape)},
+        {"output", 0, 3, ResourceAccess::Write, tensorRequirements(vk::Format::eR8Sint, std::move(shape))},
     };
     return description;
 }
@@ -84,9 +85,9 @@ void main() {
     description.entryPoint = "main";
     description.dispatch = dispatchForNhwcTensor(shape);
     description.resources = {
-        {"first_input", 0, 1, ResourceAccess::Read, makeTensorRequirements(vk::Format::eR8Sint, shape)},
-        {"second_input", 0, 4, ResourceAccess::Read, makeTensorRequirements(vk::Format::eR8Sint, shape)},
-        {"output", 0, 5, ResourceAccess::Write, makeTensorRequirements(vk::Format::eR8Sint, std::move(shape))},
+        {"first_input", 0, 1, ResourceAccess::Read, tensorRequirements(vk::Format::eR8Sint, shape)},
+        {"second_input", 0, 4, ResourceAccess::Read, tensorRequirements(vk::Format::eR8Sint, shape)},
+        {"output", 0, 5, ResourceAccess::Write, tensorRequirements(vk::Format::eR8Sint, std::move(shape))},
     };
     return description;
 }
@@ -97,8 +98,8 @@ inline DataGraphDescription makeMaxpool8x8To4x4Description() {
     description.module.spirv = assembleMaxpool8x8To4x4Spirv("standalone_maxpool_8x8_to_4x4", {0, 0, 1, 1});
     description.entryPoint = "main";
     description.resources = {
-        {"input", 0, 0, ResourceAccess::Read, makeTensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 16})},
-        {"output", 1, 1, ResourceAccess::Write, makeTensorRequirements(vk::Format::eR8Sint, {1, 4, 4, 16})},
+        {"input", 0, 0, ResourceAccess::Read, tensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 16})},
+        {"output", 1, 1, ResourceAccess::Write, tensorRequirements(vk::Format::eR8Sint, {1, 4, 4, 16})},
     };
     return description;
 }

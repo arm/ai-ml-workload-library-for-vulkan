@@ -5,7 +5,8 @@
 
 #pragma once
 
-#include "test_utils.hpp"
+#include "test_resource_requirements.hpp"
+#include "test_spirv_utils.hpp"
 
 #include "mlworkloadlib/workload.hpp"
 
@@ -20,8 +21,8 @@ inline DataGraphDescription makeMaxpoolDescription() {
     description.module.spirv = assembleMaxpool16x16To8x8Spirv("standalone_maxpool", {0, 0, 1, 1});
     description.entryPoint = "main";
     description.resources = {
-        {"input", 0, 0, ResourceAccess::Read, makeTensorRequirements(vk::Format::eR8Sint, {1, 16, 16, 16})},
-        {"output", 1, 1, ResourceAccess::Write, makeTensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 16})},
+        {"input", 0, 0, ResourceAccess::Read, tensorRequirements(vk::Format::eR8Sint, {1, 16, 16, 16})},
+        {"output", 1, 1, ResourceAccess::Write, tensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 16})},
     };
     return description;
 }
@@ -38,9 +39,9 @@ inline DataGraphDescription makeArshiftSpecBoolDescription(bool round) {
     description.module.spirv = assembleArshiftSpecBoolSpirv();
     description.entryPoint = "spec_arshift";
     description.resources = {
-        {"input", 0, 0, ResourceAccess::Read, makeTensorRequirements(vk::Format::eR16Uint, {4})},
-        {"shift", 0, 1, ResourceAccess::Read, makeTensorRequirements(vk::Format::eR16Uint, {4})},
-        {"output", 0, 2, ResourceAccess::Write, makeTensorRequirements(vk::Format::eR16Uint, {4})},
+        {"input", 0, 0, ResourceAccess::Read, tensorRequirements(vk::Format::eR16Uint, {4})},
+        {"shift", 0, 1, ResourceAccess::Read, tensorRequirements(vk::Format::eR16Uint, {4})},
+        {"output", 0, 2, ResourceAccess::Write, tensorRequirements(vk::Format::eR16Uint, {4})},
     };
     description.pipeline.specializationInfo.mapEntries = {vk::SpecializationMapEntry(0, 0, sizeof(uint32_t))};
     description.pipeline.specializationInfo.data = makeBoolSpecializationConstantData(round);
@@ -53,10 +54,10 @@ inline DataGraphDescription makeAddF32ConstantDescription(const std::vector<floa
     description.module.spirv = assembleAddF32ConstantSpirv("standalone_add_f32_constant", {0, 0, 1, 1});
     description.entryPoint = "main";
     description.resources = {
-        {"input", 0, 0, ResourceAccess::Read, makeTensorRequirements(vk::Format::eR32Sfloat, {1, 3, 2, 1})},
-        {"output", 1, 1, ResourceAccess::Write, makeTensorRequirements(vk::Format::eR32Sfloat, {1, 3, 2, 1})},
+        {"input", 0, 0, ResourceAccess::Read, tensorRequirements(vk::Format::eR32Sfloat, {1, 3, 2, 1})},
+        {"output", 1, 1, ResourceAccess::Write, tensorRequirements(vk::Format::eR32Sfloat, {1, 3, 2, 1})},
     };
-    description.constants = {{"constant", makeTensorRequirements(vk::Format::eR32Sfloat, {1, 3, 2, 1}), constant.data(),
+    description.constants = {{"constant", tensorRequirements(vk::Format::eR32Sfloat, {1, 3, 2, 1}), constant.data(),
                               constant.size() * sizeof(float)}};
     return description;
 }
@@ -67,10 +68,10 @@ inline DataGraphDescription makeConv2dRescaleConstantDescription(const std::vect
     description.module.spirv = assembleConv2dRescaleConstantSpirv("standalone_conv2d_rescale_constant", {0, 0, 1, 1});
     description.entryPoint = "main";
     description.resources = {
-        {"input", 0, 0, ResourceAccess::Read, makeTensorRequirements(vk::Format::eR8Sint, {1, 16, 16, 16})},
-        {"output", 1, 1, ResourceAccess::Write, makeTensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 16})},
+        {"input", 0, 0, ResourceAccess::Read, tensorRequirements(vk::Format::eR8Sint, {1, 16, 16, 16})},
+        {"output", 1, 1, ResourceAccess::Write, tensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 16})},
     };
-    description.constants = {{"weights", makeTensorRequirements(vk::Format::eR8Sint, {16, 2, 2, 16}), weights.data(),
+    description.constants = {{"weights", tensorRequirements(vk::Format::eR8Sint, {16, 2, 2, 16}), weights.data(),
                               weights.size() * sizeof(int8_t)}};
     return description;
 }

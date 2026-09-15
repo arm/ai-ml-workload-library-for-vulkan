@@ -6,135 +6,25 @@
 #include "internal/context_impl.hpp"
 #include "internal/utils.hpp"
 
+#include "mlworkloadlib/workload.hpp"
+
 #include <vulkan/vulkan_beta.h>
 
-#include <algorithm>
 #include <exception>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace mlsdk::workloadlib {
-
-namespace utils = detail::utils;
-namespace vulkan_helpers = detail::vulkan_helpers;
 
 namespace {
 
 /*******************************************************************************
  * Internal helpers
  *******************************************************************************/
-
-bool hasExtension(const std::vector<vk::ExtensionProperties> &extensions, const char *name) {
-    return std::any_of(extensions.begin(), extensions.end(), [name](const auto &extension) {
-        return std::string_view(extension.extensionName.data()) == name;
-    });
-}
-
-bool containsExtensionName(const std::vector<const char *> &extensions, const char *name) {
-    return std::any_of(extensions.begin(), extensions.end(),
-                       [name](const auto *extension) { return std::string_view(extension) == name; });
-}
-
-void appendDeviceExtension(std::vector<const char *> &extensions, const char *name) {
-    if (name == nullptr) {
-        throw std::runtime_error("Context::create() device extension name must not be null");
-    }
-    if (!containsExtensionName(extensions, name)) {
-        extensions.push_back(name);
-    }
-}
-
-bool hasExtensions(const std::vector<vk::ExtensionProperties> &availableExtensions,
-                   const std::vector<const char *> &requiredExtensions) {
-    return std::all_of(
-        requiredExtensions.begin(), requiredExtensions.end(),
-        [&availableExtensions](const auto *extension) { return hasExtension(availableExtensions, extension); });
-}
-
-uint32_t findExecutionQueueFamily(const vk::raii::PhysicalDevice &physicalDevice) {
-    const auto queueFamilies = physicalDevice.getQueueFamilyProperties();
-    for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilies.size()); ++i) {
-        const auto requiredFlags = vk::QueueFlagBits::eCompute | vk::QueueFlagBits::eDataGraphARM;
-        if ((queueFamilies[i].queueFlags & requiredFlags) == requiredFlags) {
-            return i;
-        }
-    }
-    return std::numeric_limits<uint32_t>::max();
-}
-
-std::vector<const char *> runtimeOwnedDeviceExtensions(const RuntimeContextDeviceRequirements &deviceRequirements) {
-    std::vector<const char *> requiredDeviceExtensions = {
-        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
-        VK_ARM_DATA_GRAPH_EXTENSION_NAME, VK_ARM_TENSORS_EXTENSION_NAME};
-    for (const auto *extension : deviceRequirements.requiredDeviceExtensions) {
-        appendDeviceExtension(requiredDeviceExtensions, extension);
-    }
-    return requiredDeviceExtensions;
-}
-
-struct RuntimeOwnedDeviceFeatures {
-    RuntimeOwnedDeviceFeatures(const std::vector<vk::ExtensionProperties> &availableExtensions,
-                               std::vector<const char *> requiredDeviceExtensions, void *deviceFeaturePNext)
-        : deviceExtensions(std::move(requiredDeviceExtensions)), featureChain(&dataGraphFeatures) {
-        deviceFeatures.shaderInt16 = true;
-        deviceFeatures.shaderInt64 = true;
-
-        vulkan12Features.storageBuffer8BitAccess = true;
-        vulkan12Features.shaderInt8 = true;
-        vulkan12Features.shaderFloat16 = true;
-        vulkan12Features.vulkanMemoryModel = true;
-        vulkan12Features.pNext = deviceFeaturePNext;
-
-        vulkan13Features.synchronization2 = true;
-        vulkan13Features.pipelineCreationCacheControl = true;
-        vulkan13Features.pNext = &vulkan12Features;
-
-        maintenance5Features.maintenance5 = true;
-        maintenance5Features.pNext = &vulkan13Features;
-
-        tensorFeatures.tensors = true;
-        tensorFeatures.shaderTensorAccess = true;
-        tensorFeatures.tensorNonPacked = true;
-        tensorFeatures.pNext = &maintenance5Features;
-
-        dataGraphFeatures.dataGraph = true;
-        dataGraphFeatures.dataGraphShaderModule = true;
-        dataGraphFeatures.dataGraphSpecializationConstants = true;
-        dataGraphFeatures.pNext = &tensorFeatures;
-
-        if (hasExtension(availableExtensions, VK_EXT_SHADER_REPLICATED_COMPOSITES_EXTENSION_NAME)) {
-            replicatedCompositesFeatures.shaderReplicatedComposites = true;
-            replicatedCompositesFeatures.pNext = featureChain;
-            featureChain = &replicatedCompositesFeatures;
-            appendDeviceExtension(deviceExtensions, VK_EXT_SHADER_REPLICATED_COMPOSITES_EXTENSION_NAME);
-        }
-        // Enable extension if available, as it is required for some platforms (e.g. MoltenVK on Darwin).
-        if (hasExtension(availableExtensions, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME)) {
-            appendDeviceExtension(deviceExtensions, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
-        }
-    }
-
-    RuntimeOwnedDeviceFeatures(const RuntimeOwnedDeviceFeatures &) = delete;
-    RuntimeOwnedDeviceFeatures &operator=(const RuntimeOwnedDeviceFeatures &) = delete;
-    RuntimeOwnedDeviceFeatures(RuntimeOwnedDeviceFeatures &&) = delete;
-    RuntimeOwnedDeviceFeatures &operator=(RuntimeOwnedDeviceFeatures &&) = delete;
-    ~RuntimeOwnedDeviceFeatures() = default;
-
-    vk::PhysicalDeviceFeatures deviceFeatures;
-    vk::PhysicalDeviceVulkan12Features vulkan12Features;
-    vk::PhysicalDeviceVulkan13Features vulkan13Features;
-    vk::PhysicalDeviceMaintenance5FeaturesKHR maintenance5Features;
-    vk::PhysicalDeviceTensorFeaturesARM tensorFeatures;
-    vk::PhysicalDeviceDataGraphFeaturesARM dataGraphFeatures;
-    vk::PhysicalDeviceShaderReplicatedCompositesFeaturesEXT replicatedCompositesFeatures;
-    std::vector<const char *> deviceExtensions;
-    void *featureChain = nullptr;
-};
 
 vk::DeviceSize allocationSize(vk::DeviceSize memoryRequirementSize) {
     return memoryRequirementSize == 0 ? 1 : memoryRequirementSize;
@@ -270,13 +160,14 @@ ImageBindingInfo ImageAllocation::binding() const {
 
 Context Context::create(const RuntimeContextDeviceRequirements &deviceRequirements) {
     auto owned = std::make_unique<Impl::Owned>();
-    const auto requiredDeviceExtensions = runtimeOwnedDeviceExtensions(deviceRequirements);
+    const auto requiredDeviceExtensions =
+        detail::requiredWorkloadDeviceExtensions(deviceRequirements.requiredDeviceExtensions);
 
     const vk::ApplicationInfo applicationInfo("mlworkloadlib", 1, nullptr, 0, VK_API_VERSION_1_3);
     std::vector<const char *> instanceExtensions;
     vk::InstanceCreateFlags instanceFlags;
     const auto availableInstanceExtensions = owned->raiiContext.enumerateInstanceExtensionProperties();
-    if (hasExtension(availableInstanceExtensions, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+    if (detail::hasExtension(availableInstanceExtensions, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
         instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
         instanceFlags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
     }
@@ -288,30 +179,31 @@ Context Context::create(const RuntimeContextDeviceRequirements &deviceRequiremen
     std::string lastFailure;
     for (auto &candidate : vk::raii::PhysicalDevices(owned->instance)) {
         const auto extensions = candidate.enumerateDeviceExtensionProperties();
-        if (!hasExtensions(extensions, requiredDeviceExtensions)) {
+        if (!detail::hasExtensions(extensions, requiredDeviceExtensions)) {
             continue;
         }
 
-        const auto queueFamilyIndex = findExecutionQueueFamily(candidate);
-        if (queueFamilyIndex == std::numeric_limits<uint32_t>::max()) {
+        const auto requiredQueueFlags = vk::QueueFlagBits::eCompute | vk::QueueFlagBits::eDataGraphARM;
+        const auto queueFamilyIndex = detail::findQueueFamilyIndex(candidate, requiredQueueFlags);
+        if (!queueFamilyIndex.has_value()) {
             continue;
         }
 
         const float queuePriority = 1.0F;
-        const vk::DeviceQueueCreateInfo queueCreateInfo({}, queueFamilyIndex, 1, &queuePriority);
-        RuntimeOwnedDeviceFeatures deviceFeatures(extensions, requiredDeviceExtensions,
-                                                  deviceRequirements.deviceFeaturePNext);
+        const vk::DeviceQueueCreateInfo queueCreateInfo({}, *queueFamilyIndex, 1, &queuePriority);
 
         try {
+            const detail::RuntimeDeviceConfiguration deviceConfiguration(extensions, requiredDeviceExtensions,
+                                                                         deviceRequirements.deviceFeaturePNext);
             owned->physicalDevice = candidate;
-            owned->queueFamilyIndex = queueFamilyIndex;
+            owned->queueFamilyIndex = *queueFamilyIndex;
             owned->device = vk::raii::Device(candidate, {vk::DeviceCreateFlags(),
                                                          queueCreateInfo,
                                                          {},
-                                                         deviceFeatures.deviceExtensions,
-                                                         &deviceFeatures.deviceFeatures,
-                                                         deviceFeatures.featureChain});
-            owned->queue = owned->device.getQueue(queueFamilyIndex, 0);
+                                                         deviceConfiguration.extensions(),
+                                                         &deviceConfiguration.features(),
+                                                         deviceConfiguration.featureChain()});
+            owned->queue = owned->device.getQueue(*queueFamilyIndex, 0);
             return Context(std::move(owned));
         } catch (const std::exception &error) {
             lastFailure = error.what();
@@ -354,7 +246,7 @@ TensorAllocation Context::createTensor(ResourceView resource) const {
     const auto resourceKind = requirements.kind();
     if (resourceKind != ResourceKind::Tensor) {
         throw std::runtime_error("Context::createTensor() requires a Tensor workload resource; actual kind is " +
-                                 std::string(utils::resourceKindName(resourceKind)));
+                                 std::string(detail::resourceKindName(resourceKind)));
     }
 
     const auto tensorRequirements = requirements.asTensor();
@@ -381,9 +273,9 @@ TensorAllocation Context::createTensor(ResourceView resource) const {
                                         .getTensorMemoryRequirementsARM(vk::TensorMemoryRequirementsInfoARM(*tensor))
                                         .memoryRequirements;
     const auto size = allocationSize(memoryRequirements.size);
-    const auto memoryType = vulkan_helpers::findMemoryType(
-        contextView.physicalDevice.get(), memoryRequirements.memoryTypeBits,
-        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+    const auto memoryType =
+        detail::findMemoryType(contextView.physicalDevice.get(), memoryRequirements.memoryTypeBits,
+                               vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
     auto memory = vk::raii::DeviceMemory(contextView.device.get(), vk::MemoryAllocateInfo(size, memoryType));
     contextView.device.get().bindTensorMemoryARM(vk::BindTensorMemoryInfoARM(*tensor, *memory, 0));
 
@@ -400,7 +292,7 @@ BufferAllocation Context::createBuffer(ResourceView resource) const {
     const auto resourceKind = requirements.kind();
     if (resourceKind != ResourceKind::StorageBuffer) {
         throw std::runtime_error("Context::createBuffer() requires a StorageBuffer workload resource; actual kind is " +
-                                 std::string(utils::resourceKindName(resourceKind)));
+                                 std::string(detail::resourceKindName(resourceKind)));
     }
 
     const auto size = requirements.byteSize();
@@ -413,9 +305,9 @@ BufferAllocation Context::createBuffer(ResourceView resource) const {
     const auto contextView = this->contextView();
     auto buffer = vk::raii::Buffer(contextView.device.get(), vk::BufferCreateInfo({}, size, usage));
     const auto memoryRequirements = buffer.getMemoryRequirements();
-    const auto memoryType = vulkan_helpers::findMemoryType(
-        contextView.physicalDevice.get(), memoryRequirements.memoryTypeBits,
-        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+    const auto memoryType =
+        detail::findMemoryType(contextView.physicalDevice.get(), memoryRequirements.memoryTypeBits,
+                               vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
     auto memory = vk::raii::DeviceMemory(contextView.device.get(),
                                          vk::MemoryAllocateInfo(allocationSize(memoryRequirements.size), memoryType));
     buffer.bindMemory(*memory, 0);
@@ -433,7 +325,7 @@ ImageAllocation Context::createImage(ResourceView resource) const {
     const auto resourceKind = requirements.kind();
     if (resourceKind != ResourceKind::Image) {
         throw std::runtime_error("Context::createImage() requires an Image workload resource; actual kind is " +
-                                 std::string(utils::resourceKindName(resourceKind)));
+                                 std::string(detail::resourceKindName(resourceKind)));
     }
 
     const auto imageRequirements = requirements.asImage();
@@ -451,8 +343,8 @@ ImageAllocation Context::createImage(ResourceView resource) const {
                                                      vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal, usage,
                                                      vk::SharingMode::eExclusive, {}, vk::ImageLayout::eUndefined));
     const auto memoryRequirements = image.getMemoryRequirements();
-    const auto memoryType = vulkan_helpers::findMemoryType(
-        contextView.physicalDevice.get(), memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    const auto memoryType = detail::findMemoryType(contextView.physicalDevice.get(), memoryRequirements.memoryTypeBits,
+                                                   vk::MemoryPropertyFlagBits::eDeviceLocal);
     auto memory = vk::raii::DeviceMemory(contextView.device.get(),
                                          vk::MemoryAllocateInfo(allocationSize(memoryRequirements.size), memoryType));
     image.bindMemory(*memory, 0);

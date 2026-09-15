@@ -4,10 +4,9 @@
  */
 #pragma once
 
-#include "test_common_utils.hpp"
-
 #include <spirv-tools/libspirv.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <iterator>
@@ -57,10 +56,17 @@ inline std::vector<uint32_t> assembleGraphSpirvFromTemplate(std::string_view nam
                                                             GraphSpvasmBindings bindings) {
     std::ifstream templateFile(templatePath);
     std::string spvasm((std::istreambuf_iterator<char>(templateFile)), {});
-    replaceAll(spvasm, "INPUT_SET", std::to_string(bindings.inputSet));
-    replaceAll(spvasm, "INPUT_BINDING", std::to_string(bindings.inputBinding));
-    replaceAll(spvasm, "OUTPUT_SET", std::to_string(bindings.outputSet));
-    replaceAll(spvasm, "OUTPUT_BINDING", std::to_string(bindings.outputBinding));
+    const auto replace = [&spvasm](std::string_view from, std::string_view to) {
+        std::size_t pos = 0;
+        while ((pos = spvasm.find(from, pos)) != std::string::npos) {
+            spvasm.replace(pos, from.size(), to);
+            pos += to.size();
+        }
+    };
+    replace("INPUT_SET", std::to_string(bindings.inputSet));
+    replace("INPUT_BINDING", std::to_string(bindings.inputBinding));
+    replace("OUTPUT_SET", std::to_string(bindings.outputSet));
+    replace("OUTPUT_BINDING", std::to_string(bindings.outputBinding));
 
     try {
         return assembleSpirv(spvasm);

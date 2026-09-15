@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "mlworkloadlib/workload.hpp"
+#include "test_spirv_utils.hpp"
 #include "test_vgf_utils.hpp"
+
+#include "vgf-utils/temp_folder.hpp"
 
 #include <gtest/gtest.h>
 #include <vulkan/vulkan_core.h>

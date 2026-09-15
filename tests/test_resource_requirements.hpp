@@ -4,15 +4,12 @@
  */
 #pragma once
 
-#include "internal/utils.hpp"
-
 #include "mlworkloadlib/workload.hpp"
+#include "mlworkloadlib_utils/workload_metadata.hpp"
 
 #include <vulkan/vulkan.hpp>
 
 #include <cstdint>
-#include <utility>
-#include <vector>
 
 namespace mlsdk::workloadlib::test {
 
@@ -21,9 +18,7 @@ namespace mlsdk::workloadlib::test {
  *******************************************************************************/
 
 inline ResourceRequirements makeBufferRequirements(vk::DeviceSize byteSize) {
-    ResourceRequirements resource;
-    resource.kind = ResourceKind::StorageBuffer;
-    resource.descriptorType = vk::DescriptorType::eStorageBuffer;
+    auto resource = utils::bufferRequirements(byteSize);
     resource.format = vk::Format::eR32Sint;
     resource.elementCount = byteSize / sizeof(int32_t);
     resource.buffer.byteSize = byteSize;
@@ -31,16 +26,7 @@ inline ResourceRequirements makeBufferRequirements(vk::DeviceSize byteSize) {
     return resource;
 }
 
-inline ResourceRequirements makeTensorRequirements(vk::Format format, std::vector<int64_t> shape) {
-    ResourceRequirements resource;
-    resource.kind = ResourceKind::Tensor;
-    resource.descriptorType = vk::DescriptorType::eTensorARM;
-    resource.format = format;
-    resource.elementCount = detail::utils::elementCount(shape);
-    resource.tensor.shape = std::move(shape);
-    resource.tensor.usage = vk::TensorUsageFlagBitsARM::eDataGraph;
-    return resource;
-}
+using utils::tensorRequirements;
 
 inline ResourceRequirements makeStorageImageRequirements() {
     ResourceRequirements resource;

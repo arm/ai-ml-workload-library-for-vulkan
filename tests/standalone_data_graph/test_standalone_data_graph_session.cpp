@@ -2,10 +2,14 @@
  * SPDX-FileCopyrightText: Copyright 2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
  * SPDX-License-Identifier: Apache-2.0
  */
+#include "test_expected_results.hpp"
 #include "test_standalone_data_graph_utils.hpp"
+#include "test_vulkan_fixture.hpp"
+#include "test_vulkan_resources.hpp"
 
 #include "mlworkloadlib/context.hpp"
 #include "mlworkloadlib/session.hpp"
+#include "mlworkloadlib_utils/mapped_device_memory.hpp"
 
 #include <gtest/gtest.h>
 #include <vulkan/vulkan_core.h>
@@ -118,9 +122,9 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkloadWithPipeline
 
         const std::vector<uint16_t> input = {7, 9, 10, 15};
         const std::vector<uint16_t> shift = {1, 1, 2, 2};
-        writeMappedMemory(device, boundMemoryInfo(inputTensor), input);
-        writeMappedMemory(device, boundMemoryInfo(shiftTensor), shift);
-        writeMappedMemory(device, boundMemoryInfo(outputTensor), std::vector<uint16_t>(input.size(), 0));
+        utils::writeDeviceMemory(device, boundMemoryInfo(inputTensor), input);
+        utils::writeDeviceMemory(device, boundMemoryInfo(shiftTensor), shift);
+        utils::writeDeviceMemory(device, boundMemoryInfo(outputTensor), std::vector<uint16_t>(input.size(), 0));
 
         Session session(context, workload);
         session.configure();
@@ -132,7 +136,7 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkloadWithPipeline
         auto execution = session.prepare(bindings);
         execution.run();
 
-        return readMappedMemory<uint16_t>(device, boundMemoryInfo(outputTensor), input.size());
+        return utils::readDeviceMemory<uint16_t>(device, boundMemoryInfo(outputTensor), input.size());
     };
 
     EXPECT_EQ(runArshift(false), (std::vector<uint16_t>{3, 4, 2, 3}));
@@ -151,9 +155,9 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkloadWithRuntimeC
     auto outputTensor = context.createTensor(workload.resource(1));
 
     const auto input = makeMaxpoolInput(inputShape, 19);
-    writeMappedMemory(contextView.device, inputTensor.memory(), input);
-    writeMappedMemory(contextView.device, outputTensor.memory(),
-                      std::vector<int8_t>(Tensor::numElements(outputShape), 0));
+    utils::writeDeviceMemory(contextView.device, inputTensor.memory(), input);
+    utils::writeDeviceMemory(contextView.device, outputTensor.memory(),
+                             std::vector<int8_t>(Tensor::numElements(outputShape), 0));
 
     Session session(context, workload);
     session.configure();
@@ -165,8 +169,9 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkloadWithRuntimeC
     auto execution = session.prepare(bindings);
     execution.run();
 
-    EXPECT_EQ(readMappedMemory<int8_t>(contextView.device, outputTensor.memory(), Tensor::numElements(outputShape)),
-              expectedMaxpool(input, inputShape));
+    EXPECT_EQ(
+        utils::readDeviceMemory<int8_t>(contextView.device, outputTensor.memory(), Tensor::numElements(outputShape)),
+        expectedMaxpool(input, inputShape));
 }
 
 TEST_F(StandaloneDataGraphSessionExecutionTest, MovesRuntimeOwnedTensorAllocations) {
@@ -196,9 +201,9 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunAddConstantInputWithRuntimeCr
 
     const std::vector<float> input = {0.0F, 1.0F, 2.0F, 3.0F, 4.0F, 5.0F};
     const std::vector<float> expected = {0.5F, 1.5F, 2.5F, 3.5F, 4.5F, 5.5F};
-    writeMappedMemory(contextView.device, inputTensor.memory(), input);
-    writeMappedMemory(contextView.device, outputTensor.memory(),
-                      std::vector<float>(Tensor::numElements(tensorShape), 0));
+    utils::writeDeviceMemory(contextView.device, inputTensor.memory(), input);
+    utils::writeDeviceMemory(contextView.device, outputTensor.memory(),
+                             std::vector<float>(Tensor::numElements(tensorShape), 0));
 
     Session session(context, workload);
     session.configure();
@@ -210,8 +215,9 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunAddConstantInputWithRuntimeCr
     auto execution = session.prepare(bindings);
     execution.run();
 
-    EXPECT_EQ(readMappedMemory<float>(contextView.device, outputTensor.memory(), Tensor::numElements(tensorShape)),
-              expected);
+    EXPECT_EQ(
+        utils::readDeviceMemory<float>(contextView.device, outputTensor.memory(), Tensor::numElements(tensorShape)),
+        expected);
 }
 
 TEST_F(StandaloneDataGraphSessionExecutionTest, RecordAddConstantInputWithCallerOwnedContextAndTensors) {
@@ -226,8 +232,9 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RecordAddConstantInputWithCaller
 
     const std::vector<float> input = {0.0F, 1.0F, 2.0F, 3.0F, 4.0F, 5.0F};
     const std::vector<float> expected = {0.5F, 1.5F, 2.5F, 3.5F, 4.5F, 5.5F};
-    writeMappedMemory(device, boundMemoryInfo(inputTensor), input);
-    writeMappedMemory(device, boundMemoryInfo(outputTensor), std::vector<float>(Tensor::numElements(tensorShape), 0));
+    utils::writeDeviceMemory(device, boundMemoryInfo(inputTensor), input);
+    utils::writeDeviceMemory(device, boundMemoryInfo(outputTensor),
+                             std::vector<float>(Tensor::numElements(tensorShape), 0));
 
     Session session(context, workload);
     session.configure();
@@ -251,7 +258,7 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RecordAddConstantInputWithCaller
     queue.submit(submitInfo, *fence);
     ASSERT_EQ(device.waitForFences(*fence, true, std::numeric_limits<uint64_t>::max()), vk::Result::eSuccess);
 
-    EXPECT_EQ(readMappedMemory<float>(device, boundMemoryInfo(outputTensor), Tensor::numElements(tensorShape)),
+    EXPECT_EQ(utils::readDeviceMemory<float>(device, boundMemoryInfo(outputTensor), Tensor::numElements(tensorShape)),
               expected);
 }
 

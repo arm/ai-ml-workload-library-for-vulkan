@@ -67,6 +67,7 @@ set(ML_WORKLOAD_LIB_SOURCES
     src/binding_set.cpp
     src/context.cpp
     src/internal/module_compiler.cpp
+    src/internal/utils.cpp
     src/internal/workload_builder.cpp
     src/prepared_execution.cpp
     src/session.cpp
@@ -186,6 +187,7 @@ if(ML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT)
     target_compile_options(mlworkloadlib_hlsl_dxc PRIVATE ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS})
 endif()
 
+add_subdirectory(utils)
 add_subdirectory(samples)
 
 install(TARGETS mlworkloadlib
@@ -208,12 +210,12 @@ if(ML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT)
 endif()
 
 install(FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/array_view.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/binding_set.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/binding_types.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/context.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/prepared_execution.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/session.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/utils.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/workload.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/workload_types.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/mlworkloadlib

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "mlworkloadlib/utils.hpp"
+#include "mlworkloadlib/array_view.hpp"
 
 #include <gtest/gtest.h>
 
@@ -12,13 +12,13 @@
 
 namespace {
 
-using namespace mlsdk::workloadlib;
+using mlsdk::workloadlib::ArrayView;
 
 /*******************************************************************************
  * Positive coverage
  *******************************************************************************/
 
-TEST(ArrayView, ExposesMutableSpanLikeAccess) { // cppcheck-suppress syntaxError
+TEST(ArrayView, ExposesMutableSpanLikeAccess) {
     std::array<int, 3> values = {1, 2, 3};
 
     const ArrayView<int> view(values.data(), values.size());
@@ -35,7 +35,7 @@ TEST(ArrayView, ExposesMutableSpanLikeAccess) { // cppcheck-suppress syntaxError
     EXPECT_EQ(values[0], 9);
 }
 
-TEST(ArrayView, ExposesConstSpanLikeAccess) {
+TEST(ArrayView, ExposesConstSpanLikeAccess) { // cppcheck-suppress syntaxError
     const std::array<int, 2> values = {4, 5};
 
     const ArrayView<const int> view(values.data(), values.size());

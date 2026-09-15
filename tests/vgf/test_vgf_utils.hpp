@@ -5,8 +5,6 @@
 
 #pragma once
 
-#include "test_utils.hpp"
-
 #include "vgf/encoder.hpp"
 
 #include <gtest/gtest.h>

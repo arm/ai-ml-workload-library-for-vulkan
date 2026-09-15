@@ -2,10 +2,14 @@
  * SPDX-FileCopyrightText: Copyright 2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
  * SPDX-License-Identifier: Apache-2.0
  */
+#include "test_expected_results.hpp"
 #include "test_standalone_compute_utils.hpp"
+#include "test_vulkan_fixture.hpp"
+#include "test_vulkan_resources.hpp"
 
 #include "mlworkloadlib/context.hpp"
 #include "mlworkloadlib/session.hpp"
+#include "mlworkloadlib_utils/mapped_device_memory.hpp"
 
 #include <gtest/gtest.h>
 #include <vulkan/vulkan_core.h>
@@ -179,9 +183,9 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderWorkloadWithRuntim
     const std::vector<int32_t> secondInput = {10, 9, 8, 7, 6, 5, 4, -3, -2, -1};
     const auto expected = addVectors(firstInput, secondInput);
 
-    writeMappedMemory(device, firstInputBuffer.memory(), firstInput);
-    writeMappedMemory(device, secondInputBuffer.memory(), secondInput);
-    writeMappedMemory(device, outputBuffer.memory(), std::vector<int32_t>(elements, 0));
+    utils::writeDeviceMemory(device, firstInputBuffer.memory(), firstInput);
+    utils::writeDeviceMemory(device, secondInputBuffer.memory(), secondInput);
+    utils::writeDeviceMemory(device, outputBuffer.memory(), std::vector<int32_t>(elements, 0));
 
     Session session(context, workload);
     session.configure();
@@ -195,7 +199,7 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderWorkloadWithRuntim
     auto execution = session.prepare(bindings);
     execution.run();
 
-    EXPECT_EQ(readMappedMemory<int32_t>(device, outputBuffer.memory(), elements), expected);
+    EXPECT_EQ(utils::readDeviceMemory<int32_t>(device, outputBuffer.memory(), elements), expected);
 }
 
 TEST_F(StandaloneComputeSessionExecutionTest, MovesRuntimeOwnedBufferAndImageAllocations) {

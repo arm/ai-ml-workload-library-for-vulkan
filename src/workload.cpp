@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -27,13 +29,115 @@ const Workload::Impl &Workload::workloadImpl() const noexcept { return *impl_; }
 
 const Workload::Impl &workloadImpl(const Workload &workload) noexcept { return workload.workloadImpl(); }
 
-namespace vulkan_helpers = detail::vulkan_helpers;
-namespace utils = detail::utils;
-
 using DescriptorBinding = detail::DescriptorBinding;
 using Executable = detail::Executable;
 using Module = detail::Module;
 using Resource = detail::Resource;
+
+/*******************************************************************************
+ * Resource metadata
+ *******************************************************************************/
+
+detail::Resource::Role detail::Resource::publicRoleForAccess(ResourceAccess access) {
+    switch (access) {
+    case ResourceAccess::Read:
+        return Resource::Role::Input;
+    case ResourceAccess::Write:
+    case ResourceAccess::ReadWrite:
+        return Resource::Role::Output;
+    }
+    throw std::runtime_error("Unsupported workload resource access");
+}
+
+ResourceAccess detail::Resource::accessForRole(detail::Resource::Role role) {
+    switch (role) {
+    case Resource::Role::Input:
+        return ResourceAccess::Read;
+    case Resource::Role::Output:
+        return ResourceAccess::Write;
+    case Resource::Role::Constant:
+        return ResourceAccess::Read;
+    case Resource::Role::Intermediate:
+        return ResourceAccess::ReadWrite;
+    }
+    throw std::runtime_error("Unsupported workload resource role");
+}
+
+vk::Extent3D detail::Resource::imageExtent() const {
+    const auto &imageInfo = imageMetadata(*this);
+    if (imageInfo.extent.width != 0 || imageInfo.extent.height != 0 || imageInfo.extent.depth != 0) {
+        return imageInfo.extent;
+    }
+    const auto dimension = [](std::string_view name, int64_t value) {
+        constexpr auto maxDimension = static_cast<int64_t>(std::numeric_limits<uint32_t>::max());
+        if (value <= 0 || value > maxDimension) {
+            throw std::runtime_error("Workload image " + std::string(name) + " must be between 1 and UINT32_MAX; got " +
+                                     std::to_string(value));
+        }
+        return static_cast<uint32_t>(value);
+    };
+
+    if (shape.size() == 3) {
+        return {dimension("width", shape[0]), dimension("height", shape[1]), dimension("depth", shape[2])};
+    }
+    if (shape.size() != 4) {
+        throw std::runtime_error("Workload image shape must be a 3D extent or 4D NHWC; got rank " +
+                                 std::to_string(shape.size()));
+    }
+    if (shape[0] != 1) {
+        throw std::runtime_error("Workload NHWC image batch must be 1; got " + std::to_string(shape[0]));
+    }
+    if (shape[3] != 4) {
+        throw std::runtime_error("Workload NHWC image channel count must be 4; got " + std::to_string(shape[3]));
+    }
+    return {dimension("width", shape[2]), dimension("height", shape[1]), 1};
+}
+
+ResourceAccess Workload::Impl::resourceAccess(uint32_t resourceIndex) const {
+    const auto &resource = resources.at(resourceIndex);
+    std::optional<ResourceAccess> access;
+    for (const auto &executable : executables) {
+        for (const auto &descBinding : executable.bindings) {
+            if (descBinding.resourceIndex != resourceIndex) {
+                continue;
+            }
+            if (!access.has_value()) {
+                access = descBinding.access;
+            } else if (*access != descBinding.access) {
+                // A public resource used through both read and write bindings must be exposed as read-write.
+                return ResourceAccess::ReadWrite;
+            }
+        }
+    }
+    return access.value_or(Resource::accessForRole(resource.role));
+}
+
+vk::DescriptorType Workload::Impl::descriptorTypeForBinding(const DescriptorBinding &descBinding) const {
+    const auto &resource = resources.at(descBinding.resourceIndex);
+    if (!resource.descriptorType.has_value()) {
+        throw std::runtime_error("Descriptor binding references a workload resource without descriptor type");
+    }
+    return *resource.descriptorType;
+}
+
+uint32_t Workload::Impl::requiredPushConstantSize() const {
+    const auto firstPushConstantExecutable =
+        std::find_if(executables.begin(), executables.end(),
+                     [](const auto &executable) { return executable.pushConstantSize != 0; });
+    if (firstPushConstantExecutable == executables.end()) {
+        return 0;
+    }
+
+    const auto size = firstPushConstantExecutable->pushConstantSize;
+    const auto hasDifferentPushConstantSize =
+        std::any_of(std::next(firstPushConstantExecutable), executables.end(), [size](const auto &executable) {
+            return executable.pushConstantSize != 0 && executable.pushConstantSize != size;
+        });
+    if (hasDifferentPushConstantSize) {
+        throw std::runtime_error("Workloads with multiple push constant sizes are not supported");
+    }
+    return size;
+}
 
 namespace {
 
@@ -77,14 +181,6 @@ uint32_t workloadPlaceholderModuleCount(const Workload &workload) {
 
 uint32_t moduleIndexForPlaceholder(const Workload &workload, uint32_t placeholderIndex) {
     return workloadImpl(workload).placeholderModuleIndices.at(placeholderIndex);
-}
-
-ResourceAccess workloadResourceAccess(const Workload &workload, uint32_t resourceIndex) {
-    return utils::resourceAccess(workload, resourceIndex);
-}
-
-vk::DescriptorType workloadDescriptorType(const Workload &workload, const DescriptorBinding &descBinding) {
-    return utils::descriptorType(workload, descBinding);
 }
 
 std::optional<uint32_t> publicResourceIndexForInternalResourceIndex(const Workload &workload,
@@ -196,7 +292,7 @@ Workload::PlaceholderModuleRange Workload::placeholderModules() const { return P
 
 ResourceKind ResourceRequirementsView::kind() const {
     const auto &resource = workloadResource(*workload_, resourceIndex_);
-    return resource.descriptorType ? vulkan_helpers::resourceKind(*resource.descriptorType) : ResourceKind::Unknown;
+    return resource.descriptorType ? detail::resourceKind(*resource.descriptorType) : ResourceKind::Unknown;
 }
 
 vk::DescriptorType ResourceRequirementsView::descriptorType() const {
@@ -216,7 +312,7 @@ bool ResourceRequirementsView::requiresBoundMemoryInfo() const {
 
 vk::DeviceSize ResourceRequirementsView::elementCount() const {
     const auto &resource = workloadResource(*workload_, resourceIndex_);
-    return resource.elementCount != 0 ? resource.elementCount : utils::elementCount(resource.shape);
+    return resource.elementCount != 0 ? resource.elementCount : detail::elementCount(resource.shape);
 }
 
 vk::DeviceSize ResourceRequirementsView::byteSize() const {
@@ -252,7 +348,7 @@ vk::DeviceSize ResourceRequirementsView::byteSize() const {
         }
         return size;
     }
-    return utils::elementCount(resource.shape) * elementSize;
+    return detail::elementCount(resource.shape) * elementSize;
 }
 
 TensorRequirementsView ResourceRequirementsView::asTensor() const {
@@ -266,7 +362,7 @@ BufferRequirementsView ResourceRequirementsView::asBuffer() const {
     const auto resourceKind = kind();
     if (resourceKind != ResourceKind::StorageBuffer) {
         throw std::runtime_error("Workload resource is not a storage buffer; actual kind is " +
-                                 std::string(utils::resourceKindName(resourceKind)));
+                                 std::string(detail::resourceKindName(resourceKind)));
     }
     return {workload_, resourceIndex_};
 }
@@ -309,7 +405,7 @@ vk::BufferUsageFlags BufferRequirementsView::usage() const {
  *******************************************************************************/
 
 vk::Extent3D ImageRequirementsView::extent() const {
-    return vulkan_helpers::imageExtentFromMetadata(workloadResource(*workload_, resourceIndex_));
+    return workloadResource(*workload_, resourceIndex_).imageExtent();
 }
 
 vk::ImageUsageFlags ImageRequirementsView::usage() const {
@@ -321,7 +417,7 @@ vk::ImageUsageFlags ImageRequirementsView::usage() const {
     if (!resource.descriptorType.has_value()) {
         return {};
     }
-    return vulkan_helpers::imageUsage(*resource.descriptorType, resource.aliasGroupId.has_value());
+    return detail::imageUsage(*resource.descriptorType, resource.aliasGroupId.has_value());
 }
 
 bool ImageRequirementsView::isSampled() const {
@@ -346,7 +442,7 @@ vk::ImageLayout ImageRequirementsView::requiredLayout() const {
     if (layout != vk::ImageLayout::eUndefined) {
         return layout;
     }
-    return vulkan_helpers::imageLayout(*resource.descriptorType);
+    return detail::imageLayout(*resource.descriptorType);
 }
 
 vk::ImageSubresourceRange ImageRequirementsView::requiredSubresourceRange() const {
@@ -366,7 +462,7 @@ uint32_t ResourceView::index() const { return index_; }
 
 std::string_view ResourceView::name() const { return workloadResource(*workload_, resourceIndex_).name; }
 
-ResourceAccess ResourceView::access() const { return workloadResourceAccess(*workload_, resourceIndex_); }
+ResourceAccess ResourceView::access() const { return workloadImpl(*workload_).resourceAccess(resourceIndex_); }
 
 ResourceRequirementsView ResourceView::requirements() const { return {workload_, resourceIndex_}; }
 
@@ -414,12 +510,12 @@ InterfaceDescriptorBindingInfo ExecutableView::interfaceDescriptorBinding(uint32
         if (publicBindingIndex++ != bindingIndex) {
             continue;
         }
-        const auto descriptorType = workloadDescriptorType(*workload_, descBinding);
+        const auto descriptorType = workloadImpl(*workload_).descriptorTypeForBinding(descBinding);
         return {descBinding.set,
                 descBinding.binding,
                 *publicResourceIndex,
                 descBinding.access,
-                vulkan_helpers::resourceKind(descriptorType),
+                detail::resourceKind(descriptorType),
                 descriptorType};
     }
     throw std::out_of_range("Workload interface descriptor binding index out of range");

@@ -109,12 +109,6 @@ class WorkloadBuilder {
     // The builder must not be used again after finish().
     Workload finish();
 
-    /***************************************************************************
-     * Shared helpers
-     **************************************************************************/
-
-    static Resource::Role publicRoleForAccess(ResourceAccess access);
-
   private:
     /***************************************************************************
      * Append helpers

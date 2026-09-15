@@ -4,43 +4,26 @@
  */
 
 #include "mlworkloadlib/workload.hpp"
+#include "mlworkloadlib_utils/workload_metadata.hpp"
 
 #include <vulkan/vulkan.hpp>
 
 #include <cstdint>
 #include <exception>
-#include <functional>
 #include <iostream>
-#include <numeric>
 #include <utility>
-#include <vector>
-
-namespace {
-
-using namespace mlsdk::workloadlib;
-
-ResourceRequirements tensorRequirements(vk::Format format, std::vector<int64_t> shape) {
-    ResourceRequirements requirements;
-    requirements.kind = ResourceKind::Tensor;
-    requirements.descriptorType = vk::DescriptorType::eTensorARM;
-    requirements.format = format;
-    requirements.elementCount = std::accumulate(shape.begin(), shape.end(), vk::DeviceSize{1}, std::multiplies<>());
-    requirements.tensor.shape = std::move(shape);
-    requirements.tensor.usage = vk::TensorUsageFlagBitsARM::eDataGraph;
-    return requirements;
-}
-
-} // namespace
 
 int main() {
+    using namespace mlsdk::workloadlib;
+
     try {
         // [data-graph-description-begin]
         DataGraphDescription description;
         description.module.codeKind = ModuleCodeKind::Missing;
         description.entryPoint = "main";
         description.resources = {
-            {"input", 0, 0, ResourceAccess::Read, tensorRequirements(vk::Format::eR8Sint, {1, 16, 16, 16})},
-            {"output", 1, 1, ResourceAccess::Write, tensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 16})},
+            {"input", 0, 0, ResourceAccess::Read, utils::tensorRequirements(vk::Format::eR8Sint, {1, 16, 16, 16})},
+            {"output", 1, 1, ResourceAccess::Write, utils::tensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 16})},
         };
         description.pipeline.identifier = "maxpool";
 

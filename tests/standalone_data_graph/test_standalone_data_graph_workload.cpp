@@ -102,7 +102,7 @@ TEST(StandaloneDataGraphWorkload, ExposesPipelineMetadata) {
 TEST(StandaloneDataGraphWorkload, AcceptsSparseConstantsWithDimension) {
     std::array<int32_t, 1> constantData = {1};
     auto description = makeMaxpoolDescription();
-    description.constants.push_back({"constant", makeTensorRequirements(vk::Format::eR32Sint, {1}), constantData.data(),
+    description.constants.push_back({"constant", tensorRequirements(vk::Format::eR32Sint, {1}), constantData.data(),
                                      sizeof(int32_t), DataGraphConstant::Sparsity{0}});
 
     EXPECT_NO_THROW((void)Workload::fromDataGraph(std::move(description)));
@@ -111,7 +111,7 @@ TEST(StandaloneDataGraphWorkload, AcceptsSparseConstantsWithDimension) {
 TEST(StandaloneDataGraphWorkload, HidesConstantsFromPublicResources) {
     std::array<int32_t, 4> constantData = {1, 2, 3, 4};
     auto description = makeMaxpoolDescription();
-    description.constants.push_back({"constant", makeTensorRequirements(vk::Format::eR32Sint, {4}), constantData.data(),
+    description.constants.push_back({"constant", tensorRequirements(vk::Format::eR32Sint, {4}), constantData.data(),
                                      constantData.size() * sizeof(int32_t)});
 
     auto workload = Workload::fromDataGraph(std::move(description));
@@ -156,7 +156,7 @@ TEST(StandaloneDataGraphWorkload, RejectsDuplicatePipelineSpecializationConstant
 TEST(StandaloneDataGraphWorkload, RejectsSparseConstantsWithoutDimension) {
     std::array<int32_t, 1> constantData = {1};
     auto description = makeMaxpoolDescription();
-    description.constants.push_back({"constant", makeTensorRequirements(vk::Format::eR32Sint, {1}), constantData.data(),
+    description.constants.push_back({"constant", tensorRequirements(vk::Format::eR32Sint, {1}), constantData.data(),
                                      sizeof(int32_t), DataGraphConstant::Sparsity{-1}});
 
     EXPECT_THROW((void)Workload::fromDataGraph(std::move(description)), std::runtime_error);
@@ -165,7 +165,7 @@ TEST(StandaloneDataGraphWorkload, RejectsSparseConstantsWithoutDimension) {
 TEST(StandaloneDataGraphWorkload, RejectsNullConstantPayload) {
     auto description = makeMaxpoolDescription();
     description.constants.push_back(
-        {"constant", makeTensorRequirements(vk::Format::eR32Sint, {1}), nullptr, sizeof(int32_t)});
+        {"constant", tensorRequirements(vk::Format::eR32Sint, {1}), nullptr, sizeof(int32_t)});
 
     EXPECT_THROW((void)Workload::fromDataGraph(std::move(description)), std::runtime_error);
 }

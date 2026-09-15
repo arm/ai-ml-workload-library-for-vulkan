@@ -5,7 +5,13 @@
 
 #include "standalone_compute/test_standalone_compute_utils.hpp"
 #include "standalone_data_graph/test_standalone_data_graph_utils.hpp"
+#include "test_alias_execution.hpp"
 #include "test_composed_utils.hpp"
+#include "test_expected_results.hpp"
+#include "test_resource_requirements.hpp"
+#include "test_spirv_utils.hpp"
+#include "test_vulkan_fixture.hpp"
+#include "test_vulkan_resources.hpp"
 
 #include "internal/workload_builder.hpp"
 
@@ -132,16 +138,15 @@ Workload makeOutputAliasedToIntermediateBufferWorkload() {
 
     WorkloadBuilder builder;
     const auto lhs = builder.addResource("lhs", makeBufferRequirements(bufferSize),
-                                         WorkloadBuilder::publicRoleForAccess(ResourceAccess::Read));
+                                         Resource::publicRoleForAccess(ResourceAccess::Read));
     const auto rhs = builder.addResource("rhs", makeBufferRequirements(bufferSize),
-                                         WorkloadBuilder::publicRoleForAccess(ResourceAccess::Read));
+                                         Resource::publicRoleForAccess(ResourceAccess::Read));
     const auto zero = builder.addResource("zero", makeBufferRequirements(bufferSize),
-                                          WorkloadBuilder::publicRoleForAccess(ResourceAccess::Read));
+                                          Resource::publicRoleForAccess(ResourceAccess::Read));
     const auto finalOutput = builder.addResource("final_output", makeBufferRequirements(bufferSize),
-                                                 WorkloadBuilder::publicRoleForAccess(ResourceAccess::Write));
-    const auto aliasedOutput =
-        builder.addResource("aliased_output", makeBufferRequirements(bufferSize),
-                            WorkloadBuilder::publicRoleForAccess(ResourceAccess::Write), aliasGroup);
+                                                 Resource::publicRoleForAccess(ResourceAccess::Write));
+    const auto aliasedOutput = builder.addResource("aliased_output", makeBufferRequirements(bufferSize),
+                                                   Resource::publicRoleForAccess(ResourceAccess::Write), aliasGroup);
     const auto intermediate = builder.addResource("intermediate", makeBufferRequirements(bufferSize),
                                                   Resource::Role::Intermediate, aliasGroup);
     const auto module = builder.addModule(makeSpirvModule(assembleAddInt32BuffersSpirv()), "add_int32_buffers", "main");
@@ -167,18 +172,16 @@ Workload makeOutputBufferAliasedToIntermediateTensorWorkload() {
     constexpr vk::DeviceSize outputBufferSize = 10 * sizeof(int32_t);
 
     WorkloadBuilder builder;
-    const auto tensorInput =
-        builder.addResource("tensor_input", makeTensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 16}),
-                            WorkloadBuilder::publicRoleForAccess(ResourceAccess::Read));
-    const auto aliasedOutput =
-        builder.addResource("aliased_output", makeBufferRequirements(aliasedBufferSize),
-                            WorkloadBuilder::publicRoleForAccess(ResourceAccess::Write), aliasGroup);
+    const auto tensorInput = builder.addResource("tensor_input", tensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 16}),
+                                                 Resource::publicRoleForAccess(ResourceAccess::Read));
+    const auto aliasedOutput = builder.addResource("aliased_output", makeBufferRequirements(aliasedBufferSize),
+                                                   Resource::publicRoleForAccess(ResourceAccess::Write), aliasGroup);
     const auto zeroInput = builder.addResource("zero", makeBufferRequirements(outputBufferSize),
-                                               WorkloadBuilder::publicRoleForAccess(ResourceAccess::Read));
+                                               Resource::publicRoleForAccess(ResourceAccess::Read));
     const auto finalOutput = builder.addResource("final_output", makeBufferRequirements(outputBufferSize),
-                                                 WorkloadBuilder::publicRoleForAccess(ResourceAccess::Write));
+                                                 Resource::publicRoleForAccess(ResourceAccess::Write));
     const auto intermediate =
-        builder.addResource("intermediate_tensor", makeTensorRequirements(vk::Format::eR8Sint, {1, 4, 4, 16}),
+        builder.addResource("intermediate_tensor", tensorRequirements(vk::Format::eR8Sint, {1, 4, 4, 16}),
                             Resource::Role::Intermediate, aliasGroup);
 
     const auto graphModule =
@@ -208,12 +211,12 @@ Workload makeOutputTensorAliasedToIntermediateBufferWorkload() {
 
     WorkloadBuilder builder;
     const auto lhs = builder.addResource("lhs", makeBufferRequirements(bufferSize),
-                                         WorkloadBuilder::publicRoleForAccess(ResourceAccess::Read));
+                                         Resource::publicRoleForAccess(ResourceAccess::Read));
     const auto rhs = builder.addResource("rhs", makeBufferRequirements(bufferSize),
-                                         WorkloadBuilder::publicRoleForAccess(ResourceAccess::Read));
+                                         Resource::publicRoleForAccess(ResourceAccess::Read));
     const auto aliasedOutput = builder.addResource(
-        "aliased_output_tensor", makeTensorRequirements(vk::Format::eR8Sint, {static_cast<int64_t>(bufferSize)}),
-        WorkloadBuilder::publicRoleForAccess(ResourceAccess::Write), aliasGroup);
+        "aliased_output_tensor", tensorRequirements(vk::Format::eR8Sint, {static_cast<int64_t>(bufferSize)}),
+        Resource::publicRoleForAccess(ResourceAccess::Write), aliasGroup);
     const auto intermediate = builder.addResource("intermediate_buffer", makeBufferRequirements(bufferSize),
                                                   Resource::Role::Intermediate, aliasGroup);
     const auto module = builder.addModule(makeSpirvModule(assembleAddInt32BuffersSpirv()), "add_int32_buffers", "main");
@@ -233,13 +236,13 @@ Workload makeOutputTensorAliasedToIntermediateTensorWorkload() {
     constexpr uint32_t aliasGroup = 31;
 
     WorkloadBuilder builder;
-    const auto input = builder.addResource("tensor_input", makeTensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 16}),
-                                           WorkloadBuilder::publicRoleForAccess(ResourceAccess::Read));
+    const auto input = builder.addResource("tensor_input", tensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 16}),
+                                           Resource::publicRoleForAccess(ResourceAccess::Read));
     const auto aliasedOutput =
-        builder.addResource("aliased_output_tensor", makeTensorRequirements(vk::Format::eR8Sint, {1, 4, 4, 16}),
-                            WorkloadBuilder::publicRoleForAccess(ResourceAccess::Write), aliasGroup);
+        builder.addResource("aliased_output_tensor", tensorRequirements(vk::Format::eR8Sint, {1, 4, 4, 16}),
+                            Resource::publicRoleForAccess(ResourceAccess::Write), aliasGroup);
     const auto intermediate =
-        builder.addResource("intermediate_tensor", makeTensorRequirements(vk::Format::eR8Sint, {1, 4, 4, 16}),
+        builder.addResource("intermediate_tensor", tensorRequirements(vk::Format::eR8Sint, {1, 4, 4, 16}),
                             Resource::Role::Intermediate, aliasGroup);
     const auto module =
         builder.addModule(makeSpirvModule(assembleMaxpool8x8To4x4Spirv("composed_tensor_alias", {0, 0, 0, 1})),
@@ -260,14 +263,13 @@ Workload makeOutputImageAliasedToIntermediateImageWorkload() {
 
     WorkloadBuilder builder;
     const auto lhs = builder.addResource("lhs", makeBufferRequirements(bufferSize),
-                                         WorkloadBuilder::publicRoleForAccess(ResourceAccess::Read));
+                                         Resource::publicRoleForAccess(ResourceAccess::Read));
     const auto rhs = builder.addResource("rhs", makeBufferRequirements(bufferSize),
-                                         WorkloadBuilder::publicRoleForAccess(ResourceAccess::Read));
+                                         Resource::publicRoleForAccess(ResourceAccess::Read));
     const auto output = builder.addResource("output", makeBufferRequirements(bufferSize),
-                                            WorkloadBuilder::publicRoleForAccess(ResourceAccess::Write));
-    const auto aliasedOutput =
-        builder.addResource("aliased_output_image", makeStorageImageRequirements(),
-                            WorkloadBuilder::publicRoleForAccess(ResourceAccess::Write), aliasGroup);
+                                            Resource::publicRoleForAccess(ResourceAccess::Write));
+    const auto aliasedOutput = builder.addResource("aliased_output_image", makeStorageImageRequirements(),
+                                                   Resource::publicRoleForAccess(ResourceAccess::Write), aliasGroup);
     const auto intermediate = builder.addResource("intermediate_image", makeStorageImageRequirements(),
                                                   Resource::Role::Intermediate, aliasGroup);
     const auto module = builder.addModule(makeSpirvModule(assembleAddInt32BuffersSpirv()), "add_int32_buffers", "main");
