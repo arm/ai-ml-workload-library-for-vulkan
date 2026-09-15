@@ -65,10 +65,7 @@ void printExecutable(ExecutableView executable) {
 
 int main() {
     try {
-        // [in-memory-vgf-loading-begin]
-        const auto vgf = addBuffersVgf(4);
-        const auto workload = Workload::fromVGF(vgf.data(), vgf.size());
-        // [in-memory-vgf-loading-end]
+        const auto workload = Workload::fromComputeShader(addBuffersDescription(4));
 
         std::cout << "Resources (" << workload.resourceCount() << "):\n";
         for (const auto resource : workload.resources()) {

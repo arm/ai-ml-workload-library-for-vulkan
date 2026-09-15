@@ -8,19 +8,11 @@
 #include "mlworkloadlib_utils/mapped_device_memory.hpp"
 #include "mlworkloadlib_utils/workload_metadata.hpp"
 
-#include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
-
-#include <vgf/encoder.hpp>
 
 #include <cstddef>
 #include <cstdint>
-#include <limits>
-#include <sstream>
-#include <stdexcept>
-#include <string>
 #include <string_view>
-#include <vector>
 
 namespace mlsdk::workloadlib::samples {
 
@@ -54,42 +46,5 @@ inline ComputeShaderDescription addBuffersDescription(std::size_t elementCount) 
     return description;
 }
 // [compute-description-end]
-
-// [vgf-building-begin]
-inline std::string addBuffersVgf(std::size_t elementCount, bool embedImplementation = true) {
-    if (elementCount > std::numeric_limits<uint32_t>::max()) {
-        throw std::invalid_argument("The element count exceeds the VGF dispatch limit");
-    }
-
-    auto encoder = mlsdk::vgflib::CreateEncoder(VK_HEADER_VERSION);
-    const auto module = embedImplementation
-                            ? encoder->AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "add_int32_buffers", "main",
-                                                 mlsdk::vgflib::ShaderType::GLSL, std::string(addBuffersGlsl))
-                            : encoder->AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "add_int32_buffers", "main");
-
-    const auto shape = std::vector<int64_t>{static_cast<int64_t>(elementCount)};
-    const auto strides = std::vector<int64_t>{static_cast<int64_t>(sizeof(int32_t))};
-    const auto lhs = encoder->AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, shape, strides);
-    const auto rhs = encoder->AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, shape, strides);
-    const auto output =
-        encoder->AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, shape, strides);
-
-    const auto lhsBinding = encoder->AddBindingSlot(0, lhs);
-    const auto rhsBinding = encoder->AddBindingSlot(1, rhs);
-    const auto outputBinding = encoder->AddBindingSlot(2, output);
-    const auto descriptorSet = encoder->AddDescriptorSetInfo({lhsBinding, rhsBinding, outputBinding}, 0);
-    const std::vector<mlsdk::vgflib::GraphConstantBindingRef> noGraphConstants;
-    encoder->AddSegmentInfo(module, "add_int32_buffers_segment", {descriptorSet}, {lhsBinding, rhsBinding},
-                            {outputBinding}, noGraphConstants, {static_cast<uint32_t>(elementCount), 1, 1});
-    encoder->AddModelSequenceInputsOutputs({lhsBinding, rhsBinding}, {"lhs", "rhs"}, {outputBinding}, {"output"});
-    encoder->Finish();
-
-    std::stringstream stream;
-    if (!encoder->WriteTo(stream)) {
-        throw std::runtime_error("Failed to encode the sample VGF");
-    }
-    return stream.str();
-}
-// [vgf-building-end]
 
 } // namespace mlsdk::workloadlib::samples

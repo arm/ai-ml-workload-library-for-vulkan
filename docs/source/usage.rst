@@ -35,13 +35,13 @@ description and mapped-memory helpers earlier in the source file.
 An application can instead retain ownership of its Vulkan® objects and wrap
 them in a library context:
 
-.. literalinclude:: ../sources/samples/4_run_glsl_compute_with_wrapped_context.cpp
+.. literalinclude:: ../sources/samples/4_record_glsl_compute_with_wrapped_context.cpp
    :language: cpp
    :start-after: // [wrapped-context-begin]
    :end-before: // [wrapped-context-end]
    :dedent: 8
 
-Complete programs showing VGF inspection and execution, standalone compute
+Complete programs showing workload inspection, VGF and standalone compute
 execution, and application-owned Vulkan® context wrapping are available in the
 ``samples`` directory.
 
@@ -65,7 +65,7 @@ Standalone data-graph workloads use the same resource model and add graph
 pipeline metadata. Sample 5 leaves the module implementation missing so it can
 be supplied to a session later:
 
-.. literalinclude:: ../sources/samples/5_create_data_graph.cpp
+.. literalinclude:: ../sources/samples/5_create_standalone_data_graph.cpp
    :language: cpp
    :start-after: // [data-graph-description-begin]
    :end-before: // [data-graph-description-end]
@@ -85,15 +85,16 @@ or ``supports(Feature::HlslModules)``.
 A workload can also contain placeholder modules. Sample 3 binds a GLSL
 implementation before configuring its session:
 
-.. literalinclude:: ../sources/samples/3_run_vgf.cpp
+.. literalinclude:: ../sources/samples/3_run_vgf_with_placeholder_module.cpp
    :language: cpp
    :start-after: // [placeholder-module-binding-begin]
    :end-before: // [placeholder-module-binding-end]
    :dedent: 8
 
-The VGF samples use a shared helper to encode an in-memory VGF:
+The VGF execution sample encodes a small in-memory VGF with a placeholder
+module:
 
-.. literalinclude:: ../sources/samples/sample_utils.hpp
+.. literalinclude:: ../sources/samples/3_run_vgf_with_placeholder_module.cpp
    :language: cpp
    :start-after: // [vgf-building-begin]
    :end-before: // [vgf-building-end]
@@ -101,7 +102,7 @@ The VGF samples use a shared helper to encode an in-memory VGF:
 The encoded bytes remain alive while ``Workload`` decodes their caller-owned
 memory:
 
-.. literalinclude:: ../sources/samples/1_inspect_vgf.cpp
+.. literalinclude:: ../sources/samples/3_run_vgf_with_placeholder_module.cpp
    :language: cpp
    :start-after: // [in-memory-vgf-loading-begin]
    :end-before: // [in-memory-vgf-loading-end]
@@ -113,14 +114,14 @@ Workload inspection
 A workload exposes non-owning views of its public resources. Sample 1 inspects
 each resource's identity, access, kind, and kind-specific requirements:
 
-.. literalinclude:: ../sources/samples/1_inspect_vgf.cpp
+.. literalinclude:: ../sources/samples/1_inspect_workload_metadata.cpp
    :language: cpp
    :start-after: // [resource-inspection-begin]
    :end-before: // [resource-inspection-end]
 
 Executables similarly expose their module and descriptor interface:
 
-.. literalinclude:: ../sources/samples/1_inspect_vgf.cpp
+.. literalinclude:: ../sources/samples/1_inspect_workload_metadata.cpp
    :language: cpp
    :start-after: // [executable-inspection-begin]
    :end-before: // [executable-inspection-end]
@@ -138,7 +139,7 @@ resource must be bound before preparing an execution.
 
 Sample 3 applies this process to every public resource according to its kind:
 
-.. literalinclude:: ../sources/samples/3_run_vgf.cpp
+.. literalinclude:: ../sources/samples/3_run_vgf_with_placeholder_module.cpp
    :language: cpp
    :start-after: // [runtime-resource-binding-begin]
    :end-before: // [runtime-resource-binding-end]
@@ -161,7 +162,7 @@ library-managed command and fence state.
 application is responsible for the command-buffer lifecycle, submission, and
 synchronization.
 
-.. literalinclude:: ../sources/samples/4_run_glsl_compute_with_wrapped_context.cpp
+.. literalinclude:: ../sources/samples/4_record_glsl_compute_with_wrapped_context.cpp
    :language: cpp
    :start-after: // [recorded-execution-begin]
    :end-before: // [recorded-execution-end]
