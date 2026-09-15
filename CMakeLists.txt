@@ -23,6 +23,16 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
+set(ML_WORKLOAD_LIB_PACKAGE_NAME ${PROJECT_NAME})
+set(ML_WORKLOAD_LIB_NAMESPACE ${PROJECT_NAME})
+set(ML_WORKLOAD_LIB_EMBEDDED_SDK_PACKAGE OFF)
+if(NOT (CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR) AND ML_SDK_GENERATE_CPACK)
+    set(ML_WORKLOAD_LIB_PACKAGE_NAME "ai_ml_sdk_for_vulkan")
+    set(ML_WORKLOAD_LIB_EMBEDDED_SDK_PACKAGE ON)
+else()
+    set(CPACK_PACKAGE_NAME "ai_ml_workload_library_for_vulkan")
+endif()
+
 set(ML_WORKLOAD_LIB_API_VERSION_MAJOR 0)
 set(ML_WORKLOAD_LIB_API_VERSION_MINOR 0)
 set(ML_WORKLOAD_LIB_API_VERSION_PATCH 0)
@@ -95,11 +105,22 @@ function(mlworkloadlib_configure_target target_name)
             ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
 
-    target_link_libraries(${target_name} PUBLIC
-        Vulkan::Headers
-        VGF::vgf
-        VGF::vgf-utils
+    target_link_libraries(${target_name}
+        PUBLIC
+            $<BUILD_INTERFACE:Vulkan::Headers>
     )
+
+    if(ML_WORKLOAD_LIB_EMBEDDED_SDK_PACKAGE)
+        target_link_libraries(${target_name} PRIVATE
+            VGF::vgf
+            VGF::vgf-utils
+        )
+    else()
+        target_link_libraries(${target_name} PRIVATE
+            $<BUILD_INTERFACE:VGF::vgf>
+            $<BUILD_INTERFACE:VGF::vgf-utils>
+        )
+    endif()
 
     target_link_libraries(${target_name} PRIVATE
         ${CMAKE_DL_LIBS}
@@ -110,6 +131,7 @@ endfunction()
 
 add_library(mlworkloadlib STATIC ${ML_WORKLOAD_LIB_SOURCES})
 mlworkloadlib_configure_target(mlworkloadlib)
+add_library(${ML_WORKLOAD_LIB_NAMESPACE}::mlworkloadlib ALIAS mlworkloadlib)
 
 if(ML_WORKLOAD_LIB_BUILD_SHARED)
     add_library(mlworkloadlib_shared SHARED ${ML_WORKLOAD_LIB_SOURCES})
@@ -129,6 +151,7 @@ if(ML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT)
     target_link_libraries(mlworkloadlib_glsl_glslang_objects
         PRIVATE
             mlworkloadlib
+            VGF::vgf-utils
             "$<BUILD_LOCAL_INTERFACE:glslang::glslang>"
             "$<BUILD_LOCAL_INTERFACE:glslang::glslang-default-resource-limits>"
             "$<BUILD_LOCAL_INTERFACE:glslang::SPIRV>"
@@ -169,6 +192,7 @@ if(ML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT)
     target_link_libraries(mlworkloadlib_hlsl_dxc_objects
         PRIVATE
             mlworkloadlib
+            VGF::vgf-utils
             mlworkloadlib_dxc
     )
 
@@ -199,9 +223,19 @@ add_subdirectory(utils)
 add_subdirectory(samples)
 
 install(TARGETS mlworkloadlib
+    EXPORT ${ML_WORKLOAD_LIB_PACKAGE_NAME}Config
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
+
+if(ML_WORKLOAD_LIB_BUILD_SHARED)
+    install(TARGETS mlworkloadlib_shared
+        EXPORT ${ML_WORKLOAD_LIB_PACKAGE_NAME}Config
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
 
 if(ML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT)
     install(TARGETS mlworkloadlib_glsl_glslang
@@ -246,4 +280,15 @@ unset(ML_WORKLOAD_LIB_BUILD_DOCS CACHE)
 
 if(ML_WORKLOAD_LIB_ENABLE_FUZZER)
     add_subdirectory(fuzz)
+endif()
+
+###############################################################################
+# Packaging
+###############################################################################
+
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    include(cmake/package.cmake)
+    mlsdk_package(PACKAGE_NAME ${ML_WORKLOAD_LIB_PACKAGE_NAME}
+        NAMESPACE ${ML_WORKLOAD_LIB_NAMESPACE}
+        LICENSES "${CMAKE_CURRENT_LIST_DIR}/LICENSES/Apache-2.0.txt")
 endif()

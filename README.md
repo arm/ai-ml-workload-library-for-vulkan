@@ -35,6 +35,17 @@ The build system must have:
   `tooling-requirements.txt`.
 - Doxygen 1.9.1 or later. (When building documentation)
 
+To create an archive containing the build artifacts, pass the `--package-type`
+option with an archive type such as `zip` or `tgz`. Use `--package-dir` to
+choose where the archive is written; by default, packages are written to the
+build directory.
+
+For more command line options, see the help output:
+
+```bash
+python3 scripts/build.py --help
+```
+
 ## Build-tree usage
 
 Enable the library when configuring the standalone project:

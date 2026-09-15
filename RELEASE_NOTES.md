@@ -40,6 +40,9 @@ state.
 
 ### Build and Integration
 
+- Add package options for installed-binary and source-tree TGZ or ZIP archives,
+  and for a Python wheel and source distribution containing the native install
+  tree.
 - Optionally build the ML Workload Library for Vulkan® as a shared library with
   `ML_WORKLOAD_LIB_BUILD_SHARED` for ABI and API compatibility analysis.
 - Build C++ samples for inspecting and running VGF workloads, constructing a

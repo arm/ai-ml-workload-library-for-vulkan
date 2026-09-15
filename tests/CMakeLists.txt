@@ -36,6 +36,7 @@ target_link_libraries(mlworkloadlib_tests PRIVATE
     GTest::gtest_main
     SPIRV-Tools-static
     VGF::vgf
+    VGF::vgf-utils
     mlworkloadlib
     mlworkloadlib_internal_utils
 )
