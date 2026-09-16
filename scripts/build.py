@@ -4,10 +4,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 import argparse
+import os
 import pathlib
 import platform
+import re
 import subprocess
 import sys
+from datetime import datetime
+from datetime import timezone
 
 try:
     import argcomplete
@@ -64,8 +68,25 @@ class Builder:
         self.gtest_path = absolute(args.gtest_path)
         self.enable_glsl_support = args.enable_glsl_support
         self.enable_hlsl_support = args.enable_hlsl_support
-        self.package_version = args.package_version
         self.install = args.install
+
+        self.package_dir = args.package_dir or self.build_dir
+        self.package_tgz = "tgz" in args.package_type
+        self.package_zip = "zip" in args.package_type
+        self.package_pip = "pip" in args.package_type
+        self.package_release_pip = "release-pip" in args.package_type
+        self.package_version = args.package_version
+        self.package_source_tgz = "source-tgz" in args.package_type
+        self.package_source_zip = "source-zip" in args.package_type
+
+        if self.package_release_pip:
+            self.package_pip = True
+
+        self.pip_install = str(
+            ML_WORKLOAD_LIB_DIR / "pip_package" / "mlworkloadlib" / "binaries"
+        )
+        if not self.install and self.package_pip:
+            self.install = self.pip_install
 
     def setup_platform_build(self, cmake_cmd):
         system = platform.system()
@@ -155,6 +176,26 @@ class Builder:
             file=sys.stderr,
         )
         return False
+
+    def generate_cmake_package(self, generator, source_package=False):
+        config_file = (
+            "CPackSourceConfig.cmake" if source_package else "CPackConfig.cmake"
+        )
+
+        cmake_package_cmd = [
+            "cpack",
+            "--config",
+            f"{self.build_dir}/{config_file}",
+            "-C",
+            self.build_type,
+            "-G",
+            generator,
+            "-B",
+            self.package_dir,
+            "-D",
+            "CPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF",
+        ]
+        subprocess.run(cmake_package_cmd, check=True)
 
     def run(self):
         cmake_setup_cmd = [
@@ -299,6 +340,66 @@ class Builder:
                 ]
                 subprocess.run(test_cmd, check=True)
 
+            if self.package_tgz:
+                self.generate_cmake_package("TGZ")
+
+            if self.package_zip:
+                self.generate_cmake_package("ZIP")
+
+            if self.package_source_tgz:
+                self.generate_cmake_package("TGZ", True)
+
+            if self.package_source_zip:
+                self.generate_cmake_package("ZIP", True)
+
+            if self.package_pip:
+                if self.install != self.pip_install:
+                    subprocess.run(
+                        [
+                            "cmake",
+                            "--install",
+                            self.build_dir,
+                            "--prefix",
+                            self.pip_install,
+                            "--config",
+                            self.build_type,
+                        ],
+                        check=True,
+                    )
+
+                package_version = ""
+                if self.package_version:
+                    package_version = self.package_version
+                else:
+                    package_version = (
+                        "" if self.package_release_pip else get_package_version()
+                    )
+
+                build_env = os.environ.copy()
+                build_env[
+                    "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AI_ML_WORKLOAD_LIBRARY_FOR_VULKAN"
+                ] = package_version
+                if package_version:
+                    build_env["ML_SDK_PACKAGE_VERSION"] = package_version
+                build_env["ML_WORKLOAD_LIB_SKIP_NATIVE_BUILD"] = "1"
+
+                result = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "build",
+                        "--outdir",
+                        str(ML_WORKLOAD_LIB_DIR / "pip_package" / "dist"),
+                        str(ML_WORKLOAD_LIB_DIR),
+                    ],
+                    env=build_env,
+                    cwd=ML_WORKLOAD_LIB_DIR,
+                )
+                result.communicate()
+                if result.returncode != 0:
+                    print("ERROR: Failed to generate pip package", file=sys.stderr)
+                    return 1
+
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
             print(f"ERROR: Build failed with error: {e}", file=sys.stderr)
             return 1
@@ -306,7 +407,21 @@ class Builder:
         return 0
 
 
-def parse_arguments():
+def get_package_version():
+    pyproject = (ML_WORKLOAD_LIB_DIR / "pyproject.toml").read_text()
+
+    regex_result = re.search(r'fallback_version\s*=\s*"([^"]+)"', pyproject)
+    if not regex_result:
+        raise RuntimeError("fallback_version not found")
+
+    base_version = regex_result.group(1)
+
+    date_tag = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+    return f"{base_version}.dev{date_tag}"
+
+
+def parse_arguments(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--build-dir",
@@ -428,21 +543,38 @@ def parse_arguments():
         help="Install build artifacts into a provided location",
     )
     parser.add_argument(
+        "--package-dir",
+        help=(
+            "Specify location for packages to be created. Defaults to the build "
+            "directory."
+        ),
+        default="",
+    )
+    parser.add_argument(
+        "--package-type",
+        choices=["zip", "tgz", "pip", "source-zip", "source-tgz", "release-pip"],
+        action="append",
+        help="Create a package of a certain type",
+        default=[],
+    )
+    parser.add_argument(
         "--package-version",
         help="Manually specify package version number",
         default="",
     )
 
-    if argcomplete:
+    if argcomplete and argv is None:
         argcomplete.autocomplete(parser)
 
-    args = parser.parse_args()
-    return args
+    return parser.parse_args(argv)
+
+
+def build(argv=None):
+    return Builder(parse_arguments(argv)).run()
 
 
 def main():
-    builder = Builder(parse_arguments())
-    sys.exit(builder.run())
+    sys.exit(build())
 
 
 if __name__ == "__main__":

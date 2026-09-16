@@ -21,7 +21,6 @@ add_executable(mlworkloadlib_fuzzer
 target_link_libraries(mlworkloadlib_fuzzer PRIVATE
     mlworkloadlib
     VGF::vgf
-    VGF::vgf-utils
 )
 
 target_compile_options(mlworkloadlib PRIVATE

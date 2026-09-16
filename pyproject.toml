@@ -3,5 +3,33 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+[build-system]
+requires = ["setuptools>=68", "setuptools-scm>=8", "wheel", "cmake>=3.25", "ninja>=1.8.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai_ml_workload_library_for_vulkan"
+description = "ML Workload Library for Vulkan"
+readme = "README.md"
+dynamic = ["version"]
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Arm Limited" }
+]
+requires-python = ">=3.10"
+
+[tool.setuptools]
+package-dir = { "" = "pip_package" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["pip_package"]
+
+[tool.setuptools.package-data]
+mlworkloadlib = ["binaries/**"]
+
+[tool.setuptools_scm]
+fallback_version = "0.11.0"
+
 [tool.black]
 target-version = ['py310']

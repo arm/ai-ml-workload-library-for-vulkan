@@ -6,9 +6,16 @@
 # Repo
 .repo
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 # Build artifacts
 /build*
 install/
+dist/
+pip_package/*/binaries/
+pip_package/*.egg-info/
 
 # Unit test / coverage reports
 .cache
