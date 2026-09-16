@@ -7,6 +7,10 @@ if(NOT ML_WORKLOAD_LIB_ENABLE_FUZZER)
     return()
 endif()
 
+if(NOT ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT)
+    message(FATAL_ERROR "mlworkloadlib_fuzzer requires ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT")
+endif()
+
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     message(FATAL_ERROR "mlworkloadlib_fuzzer requires clang/LLVM libFuzzer.")
 endif()

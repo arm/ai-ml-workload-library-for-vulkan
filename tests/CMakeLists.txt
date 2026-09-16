@@ -6,7 +6,7 @@
 include(gtest)
 include(spirv-tools)
 
-add_executable(mlworkloadlib_tests
+set(ML_WORKLOAD_LIB_TEST_SOURCES
     composed/test_composed_session.cpp
     composed/test_composed_utils.hpp
     standalone_compute/test_standalone_compute_session.cpp
@@ -22,10 +22,17 @@ add_executable(mlworkloadlib_tests
     test_spirv_utils.hpp
     test_vulkan_fixture.hpp
     test_vulkan_resources.hpp
-    vgf/test_vgf_session.cpp
-    vgf/test_vgf_utils.hpp
-    vgf/test_vgf_workload.cpp
 )
+
+if(ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT)
+    list(APPEND ML_WORKLOAD_LIB_TEST_SOURCES
+        vgf/test_vgf_session.cpp
+        vgf/test_vgf_utils.hpp
+        vgf/test_vgf_workload.cpp
+    )
+endif()
+
+add_executable(mlworkloadlib_tests ${ML_WORKLOAD_LIB_TEST_SOURCES})
 
 target_include_directories(mlworkloadlib_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -35,11 +42,17 @@ target_include_directories(mlworkloadlib_tests PRIVATE
 target_link_libraries(mlworkloadlib_tests PRIVATE
     GTest::gtest_main
     SPIRV-Tools-static
-    VGF::vgf
-    VGF::vgf-utils
     mlworkloadlib
     mlworkloadlib_internal_utils
 )
+
+if(ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT)
+    target_link_libraries(mlworkloadlib_tests PRIVATE
+        VGF::vgf
+        VGF::vgf-utils
+    )
+    target_compile_definitions(mlworkloadlib_tests PRIVATE ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT)
+endif()
 
 target_compile_definitions(mlworkloadlib_tests PRIVATE
     ML_WORKLOAD_LIB_ADD_INT32_BUFFERS_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/add_int32_buffers.spvasm"

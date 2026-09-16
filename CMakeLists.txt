@@ -57,6 +57,7 @@ configure_file(
 
 option(ML_WORKLOAD_LIB_BUILD_TESTS "Build ML Workload Library unit tests" OFF)
 option(ML_WORKLOAD_LIB_BUILD_DOCS "Build ML Workload Library documentation" OFF)
+option(ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT "Build ML Workload Library with VGF workload support" ON)
 option(ML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT "Build ML Workload Library with GLSL source module support" OFF)
 option(ML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT "Build ML Workload Library with HLSL source module support" OFF)
 option(ML_WORKLOAD_LIB_BUILD_SHARED "Build ML Workload Library as a shared library" OFF)
@@ -65,7 +66,9 @@ set(ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS "${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPT
     "Additional compile options for ML Workload Library")
 
 include(vulkan-headers)
-include(vgf-lib)
+if(ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT)
+    include(vgf-lib)
+endif()
 if(ML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT)
     include(glslang)
 endif()
@@ -110,16 +113,20 @@ function(mlworkloadlib_configure_target target_name)
             $<BUILD_INTERFACE:Vulkan::Headers>
     )
 
-    if(ML_WORKLOAD_LIB_EMBEDDED_SDK_PACKAGE)
-        target_link_libraries(${target_name} PRIVATE
-            VGF::vgf
-            VGF::vgf-utils
-        )
-    else()
-        target_link_libraries(${target_name} PRIVATE
-            $<BUILD_INTERFACE:VGF::vgf>
-            $<BUILD_INTERFACE:VGF::vgf-utils>
-        )
+    if(ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT)
+        target_compile_definitions(${target_name} PRIVATE ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT)
+
+        if(ML_WORKLOAD_LIB_EMBEDDED_SDK_PACKAGE)
+            target_link_libraries(${target_name} PRIVATE
+                VGF::vgf
+                VGF::vgf-utils
+            )
+        else()
+            target_link_libraries(${target_name} PRIVATE
+                $<BUILD_INTERFACE:VGF::vgf>
+                $<BUILD_INTERFACE:VGF::vgf-utils>
+            )
+        endif()
     endif()
 
     target_link_libraries(${target_name} PRIVATE
@@ -151,7 +158,6 @@ if(ML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT)
     target_link_libraries(mlworkloadlib_glsl_glslang_objects
         PRIVATE
             mlworkloadlib
-            VGF::vgf-utils
             "$<BUILD_LOCAL_INTERFACE:glslang::glslang>"
             "$<BUILD_LOCAL_INTERFACE:glslang::glslang-default-resource-limits>"
             "$<BUILD_LOCAL_INTERFACE:glslang::SPIRV>"
@@ -192,7 +198,6 @@ if(ML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT)
     target_link_libraries(mlworkloadlib_hlsl_dxc_objects
         PRIVATE
             mlworkloadlib
-            VGF::vgf-utils
             mlworkloadlib_dxc
     )
 
