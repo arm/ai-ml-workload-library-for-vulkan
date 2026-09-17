@@ -6,7 +6,7 @@ model.
 
 ## Public API
 
-The installed public headers are included directly as needed:
+Include the installed public headers that your application requires:
 
 ```cpp
 #include <mlworkloadlib/workload.hpp>
@@ -14,14 +14,22 @@ The installed public headers are included directly as needed:
 #include <mlworkloadlib/session.hpp>
 ```
 
-The API exposes `mlsdk::workloadlib::Workload`, `mlsdk::workloadlib::Context`,
-`mlsdk::workloadlib::Session`, `mlsdk::workloadlib::BindingSet`, and
-`mlsdk::workloadlib::PreparedExecution`. Supported workloads are VGF-backed workloads
-created with `Workload::fromVGF(...)` and standalone compute shader workloads
-created with `Workload::fromComputeShader(...)`, and standalone Vulkan® data
-graph workloads created with `Workload::fromDataGraph(...)`; callers provide
-application-owned Vulkan® objects through `Context::wrap(...)`, or let
-`Context::create()` create a runtime-owned Vulkan® context.
+The API exposes:
+
+- `mlsdk::workloadlib::Workload`
+- `mlsdk::workloadlib::Context`
+- `mlsdk::workloadlib::Session`
+- `mlsdk::workloadlib::BindingSet`
+- `mlsdk::workloadlib::PreparedExecution`
+
+You can create the following workloads:
+
+- VGF-backed workloads with `Workload::fromVGF(...)`
+- Standalone compute shader workloads with `Workload::fromComputeShader(...)`
+- Standalone Vulkan® data graph workloads with `Workload::fromDataGraph(...)`
+
+Use `Context::wrap(...)` to provide application-owned Vulkan objects, or
+use `Context::create()` to create a runtime-owned Vulkan context.
 
 ## Building the ML Workload Library for Vulkan® from source
 
@@ -60,7 +68,7 @@ Link one of the build-tree targets:
 target_link_libraries(my_target PRIVATE mlworkloadlib)
 ```
 
-or, if you prefer a namespaced target in the same build:
+Alternatively, link a namespaced target in the same build:
 
 ```cmake
 target_link_libraries(my_target PRIVATE MLWorkloadLibraryForVulkan::mlworkloadlib)
@@ -69,7 +77,7 @@ target_link_libraries(my_target PRIVATE MLWorkloadLibraryForVulkan::mlworkloadli
 ## Installed package usage
 
 When the ML Workload Library for Vulkan® is installed, the package exports `mlworkloadlib` through the
-`MLWorkloadLibraryForVulkan` package. Downstream consumers should use
+`MLWorkloadLibraryForVulkan` package. Downstream consumers must use
 `MLWorkloadLibraryForVulkan::mlworkloadlib`.
 
 ```cmake
@@ -77,12 +85,13 @@ find_package(MLWorkloadLibraryForVulkan CONFIG REQUIRED)
 target_link_libraries(my_target PRIVATE MLWorkloadLibraryForVulkan::mlworkloadlib)
 ```
 
-The package target expects the `VGF` and `VulkanHeaders` packages to be discoverable at configure time.
+The package target requires the `VGF` and `VulkanHeaders` packages to be
+discoverable at configure time.
 
 ## Optional source module support
 
-SPIR-V™ modules are supported by the base library. GLSL and HLSL source
-compilation are optional and can be enabled when building:
+The base library supports SPIR-V™ modules. You can choose to enable GLSL and
+HLSL source compilation when you build the library:
 
 ```sh
 python3 scripts/build.py --enable-glsl-support

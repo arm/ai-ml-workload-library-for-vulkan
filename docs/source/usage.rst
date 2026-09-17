@@ -7,8 +7,8 @@ Execution model
 The library can create a runtime-owned Vulkan® context, or it can wrap Vulkan®
 objects supplied by the application without taking ownership. When wrapping
 objects, the application must enable the Vulkan® extensions and features required
-by the workload. Resources can likewise be supplied by the application or
-allocated through the context from workload resource requirements.
+by the workload. Similarly, the application can supply resources, or the context
+can allocate them based on the workload resource requirements.
 
 A workload is executed through the following sequence:
 
@@ -50,7 +50,7 @@ Workload sources
 
 ``Workload::fromVGF(...)`` loads a VGF file or decodes a caller-owned memory
 buffer. ``Workload::fromComputeShader(...)`` constructs a standalone compute
-workload, and ``Workload::fromDataGraph(...)`` constructs a standalone Vulkan®
+workload. ``Workload::fromDataGraph(...)`` constructs a standalone Vulkan®
 data-graph workload.
 
 The standalone compute samples describe their module, dispatch, and resources
@@ -62,8 +62,8 @@ directly:
    :end-before: // [compute-description-end]
 
 Standalone data-graph workloads use the same resource model and add graph
-pipeline metadata. Sample 5 leaves the module implementation missing so it can
-be supplied to a session later:
+pipeline metadata. Sample 5 omits the module implementation so it can be
+supplied to a session later:
 
 .. literalinclude:: ../sources/samples/5_create_standalone_data_graph.cpp
    :language: cpp
@@ -112,14 +112,14 @@ Workload inspection
 -------------------
 
 A workload exposes non-owning views of its public resources. Sample 1 inspects
-each resource's identity, access, kind, and kind-specific requirements:
+the identity, access, kind, and kind-specific requirements of each resource:
 
 .. literalinclude:: ../sources/samples/1_inspect_workload_metadata.cpp
    :language: cpp
    :start-after: // [resource-inspection-begin]
    :end-before: // [resource-inspection-end]
 
-Executables similarly expose their module and descriptor interface:
+Similarly, executables expose their module and descriptor interface:
 
 .. literalinclude:: ../sources/samples/1_inspect_workload_metadata.cpp
    :language: cpp
@@ -131,13 +131,20 @@ Resource binding
 
 The workload exposes its public resources in order through
 ``Workload::resources()`` or by index through ``Workload::resource(...)``.
-Inspect each resource's kind and requirements before creating the corresponding
-Vulkan® object, or use ``Context::createTensor()``, ``Context::createBuffer()``,
-or ``Context::createImage()`` to create a compatible allocation. Then use
-``bindTensor()``, ``bindBuffer()``, or ``bindImage()``. Every required public
-resource must be bound before preparing an execution.
 
-Sample 3 applies this process to every public resource according to its kind:
+To create and bind resources:
+
+#. Use one of these options:
+
+   - Inspect the kind and requirements of each resource, and then create the
+     corresponding Vulkan® object.
+   - Use ``Context::createTensor()``, ``Context::createBuffer()``, or
+     ``Context::createImage()`` to create a compatible allocation.
+
+#. Use ``bindTensor()``, ``bindBuffer()``, or ``bindImage()`` to bind every
+   required public resource before preparing an execution.
+
+Sample 3 binds every public resource according to its kind:
 
 .. literalinclude:: ../sources/samples/3_run_vgf_with_placeholder_module.cpp
    :language: cpp
@@ -147,10 +154,11 @@ Sample 3 applies this process to every public resource according to its kind:
 Supply ``BoundMemoryInfo`` when
 ``ResourceRequirementsView::requiresBoundMemoryInfo()`` is true. Image bindings
 must provide an image view and the required subresource range, and must provide a
-sampler only when the image requirements request one. An image layout is
-optional: when supplied, it describes the current layout and prepared execution
-transitions the image to the workload-required layout. When omitted, the
-application manages the image layout.
+sampler only when the image requirements request one.
+
+An image layout is optional. When supplied, it describes the current layout, and
+prepared execution transitions the image to the workload-required layout. When
+omitted, the application manages the image layout.
 
 Running and recording
 ---------------------
