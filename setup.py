@@ -22,6 +22,26 @@ ML_WORKLOAD_LIB_DIR = pathlib.Path(__file__).resolve().parent
 SKIP_NATIVE_BUILD_ENV = "ML_WORKLOAD_LIB_SKIP_NATIVE_BUILD"
 
 
+def packaged_libraries():
+    binaries_dir = ML_WORKLOAD_LIB_DIR / "pip_package" / "mlworkloadlib" / "binaries"
+    system = platform.system()
+    if system == "Windows":
+        return [
+            binaries_dir / "lib" / "mlworkloadlib_static.lib",
+            binaries_dir / "lib" / "mlworkloadlib.lib",
+            binaries_dir / "bin" / "mlworkloadlib.dll",
+        ]
+    if system == "Darwin":
+        return [
+            binaries_dir / "lib" / "libmlworkloadlib.a",
+            binaries_dir / "lib" / "libmlworkloadlib.dylib",
+        ]
+    return [
+        binaries_dir / "lib" / "libmlworkloadlib.a",
+        binaries_dir / "lib" / "libmlworkloadlib.so",
+    ]
+
+
 class Build(setuptools_build):
     def initialize_options(self):
         super().initialize_options()
@@ -32,20 +52,9 @@ class BuildPy(build_py):
     def run(self):
         super().run()
 
-        library_name = (
-            "mlworkloadlib.lib"
-            if platform.system() == "Windows"
-            else "libmlworkloadlib.a"
-        )
-        staged_library = (
-            ML_WORKLOAD_LIB_DIR
-            / "pip_package"
-            / "mlworkloadlib"
-            / "binaries"
-            / "lib"
-            / library_name
-        )
-        if os.environ.get(SKIP_NATIVE_BUILD_ENV) == "1" or staged_library.is_file():
+        if os.environ.get(SKIP_NATIVE_BUILD_ENV) == "1" or all(
+            library.is_file() for library in packaged_libraries()
+        ):
             return
 
         dependency_dir = ML_WORKLOAD_LIB_DIR.parent.parent / "dependencies"
@@ -74,6 +83,7 @@ class BuildPy(build_py):
                 str(native_build_dir),
                 "--install",
                 str(native_install_dir),
+                "--build-shared",
             ]
         )
         if result:

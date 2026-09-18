@@ -139,11 +139,19 @@ endfunction()
 add_library(mlworkloadlib STATIC ${ML_WORKLOAD_LIB_SOURCES})
 mlworkloadlib_configure_target(mlworkloadlib)
 add_library(${ML_WORKLOAD_LIB_NAMESPACE}::mlworkloadlib ALIAS mlworkloadlib)
+if(WIN32)
+    set_target_properties(mlworkloadlib PROPERTIES ARCHIVE_OUTPUT_NAME mlworkloadlib_static)
+endif()
 
 if(ML_WORKLOAD_LIB_BUILD_SHARED)
     add_library(mlworkloadlib_shared SHARED ${ML_WORKLOAD_LIB_SOURCES})
     mlworkloadlib_configure_target(mlworkloadlib_shared)
     set_target_properties(mlworkloadlib_shared PROPERTIES OUTPUT_NAME mlworkloadlib)
+    if(WIN32)
+        set_target_properties(mlworkloadlib_shared PROPERTIES
+            WINDOWS_EXPORT_ALL_SYMBOLS ON
+        )
+    endif()
 endif()
 
 function(mlworkloadlib_add_source_module_backend target_name source)
