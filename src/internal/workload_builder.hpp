@@ -37,7 +37,7 @@ class WorkloadBuilder {
      **************************************************************************/
 
     WorkloadBuilder();
-    explicit WorkloadBuilder(std::unique_ptr<MemoryMap> mappedFile);
+    explicit WorkloadBuilder(std::unique_ptr<WorkloadSourceStorage> sourceStorage);
 
     /***************************************************************************
      * Resources

@@ -45,6 +45,7 @@ ModuleImplementation makeSpirvModule(std::vector<uint32_t> spirv) {
     return module;
 }
 
+#ifdef ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
 std::vector<int8_t> makeSmallTensorInput(const std::vector<int64_t> &shape, int8_t seed) {
     std::vector<int8_t> input(Tensor::numElements(shape));
     for (size_t index = 0; index < input.size(); ++index) {
@@ -66,6 +67,7 @@ std::vector<int8_t> subtractTensors(const std::vector<int8_t> &lhs, const std::v
                    [](int8_t lhsValue, int8_t rhsValue) { return static_cast<int8_t>(lhsValue - rhsValue); });
     return result;
 }
+#endif
 
 template <typename RecordCommands>
 void recordAndSubmitCommands(const vk::raii::Device &device, const vk::raii::Queue &queue, uint32_t queueFamilyIndex,
@@ -691,6 +693,7 @@ TEST_F(ComposedSessionExecutionTest, RunSacFanInDagFromTwoSacOutputsToOneSacRead
     EXPECT_EQ(outputBuffer.read(elements), addVectors(firstSourceSacOutput, secondSourceSacOutput));
 }
 
+#ifdef ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
 TEST_F(ComposedSessionExecutionTest, RecordSacVgfSacSequenceWithoutLibraryComposition) {
     if (!supports(Feature::GlslModules)) {
         GTEST_SKIP() << "GLSL source module support is not enabled";
@@ -1122,3 +1125,4 @@ TEST_F(ComposedSessionExecutionTest, RecordSacVgfSacBufferSequenceWithoutLibrary
     const auto vgfOutput = addVectors(firstOutput, vgfSecondInput);
     EXPECT_EQ(outputBuffer.read(elements), addVectors(vgfOutput, secondSacSecondInput));
 }
+#endif

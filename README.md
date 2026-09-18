@@ -88,6 +88,19 @@ target_link_libraries(my_target PRIVATE MLWorkloadLibraryForVulkan::mlworkloadli
 The package target requires the `VGF` and `VulkanHeaders` packages to be
 discoverable at configure time.
 
+## Optional VGF support
+
+VGF workload support is enabled by default. Disable it when the library is only
+needed for programmatically constructed workloads:
+
+```sh
+python3 scripts/build.py --disable-vgf-support
+```
+
+For direct CMake configuration, set `ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT=OFF`.
+Such builds do not locate or link VGF Lib. Calls to `Workload::fromVGF(...)`
+throw an exception indicating that VGF support is unavailable.
+
 ## Optional source module support
 
 The base library supports SPIR-V™ modules. You can choose to enable GLSL and

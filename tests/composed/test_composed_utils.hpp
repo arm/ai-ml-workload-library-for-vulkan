@@ -7,11 +7,14 @@
 
 #include "test_resource_requirements.hpp"
 #include "test_spirv_utils.hpp"
-#include "vgf/test_vgf_utils.hpp"
 
 #include "mlworkloadlib/workload.hpp"
 
-#include "vgf/encoder.hpp"
+#ifdef ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
+#    include "vgf/test_vgf_utils.hpp"
+
+#    include "vgf/encoder.hpp"
+#endif
 
 #include <vulkan/vulkan_core.h>
 
@@ -22,7 +25,9 @@
 
 namespace mlsdk::workloadlib::test {
 
+#ifdef ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
 inline const std::vector<mlsdk::vgflib::GraphConstantBindingRef> noGraphConstants;
+#endif
 
 inline DispatchShape dispatchForNhwcTensor(const std::vector<int64_t> &shape) {
     return {static_cast<uint32_t>(shape.at(1)), static_cast<uint32_t>(shape.at(2)), static_cast<uint32_t>(shape.at(3))};
@@ -104,6 +109,7 @@ inline DataGraphDescription makeMaxpool8x8To4x4Description() {
     return description;
 }
 
+#ifdef ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
 inline std::string makeMaxpool16x16To8x8Vgf() {
     const auto code = assembleMaxpool16x16To8x8Spirv("composed_vgf_maxpool_16x16_to_8x8", {0, 0, 1, 1});
     return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
@@ -187,5 +193,6 @@ inline std::string makeAddInt32BuffersVgf() {
                                {firstInputBinding, secondInputBinding}, {outputBinding}, noGraphConstants, {10, 1, 1});
     });
 }
+#endif
 
 } // namespace mlsdk::workloadlib::test

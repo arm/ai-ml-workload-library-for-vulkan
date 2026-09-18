@@ -5,32 +5,55 @@
 
 #include "mlworkloadlib/workload.hpp"
 
-#include "internal/workload_builder.hpp"
+#ifdef ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
 
-#include "internal/utils.hpp"
+#    include "internal/workload_builder.hpp"
 
-#include "vgf/decoder.hpp"
+#    include "internal/utils.hpp"
 
-#include <algorithm>
-#include <cstddef>
-#include <cstdint>
-#include <filesystem>
-#include <limits>
-#include <memory>
-#include <optional>
-#include <stdexcept>
-#include <string>
-#include <type_traits>
-#include <utility>
-#include <vector>
+#    include "vgf-utils/memory_map.hpp"
+#    include "vgf/decoder.hpp"
+
+#    include <algorithm>
+#    include <cstddef>
+#    include <cstdint>
+#    include <filesystem>
+#    include <limits>
+#    include <memory>
+#    include <optional>
+#    include <stdexcept>
+#    include <string>
+#    include <type_traits>
+#    include <utility>
+#    include <vector>
+
+#else
+
+#    include <stdexcept>
+
+#endif // ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
 
 namespace mlsdk::workloadlib {
+
+#ifdef ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
+
 namespace vgflib = mlsdk::vgflib;
 
 using Resource = detail::Resource;
 using WorkloadBuilder = detail::WorkloadBuilder;
 
 namespace {
+
+class VgfFileStorage final : public detail::WorkloadSourceStorage {
+  public:
+    explicit VgfFileStorage(const std::filesystem::path &path) : memoryMap_(path.string()) {}
+
+    const void *data() const { return memoryMap_.ptr(); }
+    std::size_t size() const { return memoryMap_.size(); }
+
+  private:
+    MemoryMap memoryMap_;
+};
 
 /*******************************************************************************
  * VGF decoding helpers
@@ -379,15 +402,15 @@ void populateVgfWorkload(WorkloadBuilder &builder, const void *data, std::size_t
              modelSequenceTable->getModelSequenceOutputNamesHandle());
 }
 
-Workload decodeVgfMemory(std::unique_ptr<MemoryMap> mappedFile) {
-    if (mappedFile == nullptr) {
+Workload decodeVgfMemory(std::unique_ptr<VgfFileStorage> sourceStorage) {
+    if (sourceStorage == nullptr) {
         throw std::logic_error("File-backed VGF decode requires a memory map");
     }
 
-    const auto *data = mappedFile->ptr();
-    const auto size = mappedFile->size();
+    const auto *data = sourceStorage->data();
+    const auto size = sourceStorage->size();
 
-    WorkloadBuilder builder(std::move(mappedFile));
+    WorkloadBuilder builder(std::move(sourceStorage));
     populateVgfWorkload(builder, data, size);
     return builder.finish();
 }
@@ -405,9 +428,25 @@ Workload decodeVgfMemory(const void *data, std::size_t size) {
  *******************************************************************************/
 
 Workload Workload::fromVGF(const std::filesystem::path &path) {
-    return decodeVgfMemory(std::make_unique<MemoryMap>(path.string()));
+    return decodeVgfMemory(std::make_unique<VgfFileStorage>(path));
 }
 
 Workload Workload::fromVGF(const void *data, std::size_t size) { return decodeVgfMemory(data, size); }
+
+#else
+
+namespace {
+
+[[noreturn]] void throwVgfSupportUnavailable() {
+    throw std::runtime_error("VGF workload support is not available in this build");
+}
+
+} // namespace
+
+Workload Workload::fromVGF(const std::filesystem::path &) { throwVgfSupportUnavailable(); }
+
+Workload Workload::fromVGF(const void *, std::size_t) { throwVgfSupportUnavailable(); }
+
+#endif // ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
 
 } // namespace mlsdk::workloadlib

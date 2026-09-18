@@ -7,8 +7,6 @@
 
 #include "mlworkloadlib/workload.hpp"
 
-#include "vgf-utils/memory_map.hpp"
-
 #include <vulkan/vulkan.hpp>
 
 #include <array>
@@ -21,6 +19,19 @@
 #include <vector>
 
 namespace mlsdk::workloadlib::detail {
+
+class WorkloadSourceStorage {
+  public:
+    virtual ~WorkloadSourceStorage() = default;
+
+    WorkloadSourceStorage(const WorkloadSourceStorage &) = delete;
+    WorkloadSourceStorage &operator=(const WorkloadSourceStorage &) = delete;
+    WorkloadSourceStorage(WorkloadSourceStorage &&) = delete;
+    WorkloadSourceStorage &operator=(WorkloadSourceStorage &&) = delete;
+
+  protected:
+    WorkloadSourceStorage() = default;
+};
 
 /*******************************************************************************
  * Internal workload representation
@@ -160,7 +171,7 @@ struct Workload::Impl {
      * Stored metadata
      **************************************************************************/
 
-    std::unique_ptr<MemoryMap> mappedFile;
+    std::unique_ptr<detail::WorkloadSourceStorage> sourceStorage;
 
     std::vector<Resource> resources;
     std::vector<uint32_t> publicResourceIndices;

@@ -131,8 +131,8 @@ Module moduleFromImplementation(ModuleImplementation implementation, std::string
 
 WorkloadBuilder::WorkloadBuilder() : workloadState_(std::make_unique<Workload::Impl>()) {}
 
-WorkloadBuilder::WorkloadBuilder(std::unique_ptr<MemoryMap> mappedFile) : WorkloadBuilder() {
-    workloadState_->mappedFile = std::move(mappedFile);
+WorkloadBuilder::WorkloadBuilder(std::unique_ptr<WorkloadSourceStorage> sourceStorage) : WorkloadBuilder() {
+    workloadState_->sourceStorage = std::move(sourceStorage);
 }
 
 /*******************************************************************************

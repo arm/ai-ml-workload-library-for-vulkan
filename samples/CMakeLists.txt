@@ -16,11 +16,13 @@ if(ML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT)
         mlworkloadlib_glsl_glslang
     )
 
-    mlworkloadlib_add_sample(mlworkloadlib_run_vgf_with_placeholder_module_sample
-        3_run_vgf_with_placeholder_module.cpp
-        mlworkloadlib_glsl_glslang
-        VGF::vgf
-    )
+    if(ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT)
+        mlworkloadlib_add_sample(mlworkloadlib_run_vgf_with_placeholder_module_sample
+            3_run_vgf_with_placeholder_module.cpp
+            mlworkloadlib_glsl_glslang
+            VGF::vgf
+        )
+    endif()
 
     mlworkloadlib_add_sample(mlworkloadlib_record_glsl_compute_with_wrapped_context_sample
         4_record_glsl_compute_with_wrapped_context.cpp

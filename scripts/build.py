@@ -68,6 +68,7 @@ class Builder:
         self.gtest_path = absolute(args.gtest_path)
         self.enable_glsl_support = args.enable_glsl_support
         self.enable_hlsl_support = args.enable_hlsl_support
+        self.disable_vgf_support = args.disable_vgf_support
         self.install = args.install
 
         self.package_dir = args.package_dir or self.build_dir
@@ -207,11 +208,16 @@ class Builder:
             f"-DCMAKE_BUILD_TYPE={self.build_type}",
             f"-DCMAKE_TOOLCHAIN_FILE={CMAKE_TOOLCHAIN_PATH / 'gcc.cmake'}",
             f"-DVULKAN_HEADERS_PATH={self.vulkan_headers_path}",
-            f"-DML_SDK_VGF_LIB_PATH={self.vgf_lib_path}",
-            f"-DFLATBUFFERS_PATH={self.flatbuffers_path}",
             "-G",
             "Ninja",
         ]
+
+        if self.disable_vgf_support:
+            cmake_setup_cmd.append("-DML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT=OFF")
+        else:
+            cmake_setup_cmd.append("-DML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT=ON")
+            cmake_setup_cmd.append(f"-DML_SDK_VGF_LIB_PATH={self.vgf_lib_path}")
+            cmake_setup_cmd.append(f"-DFLATBUFFERS_PATH={self.flatbuffers_path}")
 
         if self.fuzzer:
             if self.target_platform in ["android", "aarch64"]:
@@ -497,6 +503,11 @@ def parse_arguments(argv=None):
         "--vgf-lib-path",
         help="Path to the ai-ml-sdk-vgf-library repo. Default: %(default)s",
         default=f"{ML_WORKLOAD_LIB_DIR / '..' / 'vgf-lib'}",
+    )
+    parser.add_argument(
+        "--disable-vgf-support",
+        help="Disable VGF workload support",
+        action="store_true",
     )
     parser.add_argument(
         "--flatbuffers-path",
