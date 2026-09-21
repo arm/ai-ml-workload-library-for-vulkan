@@ -99,6 +99,9 @@ if(ML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT)
     set(CLANG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(HLSL_INCLUDE_TESTS OFF CACHE BOOL "" FORCE)
     set(HLSL_DISABLE_SOURCE_GENERATION ON CACHE BOOL "" FORCE)
+    # Static DXC must use the consumer's CRT allocator without replacing global
+    # new/delete in applications or libraries that link this HLSL backend.
+    set(DXC_DISABLE_ALLOCATOR_OVERRIDES ON CACHE BOOL "Disable usage of allocator overrides" FORCE)
     if(MSVC AND CMAKE_BUILD_TYPE STREQUAL "Debug")
         set(HLSL_ENABLE_DEBUG_ITERATORS ON CACHE BOOL "" FORCE)
     endif()

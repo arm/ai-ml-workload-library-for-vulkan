@@ -72,6 +72,7 @@ if(ML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT)
 endif()
 
 if(ML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT)
+    target_sources(mlworkloadlib_tests PRIVATE test_hlsl_compiler.cpp)
     target_link_libraries(mlworkloadlib_tests PRIVATE mlworkloadlib_hlsl_dxc)
     target_compile_definitions(mlworkloadlib_tests PRIVATE ML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT)
 endif()
