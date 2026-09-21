@@ -11,6 +11,7 @@ import sys
 from setuptools import setup
 from setuptools.command.build import build as setuptools_build
 from setuptools.command.build_py import build_py
+from setuptools.dist import Distribution
 
 try:
     from setuptools.command.bdist_wheel import bdist_wheel
@@ -90,6 +91,11 @@ class BuildPy(build_py):
             raise RuntimeError(f"Workload Lib native build failed with code {result}")
 
 
+class BinaryDistribution(Distribution):
+    def has_ext_modules(self):
+        return True
+
+
 class BDistWheel(bdist_wheel):
     def finalize_options(self):
         super().finalize_options()
@@ -116,4 +122,7 @@ class BDistWheel(bdist_wheel):
         return ("py3", "none", platform_name)
 
 
-setup(cmdclass={"build": Build, "build_py": BuildPy, "bdist_wheel": BDistWheel})
+setup(
+    cmdclass={"build": Build, "build_py": BuildPy, "bdist_wheel": BDistWheel},
+    distclass=BinaryDistribution,
+)
