@@ -13,7 +13,6 @@
 
 namespace mlsdk::workloadlib {
 
-using Resource = detail::Resource;
 using WorkloadBuilder = detail::WorkloadBuilder;
 
 /*******************************************************************************
@@ -43,11 +42,9 @@ Workload Workload::fromComputeShader(ComputeShaderDescription description) {
     // Public resources and descriptor bindings
     executable.bindings.reserve(description.resources.size());
     for (auto &resourceDescription : description.resources) {
-        const auto resourceIndex =
-            builder.addResource(std::move(resourceDescription.name), resourceDescription.resource,
-                                Resource::publicRoleForAccess(resourceDescription.access));
-        builder.addDescriptorBinding(executableIndex, resourceIndex, resourceDescription.set,
-                                     resourceDescription.binding, resourceDescription.access);
+        builder.addPublicResourceBinding(executableIndex, std::move(resourceDescription.name),
+                                         resourceDescription.resource, resourceDescription.set,
+                                         resourceDescription.binding, resourceDescription.access);
     }
 
     return builder.finish();

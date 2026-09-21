@@ -202,8 +202,7 @@ uint32_t addDecodedResource(WorkloadBuilder &builder, const vgflib::ModelResourc
         return builder.addImageResource(
             {}, role, *descriptorType, format, std::move(shape), std::move(stride), elementCount, aliasGroupId,
             requiresBoundMemoryInfo, {}, detail::imageUsage(*descriptorType, aliasGroupId.has_value()),
-            detail::imageLayout(*descriptorType), {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
-            samplerConfigFromVgfResource(decoder, resourceIndex));
+            detail::imageLayout(*descriptorType), {}, samplerConfigFromVgfResource(decoder, resourceIndex));
     case ResourceKind::Unknown:
         throw std::runtime_error("Unsupported VGF resource descriptor type");
     }
@@ -213,19 +212,18 @@ uint32_t addDecodedResource(WorkloadBuilder &builder, const vgflib::ModelResourc
 uint32_t addDecodedModule(WorkloadBuilder &builder, const vgflib::ModuleTableDecoder &decoder, uint32_t moduleIndex) {
     auto name = std::string(decoder.getModuleName(moduleIndex));
     auto entryPoint = std::string(decoder.getModuleEntryPoint(moduleIndex));
+    ModuleImplementation implementation;
     if (decoder.hasSPIRVCode(moduleIndex)) {
-        return builder.addModule(std::move(name), std::move(entryPoint), ModuleCodeKind::Spirv,
-                                 toVector(decoder.getSPIRVModuleCode(moduleIndex)));
+        implementation.codeKind = ModuleCodeKind::Spirv;
+        implementation.spirv = toVector(decoder.getSPIRVModuleCode(moduleIndex));
+    } else if (decoder.hasGLSLCode(moduleIndex)) {
+        implementation.codeKind = ModuleCodeKind::Glsl;
+        implementation.source = std::string(decoder.getGLSLModuleCode(moduleIndex));
+    } else if (decoder.hasHLSLCode(moduleIndex)) {
+        implementation.codeKind = ModuleCodeKind::Hlsl;
+        implementation.source = std::string(decoder.getHLSLModuleCode(moduleIndex));
     }
-    if (decoder.hasGLSLCode(moduleIndex)) {
-        return builder.addModule(std::move(name), std::move(entryPoint), ModuleCodeKind::Glsl, {},
-                                 std::string(decoder.getGLSLModuleCode(moduleIndex)));
-    }
-    if (decoder.hasHLSLCode(moduleIndex)) {
-        return builder.addModule(std::move(name), std::move(entryPoint), ModuleCodeKind::Hlsl, {},
-                                 std::string(decoder.getHLSLModuleCode(moduleIndex)));
-    }
-    return builder.addModule(std::move(name), std::move(entryPoint), ModuleCodeKind::Missing, {});
+    return builder.addModule(std::move(implementation), std::move(name), std::move(entryPoint));
 }
 
 uint32_t addDecodedConstant(WorkloadBuilder &builder, const vgflib::ConstantDecoder &decoder, uint32_t constantIndex) {

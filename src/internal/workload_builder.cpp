@@ -101,13 +101,13 @@ Module moduleFromImplementation(ModuleImplementation implementation, std::string
     switch (implementation.codeKind) {
     case ModuleCodeKind::Spirv:
         if (implementation.spirv.empty()) {
-            throw std::runtime_error("Programmatic workload module '" + name + "' SPIR-V code must not be empty");
+            throw std::runtime_error("Workload module '" + name + "' SPIR-V code must not be empty");
         }
         break;
     case ModuleCodeKind::Glsl:
     case ModuleCodeKind::Hlsl:
         if (implementation.source.empty()) {
-            throw std::runtime_error("Programmatic workload module '" + name + "' source code must not be empty");
+            throw std::runtime_error("Workload module '" + name + "' source code must not be empty");
         }
         break;
     case ModuleCodeKind::Missing:
@@ -177,6 +177,13 @@ uint32_t WorkloadBuilder::addResource(std::string name, const ResourceRequiremen
     throw std::logic_error("Unhandled workload resource kind");
 }
 
+void WorkloadBuilder::addPublicResourceBinding(uint32_t executableIndex, std::string name,
+                                               const ResourceRequirements &requirements, uint32_t set, uint32_t binding,
+                                               ResourceAccess access) {
+    const auto resourceIndex = addResource(std::move(name), requirements, Resource::publicRoleForAccess(access));
+    addDescriptorBinding(executableIndex, resourceIndex, set, binding, access);
+}
+
 uint32_t WorkloadBuilder::addTensorResource(std::string name, Resource::Role role,
                                             std::optional<vk::DescriptorType> descriptorType, vk::Format format,
                                             std::vector<int64_t> shape, std::vector<int64_t> stride,
@@ -239,36 +246,6 @@ uint32_t WorkloadBuilder::appendResource(Resource workloadResource) {
  *******************************************************************************/
 
 void WorkloadBuilder::reserveModules(std::size_t count) { workloadState_->modules.reserve(count); }
-
-uint32_t WorkloadBuilder::addModule(std::string name, std::string entryPoint, ModuleCodeKind codeKind,
-                                    std::vector<uint32_t> code, std::string source, std::string buildOptions,
-                                    std::vector<std::filesystem::path> includeDirs) {
-    switch (codeKind) {
-    case ModuleCodeKind::Spirv:
-        if (code.empty()) {
-            throw std::runtime_error("Workload SPIR-V module code must not be empty");
-        }
-        break;
-    case ModuleCodeKind::Glsl:
-    case ModuleCodeKind::Hlsl:
-        if (source.empty()) {
-            throw std::runtime_error("Workload source module code must not be empty");
-        }
-        break;
-    case ModuleCodeKind::Missing:
-        break;
-    }
-
-    Module workloadModule;
-    workloadModule.name = std::move(name);
-    workloadModule.entryPoint = std::move(entryPoint);
-    workloadModule.codeKind = codeKind;
-    workloadModule.code = std::move(code);
-    workloadModule.source = std::move(source);
-    workloadModule.buildOptions = std::move(buildOptions);
-    workloadModule.includeDirs = std::move(includeDirs);
-    return appendModule(std::move(workloadModule));
-}
 
 uint32_t WorkloadBuilder::addModule(ModuleImplementation implementation, std::string name, std::string entryPoint) {
     return appendModule(moduleFromImplementation(std::move(implementation), std::move(name), std::move(entryPoint)));

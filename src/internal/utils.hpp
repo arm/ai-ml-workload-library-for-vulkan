@@ -30,6 +30,12 @@ vk::DeviceSize storageBufferByteSize(vk::DeviceSize explicitByteSize, vk::Format
 void validateSpecializationInfo(const SpecializationInfo &specializationInfo, std::string_view description);
 
 /*******************************************************************************
+ * Instance creation
+ *******************************************************************************/
+
+vk::raii::Instance createVulkanInstance(vk::raii::Context &context, std::string_view applicationName);
+
+/*******************************************************************************
  * Extension support
  *******************************************************************************/
 

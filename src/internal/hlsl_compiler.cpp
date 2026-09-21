@@ -22,7 +22,6 @@
 #    include <windows.h>
 #endif
 
-#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -210,20 +209,11 @@ std::vector<const wchar_t *> includeArguments(const std::vector<std::wstring> &i
     return args;
 }
 
-std::vector<std::string> includeDirStrings(const std::vector<std::filesystem::path> &includeDirs) {
-    std::vector<std::string> result;
-    result.reserve(includeDirs.size());
-    for (const auto &includeDir : includeDirs) {
-        result.push_back(includeDir.string());
-    }
-    return result;
-}
-
 } // namespace
 
 std::vector<uint32_t> compileHlslComputeToSpirv(const Module &module) {
     auto result = HlslCompiler::get().compile(module.source, module.entryPoint, module.name, module.buildOptions,
-                                              includeDirStrings(module.includeDirs));
+                                              moduleIncludeDirectoryStrings(module));
     if (result.second.empty()) {
         throw std::runtime_error("HLSL module '" + module.name +
                                  "' compilation produced empty SPIR-V: " + result.first);

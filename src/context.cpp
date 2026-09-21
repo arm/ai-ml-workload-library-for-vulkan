@@ -163,18 +163,7 @@ Context Context::create(const RuntimeContextDeviceRequirements &deviceRequiremen
     const auto requiredDeviceExtensions =
         detail::requiredWorkloadDeviceExtensions(deviceRequirements.requiredDeviceExtensions);
 
-    const vk::ApplicationInfo applicationInfo("mlworkloadlib", 1, nullptr, 0, VK_API_VERSION_1_3);
-    std::vector<const char *> instanceExtensions;
-    vk::InstanceCreateFlags instanceFlags;
-    const auto availableInstanceExtensions = owned->raiiContext.enumerateInstanceExtensionProperties();
-    if (detail::hasExtension(availableInstanceExtensions, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
-        instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-        instanceFlags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
-    }
-    owned->instance =
-        vk::raii::Instance(owned->raiiContext, vk::InstanceCreateInfo(instanceFlags, &applicationInfo, {}, {},
-                                                                      static_cast<uint32_t>(instanceExtensions.size()),
-                                                                      instanceExtensions.data()));
+    owned->instance = detail::createVulkanInstance(owned->raiiContext, "mlworkloadlib");
 
     std::string lastFailure;
     for (auto &candidate : vk::raii::PhysicalDevices(owned->instance)) {

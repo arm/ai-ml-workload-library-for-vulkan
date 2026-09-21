@@ -23,7 +23,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -68,24 +67,6 @@ std::vector<int8_t> subtractTensors(const std::vector<int8_t> &lhs, const std::v
     return result;
 }
 #endif
-
-template <typename RecordCommands>
-void recordAndSubmitCommands(const vk::raii::Device &device, const vk::raii::Queue &queue, uint32_t queueFamilyIndex,
-                             RecordCommands recordCommands) {
-    const vk::raii::CommandPool commandPool(device,
-                                            {vk::CommandPoolCreateFlagBits::eResetCommandBuffer, queueFamilyIndex});
-    auto commandBuffer =
-        std::move(device.allocateCommandBuffers({*commandPool, vk::CommandBufferLevel::ePrimary, 1}).front());
-    const vk::raii::Fence fence(device, vk::FenceCreateInfo{});
-
-    commandBuffer.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
-    recordCommands(*commandBuffer);
-    commandBuffer.end();
-
-    const vk::SubmitInfo submitInfo({}, {}, *commandBuffer);
-    queue.submit(submitInfo, *fence);
-    ASSERT_EQ(device.waitForFences(*fence, true, std::numeric_limits<uint64_t>::max()), vk::Result::eSuccess);
-}
 
 void insertAppTensorHandoffBarrier(const vk::raii::Device &device, vk::CommandBuffer commandBuffer,
                                    vk::TensorARM tensor, vk::PipelineStageFlags2 srcStage, vk::AccessFlags2 srcAccess,
@@ -317,18 +298,7 @@ TEST_P(ComposedAliasExecutionTest, PrepareRequiresBoundMemoryInfo) {
     runAliasCase(workload, GetParam(), false);
 }
 
-INSTANTIATE_TEST_SUITE_P(AliasCases, ComposedAliasExecutionTest,
-                         testing::Values(AliasCase{"OutputBufferAliasedToIntermediateBuffer",
-                                                   AliasScenario::OutputBufferAliasedToIntermediateBuffer, 2, 5},
-                                         AliasCase{"OutputBufferAliasedToIntermediateTensor",
-                                                   AliasScenario::OutputBufferAliasedToIntermediateTensor, 2, 4},
-                                         AliasCase{"OutputTensorAliasedToIntermediateBuffer",
-                                                   AliasScenario::OutputTensorAliasedToIntermediateBuffer, 1, 3},
-                                         AliasCase{"OutputTensorAliasedToIntermediateTensor",
-                                                   AliasScenario::OutputTensorAliasedToIntermediateTensor, 1, 2},
-                                         AliasCase{"OutputImageAliasedToIntermediateImage",
-                                                   AliasScenario::OutputImageAliasedToIntermediateImage, 1, 4}),
-                         aliasCaseName);
+INSTANTIATE_TEST_SUITE_P(AliasCases, ComposedAliasExecutionTest, testing::ValuesIn(aliasCases), aliasCaseName);
 
 TEST_F(ComposedSessionExecutionTest, RecordTwoSagWorkloadsWithAppTensorHandoff) {
     /***************************************************************************

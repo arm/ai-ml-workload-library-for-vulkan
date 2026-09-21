@@ -93,6 +93,17 @@ vk::Extent3D detail::Resource::imageExtent() const {
     return {dimension("width", shape[2]), dimension("height", shape[1]), 1};
 }
 
+vk::ImageLayout detail::Resource::requiredImageLayout() const {
+    const auto layout = imageMetadata(*this).layout;
+    return layout != vk::ImageLayout::eUndefined ? layout : detail::imageLayout(*descriptorType);
+}
+
+vk::ImageSubresourceRange detail::Resource::requiredImageSubresourceRange() const {
+    const auto subresourceRange = imageMetadata(*this).subresourceRange;
+    return subresourceRange.aspectMask ? subresourceRange
+                                       : vk::ImageSubresourceRange{vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+}
+
 ResourceAccess Workload::Impl::resourceAccess(uint32_t resourceIndex) const {
     const auto &resource = resources.at(resourceIndex);
     std::optional<ResourceAccess> access;
@@ -437,21 +448,11 @@ bool ImageRequirementsView::hasRuntimeSampler() const {
 bool ImageRequirementsView::requiresSamplerBinding() const { return isSampled() && !hasRuntimeSampler(); }
 
 vk::ImageLayout ImageRequirementsView::requiredLayout() const {
-    const auto &resource = workloadResource(*workload_, resourceIndex_);
-    const auto layout = detail::imageMetadata(resource).layout;
-    if (layout != vk::ImageLayout::eUndefined) {
-        return layout;
-    }
-    return detail::imageLayout(*resource.descriptorType);
+    return workloadResource(*workload_, resourceIndex_).requiredImageLayout();
 }
 
 vk::ImageSubresourceRange ImageRequirementsView::requiredSubresourceRange() const {
-    const auto &resource = workloadResource(*workload_, resourceIndex_);
-    const auto subresourceRange = detail::imageMetadata(resource).subresourceRange;
-    if (subresourceRange.aspectMask) {
-        return subresourceRange;
-    }
-    return {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+    return workloadResource(*workload_, resourceIndex_).requiredImageSubresourceRange();
 }
 
 /*******************************************************************************

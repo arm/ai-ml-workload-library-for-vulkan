@@ -129,6 +129,25 @@ void validateSpecializationInfo(const SpecializationInfo &specializationInfo, st
 }
 
 /*******************************************************************************
+ * Instance creation
+ *******************************************************************************/
+
+vk::raii::Instance createVulkanInstance(vk::raii::Context &context, std::string_view applicationName) {
+    const std::string applicationNameStorage(applicationName);
+    const vk::ApplicationInfo applicationInfo(applicationNameStorage.c_str(), 1, nullptr, 0, VK_API_VERSION_1_3);
+    std::vector<const char *> instanceExtensions;
+    vk::InstanceCreateFlags instanceFlags;
+    const auto availableInstanceExtensions = context.enumerateInstanceExtensionProperties();
+    if (hasExtension(availableInstanceExtensions, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+        instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+        instanceFlags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
+    }
+    return {context,
+            vk::InstanceCreateInfo(instanceFlags, &applicationInfo, {}, {},
+                                   static_cast<uint32_t>(instanceExtensions.size()), instanceExtensions.data())};
+}
+
+/*******************************************************************************
  * Extension support
  *******************************************************************************/
 

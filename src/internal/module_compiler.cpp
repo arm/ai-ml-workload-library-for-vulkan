@@ -7,6 +7,8 @@
 #include "workload_impl.hpp"
 
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace mlsdk::workloadlib::detail {
 namespace {
@@ -35,6 +37,15 @@ void registerHlslCompiler(SourceModuleCompiler compiler) {
 bool supportsGlslModules() { return glslCompiler != nullptr; }
 
 bool supportsHlslModules() { return hlslCompiler != nullptr; }
+
+std::vector<std::string> moduleIncludeDirectoryStrings(const Module &module) {
+    std::vector<std::string> includeDirectories;
+    includeDirectories.reserve(module.includeDirs.size());
+    for (const auto &includeDirectory : module.includeDirs) {
+        includeDirectories.push_back(includeDirectory.string());
+    }
+    return includeDirectories;
+}
 
 bool SourceModuleCompilerRegistration(ModuleCodeKind codeKind, SourceModuleCompiler compiler) {
     switch (codeKind) {
