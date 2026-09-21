@@ -69,6 +69,7 @@ class Builder:
         self.enable_glsl_support = args.enable_glsl_support
         self.enable_hlsl_support = args.enable_hlsl_support
         self.disable_vgf_support = args.disable_vgf_support
+        self.build_shared = args.build_shared
         self.install = args.install
 
         self.package_dir = args.package_dir or self.build_dir
@@ -82,6 +83,9 @@ class Builder:
 
         if self.package_release_pip:
             self.package_pip = True
+
+        if self.package_tgz or self.package_zip or self.package_pip:
+            self.build_shared = True
 
         self.pip_install = str(
             ML_WORKLOAD_LIB_DIR / "pip_package" / "mlworkloadlib" / "binaries"
@@ -218,6 +222,11 @@ class Builder:
             cmake_setup_cmd.append("-DML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT=ON")
             cmake_setup_cmd.append(f"-DML_SDK_VGF_LIB_PATH={self.vgf_lib_path}")
             cmake_setup_cmd.append(f"-DFLATBUFFERS_PATH={self.flatbuffers_path}")
+
+        if self.build_shared:
+            cmake_setup_cmd.append("-DML_WORKLOAD_LIB_BUILD_SHARED=ON")
+        else:
+            cmake_setup_cmd.append("-DML_WORKLOAD_LIB_BUILD_SHARED=OFF")
 
         if self.fuzzer:
             if self.target_platform in ["android", "aarch64"]:
@@ -507,6 +516,11 @@ def parse_arguments(argv=None):
     parser.add_argument(
         "--disable-vgf-support",
         help="Disable VGF workload support",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--build-shared",
+        help="Build the shared library in addition to the static library",
         action="store_true",
     )
     parser.add_argument(
