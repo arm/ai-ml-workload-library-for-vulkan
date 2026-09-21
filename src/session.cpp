@@ -11,6 +11,7 @@
 #include "mlworkloadlib/session.hpp"
 
 #include <algorithm>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -186,9 +187,9 @@ Module moduleForExecutable(const Workload &workload, const std::map<uint32_t, Mo
  * Executable configuration
  *******************************************************************************/
 
-template <typename ExecutableState>
-void createDescriptorSetLayouts(ExecutableState &executableState, const std::vector<DescriptorBinding> &descBindings,
-                                const Workload &workload, const ContextView &contextView) {
+std::vector<vk::raii::DescriptorSetLayout>
+createDescriptorSetLayouts(const std::vector<DescriptorBinding> &descBindings, const Workload &workload,
+                           const ContextView &contextView) {
     const auto &workloadState = workloadImpl(workload);
     const auto descBindingSets = [&descBindings] {
         std::vector<std::vector<DescriptorBinding>> sets;
@@ -200,7 +201,9 @@ void createDescriptorSetLayouts(ExecutableState &executableState, const std::vec
         }
         return sets;
     }();
-    executableState.descriptorSetLayouts.reserve(descBindingSets.size());
+
+    std::vector<vk::raii::DescriptorSetLayout> descriptorSetLayouts;
+    descriptorSetLayouts.reserve(descBindingSets.size());
     for (const auto &setDescBindings : descBindingSets) {
         std::vector<vk::DescriptorSetLayoutBinding> layoutBindings;
         layoutBindings.reserve(setDescBindings.size());
@@ -208,9 +211,10 @@ void createDescriptorSetLayouts(ExecutableState &executableState, const std::vec
             layoutBindings.emplace_back(descBinding.binding, workloadState.descriptorTypeForBinding(descBinding), 1,
                                         vk::ShaderStageFlagBits::eAll);
         }
-        executableState.descriptorSetLayouts.emplace_back(contextView.device.get(),
-                                                          vk::DescriptorSetLayoutCreateInfo({}, layoutBindings));
+        descriptorSetLayouts.emplace_back(contextView.device.get(),
+                                          vk::DescriptorSetLayoutCreateInfo({}, layoutBindings));
     }
+    return descriptorSetLayouts;
 }
 
 void validatePushConstantRanges(const Executable &executable) {
@@ -225,27 +229,25 @@ void validatePushConstantRanges(const Executable &executable) {
     }
 }
 
-template <typename ExecutableState>
-void createPipelineLayout(ExecutableState &executableState, const Executable &executable,
-                          const ContextView &contextView) {
-    const auto descriptorSetLayouts = detail::rawDescriptorSetLayouts(executableState.descriptorSetLayouts);
+vk::raii::PipelineLayout createPipelineLayout(const std::vector<vk::raii::DescriptorSetLayout> &descriptorSetLayouts,
+                                              const Executable &executable, const ContextView &contextView) {
+    const auto rawDescriptorSetLayouts = detail::rawDescriptorSetLayouts(descriptorSetLayouts);
     validatePushConstantRanges(executable);
-    const vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, descriptorSetLayouts,
+    const vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, rawDescriptorSetLayouts,
                                                                 executable.pushConstantRanges);
-    executableState.pipelineLayout = vk::raii::PipelineLayout(contextView.device.get(), pipelineLayoutCreateInfo);
+    return {contextView.device.get(), pipelineLayoutCreateInfo};
 }
 
-template <typename ExecutableState>
-void createShaderModule(ExecutableState &executableState, const Module &compiledModule,
-                        const ContextView &contextView) {
+vk::raii::ShaderModule createShaderModule(const Module &compiledModule, const ContextView &contextView) {
     const vk::ShaderModuleCreateInfo shaderCreateInfo({}, compiledModule.code.size() * sizeof(uint32_t),
                                                       compiledModule.code.data());
-    executableState.shaderModule = vk::raii::ShaderModule(contextView.device.get(), shaderCreateInfo);
+    return {contextView.device.get(), shaderCreateInfo};
 }
 
-template <typename ExecutableState>
-void configureComputeExecutableState(ExecutableState &executableState, const Executable &executable,
-                                     const Module &compiledModule, const ContextView &contextView) {
+vk::raii::Pipeline createComputePipeline(const Executable &executable, const Module &compiledModule,
+                                         const vk::raii::ShaderModule &shaderModule,
+                                         const vk::raii::PipelineLayout &pipelineLayout,
+                                         const ContextView &contextView) {
     const auto &dispatchShape = executable.dispatchShape;
     if (dispatchShape[0] == 0 || dispatchShape[1] == 0 || dispatchShape[2] == 0) {
         throw std::runtime_error("Compute shader executables must have a non-zero 3D dispatch shape");
@@ -253,11 +255,34 @@ void configureComputeExecutableState(ExecutableState &executableState, const Exe
 
     SpecializationInfoStorage specializationInfo;
     const vk::PipelineShaderStageCreateInfo shaderStageCreateInfo(
-        {}, vk::ShaderStageFlagBits::eCompute, *executableState.shaderModule, compiledModule.entryPoint.c_str(),
+        {}, vk::ShaderStageFlagBits::eCompute, *shaderModule, compiledModule.entryPoint.c_str(),
         specializationInfo.populate(executable.specializationInfo));
-    const vk::ComputePipelineCreateInfo pipelineCreateInfo({}, shaderStageCreateInfo, *executableState.pipelineLayout);
-    executableState.pipeline = vk::raii::Pipeline(contextView.device.get(), nullptr, pipelineCreateInfo);
+    const vk::ComputePipelineCreateInfo pipelineCreateInfo({}, shaderStageCreateInfo, *pipelineLayout);
+    return {contextView.device.get(), nullptr, pipelineCreateInfo};
 }
+
+vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const Module &compiledModule,
+                                           const vk::raii::ShaderModule &shaderModule,
+                                           const vk::raii::PipelineLayout &pipelineLayout, const Workload &workload,
+                                           const ContextView &contextView) {
+    DataGraphPipelineCreateStorage storage;
+    populateDataGraphResources(storage, executable, workload);
+    populateDataGraphConstants(storage, executable, workload);
+
+    SpecializationInfoStorage specializationInfo;
+    const vk::DataGraphPipelineShaderModuleCreateInfoARM shaderModuleInfo(
+        *shaderModule, compiledModule.entryPoint.c_str(), specializationInfo.populate(executable.specializationInfo),
+        static_cast<uint32_t>(storage.constants.size()), storage.constants.data(), nullptr);
+    const vk::DataGraphPipelineCreateInfoARM pipelineCreateInfo(executable.dataGraphPipelineFlags, *pipelineLayout,
+                                                                static_cast<uint32_t>(storage.resourceInfos.size()),
+                                                                storage.resourceInfos.data(), &shaderModuleInfo);
+    const vk::raii::DeferredOperationKHR deferredOperation(nullptr);
+    return {contextView.device.get(), deferredOperation, nullptr, pipelineCreateInfo};
+}
+
+/*******************************************************************************
+ * Data graph session memory
+ *******************************************************************************/
 
 std::vector<vk::BindDataGraphPipelineSessionMemoryInfoARM>
 allocateDataGraphSessionMemory(const ContextView &contextView,
@@ -293,6 +318,30 @@ allocateDataGraphSessionMemory(const ContextView &contextView,
 
 } // namespace
 
+void Session::Impl::createPipeline(ExecutableState &executableState, uint32_t executableIndex) const {
+    const auto &executable = workloadImpl(workload).executables.at(executableIndex);
+    auto compiledModule = moduleForExecutable(workload, moduleImplementations, executableIndex);
+    detail::compileModuleToSpirv(compiledModule, executable.type);
+
+    validateExecutableBindings(workload, executable);
+    executableState.descriptorSetLayouts = createDescriptorSetLayouts(executable.bindings, workload, contextView);
+    executableState.pipelineLayout =
+        createPipelineLayout(executableState.descriptorSetLayouts, executable, contextView);
+    executableState.shaderModule = createShaderModule(compiledModule, contextView);
+
+    if (executable.type == ExecutableKind::Compute) {
+        executableState.pipeline = createComputePipeline(executable, compiledModule, executableState.shaderModule,
+                                                         executableState.pipelineLayout, contextView);
+        return;
+    }
+    if (executable.type == ExecutableKind::Graph) {
+        executableState.pipeline = createDataGraphPipeline(executable, compiledModule, executableState.shaderModule,
+                                                           executableState.pipelineLayout, workload, contextView);
+        return;
+    }
+    throw std::logic_error("Unhandled executable kind after validation");
+}
+
 void Session::Impl::configureExecutableState(uint32_t executableIndex) {
     const auto &executable = workloadImpl(workload).executables.at(executableIndex);
     if (executable.type != ExecutableKind::Graph && executable.type != ExecutableKind::Compute) {
@@ -300,36 +349,12 @@ void Session::Impl::configureExecutableState(uint32_t executableIndex) {
     }
 
     auto &executableState = executableStates.emplace_back();
-    executableState.executableIndex = executableIndex;
-    auto compiledModule = moduleForExecutable(workload, moduleImplementations, executableIndex);
-    detail::compileModuleToSpirv(compiledModule, executable.type);
-
-    validateExecutableBindings(workload, executable);
-    createDescriptorSetLayouts(executableState, executable.bindings, workload, contextView);
-    createPipelineLayout(executableState, executable, contextView);
-    createShaderModule(executableState, compiledModule, contextView);
+    createPipeline(executableState, executableIndex);
 
     if (executable.type == ExecutableKind::Compute) {
-        configureComputeExecutableState(executableState, executable, compiledModule, contextView);
         return;
     }
     if (executable.type == ExecutableKind::Graph) {
-        DataGraphPipelineCreateStorage storage;
-        populateDataGraphResources(storage, executable, workload);
-        populateDataGraphConstants(storage, executable, workload);
-
-        SpecializationInfoStorage specializationInfo;
-        const vk::DataGraphPipelineShaderModuleCreateInfoARM shaderModuleInfo(
-            *executableState.shaderModule, compiledModule.entryPoint.c_str(),
-            specializationInfo.populate(executable.specializationInfo), static_cast<uint32_t>(storage.constants.size()),
-            storage.constants.data(), nullptr);
-        const vk::DataGraphPipelineCreateInfoARM pipelineCreateInfo(
-            executable.dataGraphPipelineFlags, *executableState.pipelineLayout,
-            static_cast<uint32_t>(storage.resourceInfos.size()), storage.resourceInfos.data(), &shaderModuleInfo);
-        const vk::raii::DeferredOperationKHR deferredOperation(nullptr);
-        executableState.pipeline =
-            vk::raii::Pipeline(contextView.device.get(), deferredOperation, nullptr, pipelineCreateInfo);
-
         const vk::DataGraphPipelineSessionCreateInfoARM sessionCreateInfo({}, *executableState.pipeline);
         executableState.graphSession =
             vk::raii::DataGraphPipelineSessionARM(contextView.device.get(), sessionCreateInfo);
@@ -352,11 +377,14 @@ void Session::Impl::configure() {
     if (configured) {
         throw std::runtime_error("Session::configure() must only be called once");
     }
+
+    // Executable state
     executableStates.reserve(workload.executableCount());
     for (uint32_t executableIndex = 0; executableIndex < workload.executableCount(); ++executableIndex) {
         configureExecutableState(executableIndex);
     }
 
+    // Runtime-owned command state
     commandPool = vk::raii::CommandPool(
         contextView.device.get(), {vk::CommandPoolCreateFlagBits::eResetCommandBuffer, contextView.queueFamilyIndex});
     commandBuffer = std::move(

@@ -28,7 +28,6 @@ struct Session::Impl {
      **************************************************************************/
 
     struct ExecutableState {
-        uint32_t executableIndex = 0;
         vk::raii::ShaderModule shaderModule{nullptr};
         std::vector<vk::raii::DescriptorSetLayout> descriptorSetLayouts;
         vk::raii::PipelineLayout pipelineLayout{nullptr};
@@ -50,8 +49,9 @@ struct Session::Impl {
      * Configuration
      **************************************************************************/
 
-    void configure();
+    void createPipeline(ExecutableState &executableState, uint32_t executableIndex) const;
     void configureExecutableState(uint32_t executableIndex);
+    void configure();
 
     /***************************************************************************
      * Stored state
