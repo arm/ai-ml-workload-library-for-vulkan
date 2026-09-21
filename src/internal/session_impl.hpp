@@ -10,6 +10,7 @@
 
 #include "mlworkloadlib/session.hpp"
 
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -50,12 +51,7 @@ struct Session::Impl {
      **************************************************************************/
 
     void configure();
-
-    /***************************************************************************
-     * State access
-     **************************************************************************/
-
-    const Workload::Impl &workloadImpl() const noexcept { return workload.workloadImpl(); }
+    void configureExecutableState(uint32_t executableIndex);
 
     /***************************************************************************
      * Stored state
