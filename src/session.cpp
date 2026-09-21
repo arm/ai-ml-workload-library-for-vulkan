@@ -259,10 +259,11 @@ void configureComputeExecutableState(ExecutableState &executableState, const Exe
     executableState.pipeline = vk::raii::Pipeline(contextView.device.get(), nullptr, pipelineCreateInfo);
 }
 
-template <typename ExecutableState>
 std::vector<vk::BindDataGraphPipelineSessionMemoryInfoARM>
-allocateDataGraphSessionMemory(ExecutableState &executableState, const ContextView &contextView) {
-    const vk::DataGraphPipelineSessionBindPointRequirementsInfoARM bindPointInfo(*executableState.graphSession);
+allocateDataGraphSessionMemory(const ContextView &contextView,
+                               const vk::raii::DataGraphPipelineSessionARM &graphSession,
+                               std::vector<vk::raii::DeviceMemory> &sessionMemory) {
+    const vk::DataGraphPipelineSessionBindPointRequirementsInfoARM bindPointInfo(*graphSession);
     const auto bindPointRequirements =
         contextView.device.get().getDataGraphPipelineSessionBindPointRequirementsARM(bindPointInfo);
     std::vector<vk::BindDataGraphPipelineSessionMemoryInfoARM> bindInfos;
@@ -273,7 +274,7 @@ allocateDataGraphSessionMemory(ExecutableState &executableState, const ContextVi
 
         for (uint32_t objectIndex = 0; objectIndex < bindPointRequirement.numObjects; ++objectIndex) {
             const vk::DataGraphPipelineSessionMemoryRequirementsInfoARM memoryInfo(
-                *executableState.graphSession, bindPointRequirement.bindPoint, objectIndex);
+                *graphSession, bindPointRequirement.bindPoint, objectIndex);
             const auto memReqs = contextView.device.get().getDataGraphPipelineSessionMemoryRequirementsARM(memoryInfo);
             if (memReqs.memoryRequirements.size == 0) {
                 continue;
@@ -283,73 +284,65 @@ allocateDataGraphSessionMemory(ExecutableState &executableState, const ContextVi
                 detail::findMemoryType(contextView.physicalDevice.get(), memReqs.memoryRequirements.memoryTypeBits,
                                        vk::MemoryPropertyFlagBits::eDeviceLocal);
             const vk::MemoryAllocateInfo allocateInfo(memReqs.memoryRequirements.size, memoryType);
-            executableState.sessionMemory.emplace_back(contextView.device.get(), allocateInfo);
-            bindInfos.emplace_back(*executableState.graphSession, bindPointRequirement.bindPoint, objectIndex,
-                                   *executableState.sessionMemory.back());
+            sessionMemory.emplace_back(contextView.device.get(), allocateInfo);
+            bindInfos.emplace_back(*graphSession, bindPointRequirement.bindPoint, objectIndex, *sessionMemory.back());
         }
     }
     return bindInfos;
 }
 
-template <typename ExecutableState>
-void configureDataGraphExecutableState(ExecutableState &executableState, const Executable &executable,
-                                       const Module &compiledModule, const Workload &workload,
-                                       const ContextView &contextView) {
-    DataGraphPipelineCreateStorage storage;
-    populateDataGraphResources(storage, executable, workload);
-    populateDataGraphConstants(storage, executable, workload);
+} // namespace
 
-    SpecializationInfoStorage specializationInfo;
-    const vk::DataGraphPipelineShaderModuleCreateInfoARM shaderModuleInfo(
-        *executableState.shaderModule, compiledModule.entryPoint.c_str(),
-        specializationInfo.populate(executable.specializationInfo), static_cast<uint32_t>(storage.constants.size()),
-        storage.constants.data(), nullptr);
-    const vk::DataGraphPipelineCreateInfoARM pipelineCreateInfo(
-        executable.dataGraphPipelineFlags, *executableState.pipelineLayout,
-        static_cast<uint32_t>(storage.resourceInfos.size()), storage.resourceInfos.data(), &shaderModuleInfo);
-    const vk::raii::DeferredOperationKHR deferredOperation(nullptr);
-    executableState.pipeline =
-        vk::raii::Pipeline(contextView.device.get(), deferredOperation, nullptr, pipelineCreateInfo);
-
-    const vk::DataGraphPipelineSessionCreateInfoARM sessionCreateInfo({}, *executableState.pipeline);
-    executableState.graphSession = vk::raii::DataGraphPipelineSessionARM(contextView.device.get(), sessionCreateInfo);
-
-    auto bindInfos = allocateDataGraphSessionMemory(executableState, contextView);
-    if (!bindInfos.empty()) {
-        contextView.device.get().bindDataGraphPipelineSessionMemoryARM(bindInfos);
-    }
-}
-
-template <typename SessionState> void configureExecutableState(SessionState &sessionState, uint32_t executableIndex) {
-    const auto &executable = workloadImpl(sessionState.workload).executables.at(executableIndex);
+void Session::Impl::configureExecutableState(uint32_t executableIndex) {
+    const auto &executable = workloadImpl(workload).executables.at(executableIndex);
     if (executable.type != ExecutableKind::Graph && executable.type != ExecutableKind::Compute) {
         throw std::runtime_error("Session only supports data graph and compute shader executables");
     }
 
-    auto &executableState = sessionState.executableStates.emplace_back();
+    auto &executableState = executableStates.emplace_back();
     executableState.executableIndex = executableIndex;
-    auto compiledModule =
-        moduleForExecutable(sessionState.workload, sessionState.moduleImplementations, executableIndex);
+    auto compiledModule = moduleForExecutable(workload, moduleImplementations, executableIndex);
     detail::compileModuleToSpirv(compiledModule, executable.type);
 
-    validateExecutableBindings(sessionState.workload, executable);
-    createDescriptorSetLayouts(executableState, executable.bindings, sessionState.workload, sessionState.contextView);
-    createPipelineLayout(executableState, executable, sessionState.contextView);
-    createShaderModule(executableState, compiledModule, sessionState.contextView);
+    validateExecutableBindings(workload, executable);
+    createDescriptorSetLayouts(executableState, executable.bindings, workload, contextView);
+    createPipelineLayout(executableState, executable, contextView);
+    createShaderModule(executableState, compiledModule, contextView);
 
     if (executable.type == ExecutableKind::Compute) {
-        configureComputeExecutableState(executableState, executable, compiledModule, sessionState.contextView);
+        configureComputeExecutableState(executableState, executable, compiledModule, contextView);
         return;
     }
     if (executable.type == ExecutableKind::Graph) {
-        configureDataGraphExecutableState(executableState, executable, compiledModule, sessionState.workload,
-                                          sessionState.contextView);
+        DataGraphPipelineCreateStorage storage;
+        populateDataGraphResources(storage, executable, workload);
+        populateDataGraphConstants(storage, executable, workload);
+
+        SpecializationInfoStorage specializationInfo;
+        const vk::DataGraphPipelineShaderModuleCreateInfoARM shaderModuleInfo(
+            *executableState.shaderModule, compiledModule.entryPoint.c_str(),
+            specializationInfo.populate(executable.specializationInfo), static_cast<uint32_t>(storage.constants.size()),
+            storage.constants.data(), nullptr);
+        const vk::DataGraphPipelineCreateInfoARM pipelineCreateInfo(
+            executable.dataGraphPipelineFlags, *executableState.pipelineLayout,
+            static_cast<uint32_t>(storage.resourceInfos.size()), storage.resourceInfos.data(), &shaderModuleInfo);
+        const vk::raii::DeferredOperationKHR deferredOperation(nullptr);
+        executableState.pipeline =
+            vk::raii::Pipeline(contextView.device.get(), deferredOperation, nullptr, pipelineCreateInfo);
+
+        const vk::DataGraphPipelineSessionCreateInfoARM sessionCreateInfo({}, *executableState.pipeline);
+        executableState.graphSession =
+            vk::raii::DataGraphPipelineSessionARM(contextView.device.get(), sessionCreateInfo);
+
+        auto bindInfos =
+            allocateDataGraphSessionMemory(contextView, executableState.graphSession, executableState.sessionMemory);
+        if (!bindInfos.empty()) {
+            contextView.device.get().bindDataGraphPipelineSessionMemoryARM(bindInfos);
+        }
         return;
     }
     throw std::logic_error("Unhandled executable kind after validation");
 }
-
-} // namespace
 
 /*******************************************************************************
  * Configuration
@@ -361,7 +354,7 @@ void Session::Impl::configure() {
     }
     executableStates.reserve(workload.executableCount());
     for (uint32_t executableIndex = 0; executableIndex < workload.executableCount(); ++executableIndex) {
-        configureExecutableState(*this, executableIndex);
+        configureExecutableState(executableIndex);
     }
 
     commandPool = vk::raii::CommandPool(
