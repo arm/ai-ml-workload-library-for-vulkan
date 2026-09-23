@@ -913,6 +913,20 @@ TEST_F(VgfSessionExecutionTest, RunMaxpoolDataVgf) {
     EXPECT_EQ(outputTensor.read(outputTensor.numElements()), expectedMaxpool(input, inputTensor.shape));
 }
 
+TEST_F(VgfSessionExecutionTest, ConfigureAcceptsMissingLinearTensorAndConstantStrides) {
+    const std::vector<int8_t> weights(16UL * 2 * 2 * 16, 1);
+    const auto bytes = makeConv2dRescaleConstantVgf(weights);
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+
+    ASSERT_EQ(workload.resourceCount(), 2);
+    EXPECT_TRUE(workload.resource(0).requirements().asTensor().stride().empty());
+    EXPECT_TRUE(workload.resource(1).requirements().asTensor().stride().empty());
+
+    Session session(context, workload);
+    EXPECT_NO_THROW(session.configure());
+}
+
 TEST_F(VgfSessionExecutionTest, RunGraphWithConstant) {
     const std::vector<int64_t> inputShape = {1, 16, 16, 16};
     const std::vector<int64_t> outputShape = {1, 8, 8, 16};
