@@ -8,7 +8,7 @@ import sys
 sys.path.insert(0, os.path.abspath("."))
 
 # ML Workload Library for Vulkan project config
-MLWORKLOADLIB_project = "ML Workload Library for Vulkan"
+MLWORKLOADLIB_project = "ML Workload Library for Vulkan®"
 copyright = "2026, Arm Limited and/or its affiliates <open-source-office@arm.com>"
 author = "Arm Limited"
 git_repo_tool_url = "https://gerrit.googlesource.com/git-repo"

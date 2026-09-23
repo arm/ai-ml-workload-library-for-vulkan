@@ -28,8 +28,8 @@ You can create the following workloads:
 - Standalone compute shader workloads with `Workload::fromComputeShader(...)`
 - Standalone Vulkan® data graph workloads with `Workload::fromDataGraph(...)`
 
-Use `Context::wrap(...)` to provide application-owned Vulkan objects, or
-use `Context::create()` to create a runtime-owned Vulkan context.
+Use `Context::wrap(...)` to provide application-owned Vulkan® objects, or
+use `Context::create()` to create a runtime-owned Vulkan® context.
 
 ## Building the ML Workload Library for Vulkan® from source
 
@@ -146,5 +146,5 @@ the `LICENSES` directory.
 Arm® is a registered trademark of Arm Limited (or its subsidiaries) in the US
 and/or elsewhere.
 
-Khronos®, Vulkan®, and SPIR-V™ are trademarks of the
-[Khronos® Group](https://www.khronos.org/legal/trademarks).
+Khronos® and Vulkan® are registered trademarks, and SPIR-V™ is a trademark of
+[The Khronos Group Inc.](https://www.khronos.org/legal/trademarks/).
