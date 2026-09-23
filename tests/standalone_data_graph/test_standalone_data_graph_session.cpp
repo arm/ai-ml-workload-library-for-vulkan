@@ -179,16 +179,16 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkloadWithRuntimeC
     auto workload = Workload::fromDataGraph(makeMaxpoolDescription());
     auto context = Context::create();
     const auto contextView = context.contextView();
+    Session session(context, workload);
 
-    auto inputTensor = context.createTensor(workload.resource(0));
-    auto outputTensor = context.createTensor(workload.resource(1));
+    auto inputTensor = context.createTensor(workload.resource(0), session.tensorTiling(workload.resource(0)));
+    auto outputTensor = context.createTensor(workload.resource(1), session.tensorTiling(workload.resource(1)));
 
     const auto input = makeMaxpoolInput(inputShape, 19);
     utils::writeDeviceMemory(contextView.device, inputTensor.memory(), input);
     utils::writeDeviceMemory(contextView.device, outputTensor.memory(),
                              std::vector<int8_t>(Tensor::numElements(outputShape), 0));
 
-    Session session(context, workload);
     session.configure();
     auto bindings = session.createBindingSet();
     ASSERT_EQ(workload.resourceCount(), 2);
@@ -206,10 +206,11 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkloadWithRuntimeC
 TEST_F(StandaloneDataGraphSessionExecutionTest, MovesRuntimeOwnedTensorAllocations) {
     auto workload = Workload::fromDataGraph(makeMaxpoolDescription());
     auto context = wrappedContext();
+    const Session session(context, workload);
 
-    auto tensor = context.createTensor(workload.resource(0));
+    auto tensor = context.createTensor(workload.resource(0), session.tensorTiling(workload.resource(0)));
     auto movedTensor(std::move(tensor));
-    auto assignedTensor = context.createTensor(workload.resource(1));
+    auto assignedTensor = context.createTensor(workload.resource(1), session.tensorTiling(workload.resource(1)));
     EXPECT_NE(assignedTensor.handle(), nullptr);
     assignedTensor = std::move(movedTensor);
 
@@ -224,9 +225,10 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunAddConstantInputWithRuntimeCr
     auto workload = Workload::fromDataGraph(makeAddF32ConstantDescription(constant));
     auto context = Context::create();
     const auto contextView = context.contextView();
+    Session session(context, workload);
 
-    auto inputTensor = context.createTensor(workload.resource(0));
-    auto outputTensor = context.createTensor(workload.resource(1));
+    auto inputTensor = context.createTensor(workload.resource(0), session.tensorTiling(workload.resource(0)));
+    auto outputTensor = context.createTensor(workload.resource(1), session.tensorTiling(workload.resource(1)));
 
     const std::vector<float> input = {0.0F, 1.0F, 2.0F, 3.0F, 4.0F, 5.0F};
     const std::vector<float> expected = {0.5F, 1.5F, 2.5F, 3.5F, 4.5F, 5.5F};
@@ -234,7 +236,6 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunAddConstantInputWithRuntimeCr
     utils::writeDeviceMemory(contextView.device, outputTensor.memory(),
                              std::vector<float>(Tensor::numElements(tensorShape), 0));
 
-    Session session(context, workload);
     session.configure();
     auto bindings = session.createBindingSet();
     ASSERT_EQ(workload.resourceCount(), 2);
@@ -528,5 +529,5 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RejectsRuntimeAllocationForWrong
     auto context = wrappedContext();
 
     EXPECT_THROW((void)context.createBuffer(workload.resource(0)), std::runtime_error);
-    EXPECT_THROW((void)context.createImage(workload.resource(0)), std::runtime_error);
+    EXPECT_THROW((void)context.createImage(workload.resource(0), vk::ImageTiling::eOptimal), std::runtime_error);
 }

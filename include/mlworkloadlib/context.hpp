@@ -227,14 +227,20 @@ class Context {
      * Runtime-owned allocation
      **************************************************************************/
 
-    /** @brief Allocates a host-visible tensor compatible with a workload resource. */
+    /** @brief Allocates a host-visible tensor with Linear tiling. */
     TensorAllocation createTensor(ResourceView resource) const;
+
+    /** @brief Allocates a host-visible tensor with the requested tiling. */
+    TensorAllocation createTensor(ResourceView resource, vk::TensorTilingARM tiling) const;
 
     /** @brief Allocates a host-visible buffer compatible with a workload resource. */
     BufferAllocation createBuffer(ResourceView resource) const;
 
-    /** @brief Allocates a device-local image compatible with a workload resource. */
+    /** @brief Allocates a device-local image with Optimal tiling. */
     ImageAllocation createImage(ResourceView resource) const;
+
+    /** @brief Allocates a device-local image with the requested tiling. */
+    ImageAllocation createImage(ResourceView resource, vk::ImageTiling tiling) const;
 
   private:
     // Implementation type

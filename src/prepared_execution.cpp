@@ -4,6 +4,7 @@
  */
 
 #include "internal/prepared_execution_impl.hpp"
+#include "internal/session_tiling.hpp"
 #include "internal/utils.hpp"
 
 #include "mlworkloadlib/prepared_execution.hpp"
@@ -270,12 +271,12 @@ const typename BoundResources::value_type &findBoundResource(const BoundResource
  *******************************************************************************/
 
 vk::raii::TensorARM createIntermediateTensor(const Workload &workload, const ContextView &contextView,
-                                             const DescriptorBinding &descBinding) {
+                                             const DescriptorBinding &descBinding, vk::TensorTilingARM tiling) {
     const auto &resource = workloadImpl(workload).resources.at(descBinding.resourceIndex);
-    const vk::TensorDescriptionARM description(vk::TensorTilingARM::eLinear, resource.format,
-                                               static_cast<uint32_t>(resource.shape.size()), resource.shape.data(),
-                                               resource.stride.empty() ? nullptr : resource.stride.data(),
-                                               vk::TensorUsageFlagBitsARM::eDataGraph);
+    const auto usage = detail::tensorUsageForTiling(workload, descBinding.resourceIndex, tiling);
+    const vk::TensorDescriptionARM description(tiling, resource.format, static_cast<uint32_t>(resource.shape.size()),
+                                               resource.shape.data(),
+                                               resource.stride.empty() ? nullptr : resource.stride.data(), usage);
     const vk::TensorCreateInfoARM createInfo({}, &description, vk::SharingMode::eExclusive);
     return {contextView.device.get(), createInfo};
 }
@@ -290,14 +291,19 @@ vk::raii::Buffer createIntermediateBuffer(const Workload &workload, const Contex
 }
 
 vk::raii::Image createIntermediateImage(const Workload &workload, const ContextView &contextView,
-                                        const DescriptorBinding &descBinding, bool forAliasing) {
+                                        const DescriptorBinding &descBinding, bool forAliasing,
+                                        vk::ImageTiling tiling) {
     const auto &workloadState = workloadImpl(workload);
     const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
     const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
+
+    const auto requiredUsage = detail::imageMetadata(resource).usage | detail::imageUsage(descriptorType, forAliasing);
+    const auto effectiveUsage = detail::imageUsageForTiling(requiredUsage, forAliasing, tiling);
+
     const vk::ImageCreateInfo createInfo({}, vk::ImageType::e2D, resource.format, resource.imageExtent(), 1, 1,
-                                         vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal,
-                                         detail::imageUsage(descriptorType, forAliasing), vk::SharingMode::eExclusive,
-                                         {}, vk::ImageLayout::eUndefined);
+                                         vk::SampleCountFlagBits::e1, tiling, effectiveUsage,
+                                         vk::SharingMode::eExclusive, {}, vk::ImageLayout::eUndefined);
+
     return {contextView.device.get(), createInfo};
 }
 
@@ -471,7 +477,8 @@ void PreparedExecution::Impl::resolveAliasGroups(
 
 // Resolve unaliased intermediates.
 void PreparedExecution::Impl::resolveUnaliasedIntermediateTensor(const DescriptorBinding &descBinding) {
-    auto tensor = createIntermediateTensor(sessionImpl.workload, sessionImpl.contextView, descBinding);
+    const auto tiling = detail::toTensorTiling(sessionImpl.resourceTilings.at(descBinding.resourceIndex));
+    auto tensor = createIntermediateTensor(sessionImpl.workload, sessionImpl.contextView, descBinding, tiling);
     const auto memoryRequirements = resourceMemoryRequirements(sessionImpl.contextView, tensor);
     auto memory = allocateDeviceLocalMemory(sessionImpl.contextView, memoryRequirements);
     bindResourceMemory(sessionImpl.contextView, tensor, *memory, 0);
@@ -491,7 +498,8 @@ void PreparedExecution::Impl::resolveUnaliasedIntermediateBuffer(const Descripto
 }
 
 void PreparedExecution::Impl::resolveUnaliasedIntermediateImage(const DescriptorBinding &descBinding) {
-    auto image = createIntermediateImage(sessionImpl.workload, sessionImpl.contextView, descBinding, false);
+    const auto tiling = detail::toImageTiling(sessionImpl.resourceTilings.at(descBinding.resourceIndex));
+    auto image = createIntermediateImage(sessionImpl.workload, sessionImpl.contextView, descBinding, false, tiling);
     const auto memoryRequirements = resourceMemoryRequirements(sessionImpl.contextView, image);
     auto memory = allocateDeviceLocalMemory(sessionImpl.contextView, memoryRequirements);
     const BoundMemoryInfo bindingMemory{*memory, 0, memoryRequirements.size};
@@ -548,7 +556,8 @@ void PreparedExecution::Impl::resolveAliasGroupBinding(const DescriptorBinding &
 
     switch (descriptorType) {
     case vk::DescriptorType::eTensorARM: {
-        auto tensor = createIntermediateTensor(sessionImpl.workload, sessionImpl.contextView, descBinding);
+        const auto tiling = detail::toTensorTiling(sessionImpl.resourceTilings.at(descBinding.resourceIndex));
+        auto tensor = createIntermediateTensor(sessionImpl.workload, sessionImpl.contextView, descBinding, tiling);
         if (existingBindings.boundMemory.has_value()) {
             const auto aliasMemory = *existingBindings.boundMemory;
             bindResourceMemory(sessionImpl.contextView, tensor, aliasMemory.memory, aliasMemory.offset);
@@ -581,7 +590,8 @@ void PreparedExecution::Impl::resolveAliasGroupBinding(const DescriptorBinding &
     }
     case vk::DescriptorType::eCombinedImageSampler:
     case vk::DescriptorType::eStorageImage: {
-        auto image = createIntermediateImage(sessionImpl.workload, sessionImpl.contextView, descBinding, true);
+        const auto tiling = detail::toImageTiling(sessionImpl.resourceTilings.at(descBinding.resourceIndex));
+        auto image = createIntermediateImage(sessionImpl.workload, sessionImpl.contextView, descBinding, true, tiling);
         if (existingBindings.boundMemory.has_value()) {
             const auto aliasMemory = *existingBindings.boundMemory;
             bindResourceMemory(sessionImpl.contextView, image, aliasMemory.memory, aliasMemory.offset);

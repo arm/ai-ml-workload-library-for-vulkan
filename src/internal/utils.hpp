@@ -108,6 +108,14 @@ uint32_t findMemoryType(const vk::raii::PhysicalDevice &physicalDevice, uint32_t
                         vk::MemoryPropertyFlags requiredFlags);
 
 /*******************************************************************************
+ * Resource creation validation
+ *******************************************************************************/
+
+void validateTensorTiling(vk::TensorTilingARM tiling, vk::TensorUsageFlagsARM usage, const std::vector<int64_t> &shape,
+                          bool hasExplicitStrides);
+void validateImageTiling(vk::ImageTiling tiling, vk::ImageUsageFlags usage);
+
+/*******************************************************************************
  * Executable synchronization
  *******************************************************************************/
 
@@ -122,6 +130,7 @@ vk::AccessFlags2 writeAccess(ExecutableKind executableKind);
 
 vk::ImageLayout imageLayout(vk::DescriptorType descriptorType);
 vk::ImageUsageFlags imageUsage(vk::DescriptorType descriptorType, bool aliased);
+vk::ImageUsageFlags imageUsageForTiling(vk::ImageUsageFlags usage, bool aliased, vk::ImageTiling tiling);
 vk::AccessFlags2 imageAccess(ExecutableKind executableKind, vk::DescriptorType descriptorType);
 
 /*******************************************************************************

@@ -75,7 +75,10 @@ class Session;
  * the compiled state alive if this object is moved or destroyed. The compiling
  * Session supplies compilation inputs before the shared pipelines are created.
  * Later Sessions reuse the pipelines without rebinding those inputs.
- * Session::configure() calls sharing this state must be serialized.
+ * Creating or configuring Sessions and changing their tiling selections while
+ * sharing this state must be serialized. Graph tensor tiling and the tiling of
+ * its alias peers are fixed after compilation; other tiling choices remain
+ * local to each Session.
  */
 class CompiledExecution final {
   public:

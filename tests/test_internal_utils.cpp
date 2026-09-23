@@ -3,8 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "internal/session_tiling.hpp"
 #include "internal/utils.hpp"
+#include "internal/workload_builder.hpp"
 #include "internal/workload_impl.hpp"
+#include "test_resource_requirements.hpp"
 
 #include <gtest/gtest.h>
 #include <vulkan/vulkan.hpp>

@@ -69,6 +69,18 @@ class Session final {
     /** @brief Supplies or replaces code for a placeholder module before configure(). */
     void bindModule(PlaceholderModuleView placeholderModule, ModuleImplementation implementation);
 
+    /** @brief Chooses this Session's public tensor tiling before configure(). */
+    void setTensorTiling(ResourceView resource, vk::TensorTilingARM tiling);
+
+    /** @brief Chooses this Session's public image tiling before configure(). */
+    void setImageTiling(ResourceView resource, vk::ImageTiling tiling);
+
+    /** @brief Returns the tiling selected for a public tensor resource. */
+    vk::TensorTilingARM tensorTiling(ResourceView resource) const;
+
+    /** @brief Returns the tiling selected for a public image resource. */
+    vk::ImageTiling imageTiling(ResourceView resource) const;
+
     /** @brief Builds or reuses pipelines and layouts, then creates per-Session data graph and command objects. */
     void configure();
 
@@ -110,6 +122,8 @@ class Session final {
     // Implementation access
     Impl &sessionImpl() noexcept;
     const Impl &sessionImpl() const noexcept;
+    static void validateResourceAccess(const Impl &sessionState, const ResourceView &resource);
+    static void validateResourceAccessForSet(const Impl &sessionState, const ResourceView &resource);
 
     // Stored state
     std::unique_ptr<Impl> impl_;

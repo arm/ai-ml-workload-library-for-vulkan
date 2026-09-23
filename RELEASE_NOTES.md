@@ -31,6 +31,8 @@
   cannot be bound after compilation.
 - Runtime-owned contexts can select compute, data-graph shader-module, and
   tensor requirements while retaining the existing defaults.
+- Added per-session tensor and image tiling selection, with validation and
+  alias-group-aware defaults for library- and caller-owned resources.
 
 ## Version 0.11.0 – *Initial Public Release*
 

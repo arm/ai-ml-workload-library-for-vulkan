@@ -7,6 +7,7 @@
 #include "mlworkloadlib/workload.hpp"
 #include "test_alias_execution.hpp"
 #include "test_expected_results.hpp"
+#include "test_resource_requirements.hpp"
 #include "test_spirv_utils.hpp"
 #include "test_vgf_utils.hpp"
 #include "test_vulkan_fixture.hpp"
@@ -23,6 +24,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -35,6 +37,106 @@ using namespace mlsdk::workloadlib;
 using namespace mlsdk::workloadlib::test;
 
 class VgfSessionExecutionTest : public RuntimeSessionExecutionTest {};
+
+// Capture library arguments before forwarding to Vulkan. The emulation layer
+// can accept mismatched tensor tilings, so execution alone is insufficient.
+class ResourceCreationRecorder {
+  public:
+    // Vulkan-Hpp exposes only a const dispatcher, even for a mutable device.
+    explicit ResourceCreationRecorder(vk::raii::Device &device)
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+        : dispatcher_(const_cast<vk::raii::detail::DeviceDispatcher &>(*device.getDispatcher())),
+          createTensor_(dispatcher_.vkCreateTensorARM), createImage_(dispatcher_.vkCreateImage),
+          createPipelines_(dispatcher_.vkCreateDataGraphPipelinesARM), previous_(active_) {
+        active_ = this;
+        dispatcher_.vkCreateTensorARM = createTensor;
+        dispatcher_.vkCreateImage = createImage;
+        dispatcher_.vkCreateDataGraphPipelinesARM = createPipelines;
+    }
+
+    ~ResourceCreationRecorder() {
+        dispatcher_.vkCreateTensorARM = createTensor_;
+        dispatcher_.vkCreateImage = createImage_;
+        dispatcher_.vkCreateDataGraphPipelinesARM = createPipelines_;
+        active_ = previous_;
+    }
+
+    ResourceCreationRecorder(const ResourceCreationRecorder &) = delete;
+    ResourceCreationRecorder &operator=(const ResourceCreationRecorder &) = delete;
+    ResourceCreationRecorder(ResourceCreationRecorder &&) = delete;
+    ResourceCreationRecorder &operator=(ResourceCreationRecorder &&) = delete;
+
+    // Vulkan callbacks append observations even when the hook guard is const.
+    mutable std::vector<vk::TensorTilingARM> tensorTilings;
+    mutable std::vector<vk::ImageTiling> imageTilings;
+    mutable std::vector<vk::Format> imageFormats;
+    mutable std::vector<vk::ImageUsageFlags> imageUsages;
+    mutable std::vector<vk::TensorTilingARM> pipelineTensorTilings;
+    mutable std::vector<vk::Format> pipelineTensorFormats;
+    mutable std::vector<std::vector<int64_t>> pipelineTensorShapes;
+    mutable std::vector<bool> pipelineTensorHasStrides;
+    mutable std::vector<std::vector<vk::StructureType>> pipelineResourceChains;
+    mutable std::vector<vk::ImageLayout> pipelineImageLayouts;
+    bool forwardPipelineCreation = true;
+
+  private:
+    static VKAPI_ATTR VkResult VKAPI_CALL createTensor(VkDevice device, const VkTensorCreateInfoARM *createInfo,
+                                                       const VkAllocationCallbacks *allocator, VkTensorARM *tensor) {
+        active_->tensorTilings.push_back(vk::TensorTilingARM(createInfo->pDescription->tiling));
+        return active_->createTensor_(device, createInfo, allocator, tensor);
+    }
+
+    static VKAPI_ATTR VkResult VKAPI_CALL createImage(VkDevice device, const VkImageCreateInfo *createInfo,
+                                                      const VkAllocationCallbacks *allocator, VkImage *image) {
+        active_->imageTilings.push_back(vk::ImageTiling(createInfo->tiling));
+        active_->imageFormats.push_back(vk::Format(createInfo->format));
+        active_->imageUsages.emplace_back(createInfo->usage);
+        return active_->createImage_(device, createInfo, allocator, image);
+    }
+
+    static VKAPI_ATTR VkResult VKAPI_CALL createPipelines(VkDevice device, VkDeferredOperationKHR deferredOperation,
+                                                          VkPipelineCache pipelineCache, uint32_t createInfoCount,
+                                                          const VkDataGraphPipelineCreateInfoARM *createInfos,
+                                                          const VkAllocationCallbacks *allocator,
+                                                          VkPipeline *pipelines) {
+        for (uint32_t index = 0; index < createInfoCount; ++index) {
+            const auto &createInfo = createInfos[index];
+            for (uint32_t resourceIndex = 0; resourceIndex < createInfo.resourceInfoCount; ++resourceIndex) {
+                const auto *next =
+                    static_cast<const VkBaseInStructure *>(createInfo.pResourceInfos[resourceIndex].pNext);
+                active_->pipelineResourceChains.emplace_back();
+                while (next != nullptr) {
+                    active_->pipelineResourceChains.back().push_back(vk::StructureType(next->sType));
+                    if (next->sType == VK_STRUCTURE_TYPE_TENSOR_DESCRIPTION_ARM) {
+                        const auto *description = reinterpret_cast<const VkTensorDescriptionARM *>(next);
+                        active_->pipelineTensorTilings.push_back(vk::TensorTilingARM(description->tiling));
+                        active_->pipelineTensorFormats.push_back(vk::Format(description->format));
+                        active_->pipelineTensorShapes.emplace_back(
+                            description->pDimensions, description->pDimensions + description->dimensionCount);
+                        active_->pipelineTensorHasStrides.push_back(description->pStrides != nullptr);
+                    } else if (next->sType == VK_STRUCTURE_TYPE_DATA_GRAPH_PIPELINE_RESOURCE_INFO_IMAGE_LAYOUT_ARM) {
+                        const auto *layout =
+                            reinterpret_cast<const VkDataGraphPipelineResourceInfoImageLayoutARM *>(next);
+                        active_->pipelineImageLayouts.push_back(vk::ImageLayout(layout->layout));
+                    }
+                    next = next->pNext;
+                }
+            }
+        }
+        if (!active_->forwardPipelineCreation) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        return active_->createPipelines_(device, deferredOperation, pipelineCache, createInfoCount, createInfos,
+                                         allocator, pipelines);
+    }
+
+    vk::raii::detail::DeviceDispatcher &dispatcher_;
+    PFN_vkCreateTensorARM createTensor_;
+    PFN_vkCreateImage createImage_;
+    PFN_vkCreateDataGraphPipelinesARM createPipelines_;
+    const ResourceCreationRecorder *previous_;
+    inline static thread_local const ResourceCreationRecorder *active_ = nullptr;
+};
 
 std::string makeConv2dRescaleConstantVgf(const std::vector<int8_t> &weights) {
     const auto &code = assembleConv2dRescaleConstantSpirv("conv2d_rescale_constant", {0, 0, 1, 1});
@@ -423,7 +525,7 @@ std::string makeOutputTensorAliasedToIntermediateBufferVgf() {
     });
 }
 
-std::string makeOutputTensorAliasedToIntermediateTensorVgf() {
+std::string makeOutputTensorAliasedToIntermediateTensorVgf(bool stridedPeer = false, bool publicPeer = false) {
     const auto &code = assembleMaxpool8x8To4x4Spirv("maxpool_8x8_to_4x4_tensor_alias", {0, 0, 0, 1});
     return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
         constexpr uint32_t aliasGroup = 31;
@@ -436,6 +538,14 @@ std::string makeOutputTensorAliasedToIntermediateTensorVgf() {
             encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 4, 4, 16}, {}, aliasGroup);
         const auto intermediate = encoder.AddIntermediateResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT,
                                                                   {1, 4, 4, 16}, {}, aliasGroup);
+        if (stridedPeer) {
+            (void)encoder.AddIntermediateResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 4, 4, 16},
+                                                  {256, 64, 16, 1}, aliasGroup);
+        }
+        if (publicPeer) {
+            (void)encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 4, 4, 16}, {},
+                                            aliasGroup);
+        }
 
         const auto inputBinding = encoder.AddBindingSlot(0, input);
         const auto intermediateBinding = encoder.AddBindingSlot(1, intermediate);
@@ -446,7 +556,9 @@ std::string makeOutputTensorAliasedToIntermediateTensorVgf() {
     });
 }
 
-std::string makeOutputImageAliasedToIntermediateImageVgf() {
+std::string makeOutputImageAliasedToIntermediateImageVgf(
+    VkDescriptorType outputDescriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+    VkDescriptorType intermediateDescriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
     const auto &code = assembleAddInt32BuffersSpirv();
     return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
         constexpr uint32_t aliasGroup = 37;
@@ -458,10 +570,20 @@ std::string makeOutputImageAliasedToIntermediateImageVgf() {
         const auto secondInput =
             encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
         const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {10}, {4});
-        const auto aliasedOutputImage = encoder.AddOutputResource(
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_FORMAT_R8G8B8A8_SNORM, {1, 2, 3, 4}, {}, aliasGroup);
+        const auto aliasedOutputImage =
+            encoder.AddOutputResource(outputDescriptorType, VK_FORMAT_R8G8B8A8_SNORM, {1, 2, 3, 4}, {}, aliasGroup);
         const auto intermediateImage = encoder.AddIntermediateResource(
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_FORMAT_R8G8B8A8_SNORM, {1, 2, 3, 4}, {}, aliasGroup);
+            intermediateDescriptorType, VK_FORMAT_R8G8B8A8_SNORM, {1, 2, 3, 4}, {}, aliasGroup);
+        if (outputDescriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+            encoder.AddSamplerConfig(aliasedOutputImage, VK_FILTER_NEAREST, VK_FILTER_NEAREST,
+                                     VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                     VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK);
+        }
+        if (intermediateDescriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+            encoder.AddSamplerConfig(intermediateImage, VK_FILTER_NEAREST, VK_FILTER_NEAREST,
+                                     VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                     VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK);
+        }
 
         const auto firstInputBinding = encoder.AddBindingSlot(0, firstInput);
         const auto secondInputBinding = encoder.AddBindingSlot(1, secondInput);
@@ -504,6 +626,33 @@ TEST_P(VgfAliasExecutionTest, Run) {
     const auto bytes = makeAliasVgf(GetParam().scenario);
     auto workload = Workload::fromVGF(bytes.data(), bytes.size());
     runAliasCase(workload, GetParam(), true);
+}
+
+TEST_F(VgfAliasExecutionTest, RunOptimalTensorAliasWithSessionSelection) {
+    const auto bytes = makeOutputTensorAliasedToIntermediateTensorVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    const ResourceCreationRecorder recorder(device);
+
+    runAliasCase(workload, aliasCases[3], true, vk::TensorTilingARM::eOptimal);
+
+    EXPECT_EQ(recorder.pipelineTensorTilings,
+              (std::vector<vk::TensorTilingARM>{vk::TensorTilingARM::eLinear, vk::TensorTilingARM::eOptimal}));
+    EXPECT_EQ(recorder.tensorTilings,
+              (std::vector<vk::TensorTilingARM>{vk::TensorTilingARM::eLinear, vk::TensorTilingARM::eOptimal,
+                                                vk::TensorTilingARM::eOptimal, vk::TensorTilingARM::eLinear}));
+}
+
+TEST_F(VgfAliasExecutionTest, RunLinearImageAliasWithSessionSelection) {
+    const auto bytes = makeOutputImageAliasedToIntermediateImageVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    const ResourceCreationRecorder recorder(device);
+
+    runAliasCase(workload, aliasCases[4], true, std::nullopt, vk::ImageTiling::eLinear);
+
+    EXPECT_EQ(recorder.imageTilings,
+              (std::vector<vk::ImageTiling>{vk::ImageTiling::eLinear, vk::ImageTiling::eLinear}));
+    const auto aliasedUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage;
+    EXPECT_EQ(recorder.imageUsages, (std::vector<vk::ImageUsageFlags>{aliasedUsage, aliasedUsage}));
 }
 
 TEST_F(VgfSessionExecutionTest, RunComputeShaderSegment) {
@@ -996,6 +1145,317 @@ TEST_F(VgfSessionExecutionTest, RunMaxpoolDataVgf) {
     EXPECT_EQ(outputTensor.read(outputTensor.numElements()), expectedMaxpool(input, inputTensor.shape));
 }
 
+TEST_F(VgfSessionExecutionTest, SelectsTensorTilingPerSession) {
+    const auto bytes = makeMaxpool16x16To8x8Vgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    const auto input = workload.resource(0);
+
+    const Session first(context, workload);
+    Session second(context, workload);
+    EXPECT_EQ(first.tensorTiling(input), vk::TensorTilingARM::eLinear);
+
+    second.setTensorTiling(input, vk::TensorTilingARM::eOptimal);
+    EXPECT_EQ(second.tensorTiling(input), vk::TensorTilingARM::eOptimal);
+    EXPECT_EQ(first.tensorTiling(input), vk::TensorTilingARM::eLinear);
+}
+
+TEST_F(VgfSessionExecutionTest, KeepsSharedSessionTilingSelectionsIndependent) {
+    const auto bytes = makeOutputTensorAliasedToIntermediateTensorVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    const auto input = workload.resource(0);
+    const auto output = workload.resource(1);
+
+    CompiledExecution compiled(context, workload);
+    Session first(context, workload, compiled);
+    Session second(context, workload, compiled);
+    first.setTensorTiling(input, vk::TensorTilingARM::eOptimal);
+    first.setTensorTiling(output, vk::TensorTilingARM::eOptimal);
+
+    EXPECT_EQ(first.tensorTiling(input), vk::TensorTilingARM::eOptimal);
+    EXPECT_EQ(first.tensorTiling(output), vk::TensorTilingARM::eOptimal);
+    EXPECT_EQ(second.tensorTiling(input), vk::TensorTilingARM::eLinear);
+    EXPECT_EQ(second.tensorTiling(output), vk::TensorTilingARM::eLinear);
+    const ResourceCreationRecorder recorder(device);
+    first.configure();
+    EXPECT_EQ(recorder.pipelineTensorTilings,
+              (std::vector<vk::TensorTilingARM>{vk::TensorTilingARM::eOptimal, vk::TensorTilingARM::eOptimal}));
+
+    EXPECT_THROW(second.configure(), std::runtime_error);
+    second.setTensorTiling(input, vk::TensorTilingARM::eOptimal);
+    second.setTensorTiling(output, vk::TensorTilingARM::eOptimal);
+    EXPECT_NO_THROW(second.configure());
+
+    Session later(context, workload, compiled);
+    EXPECT_EQ(later.tensorTiling(input), vk::TensorTilingARM::eOptimal);
+    EXPECT_EQ(later.tensorTiling(output), vk::TensorTilingARM::eOptimal);
+    EXPECT_NO_THROW(later.configure());
+}
+
+TEST_F(VgfSessionExecutionTest, KeepsInternalAliasSelectionSeparateAcrossCompiledExecutions) {
+    const auto bytes = makeOutputTensorAliasedToIntermediateTensorVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    Session first(context, workload);
+    Session second(context, workload);
+    first.setTensorTiling(workload.resource(1), vk::TensorTilingARM::eOptimal);
+    EXPECT_EQ(second.tensorTiling(workload.resource(1)), vk::TensorTilingARM::eLinear);
+
+    const ResourceCreationRecorder recorder(device);
+    first.configure();
+    second.configure();
+    EXPECT_EQ(recorder.pipelineTensorTilings,
+              (std::vector<vk::TensorTilingARM>{vk::TensorTilingARM::eLinear, vk::TensorTilingARM::eOptimal,
+                                                vk::TensorTilingARM::eLinear, vk::TensorTilingARM::eLinear}));
+}
+
+TEST_F(VgfSessionExecutionTest, RejectsConflictingPublicAliasTilings) {
+    const auto bytes = makeOutputTensorAliasedToIntermediateTensorVgf(false, true);
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.setTensorTiling(workload.resource(1), vk::TensorTilingARM::eOptimal);
+    session.setTensorTiling(workload.resource(2), vk::TensorTilingARM::eLinear);
+    EXPECT_EQ(session.tensorTiling(workload.resource(1)), vk::TensorTilingARM::eOptimal);
+    EXPECT_THROW(session.configure(), std::runtime_error);
+
+    session.setTensorTiling(workload.resource(2), vk::TensorTilingARM::eOptimal);
+    EXPECT_NO_THROW(session.configure());
+}
+
+TEST_F(VgfSessionExecutionTest, RejectsOptimalTilingWithIntermediateBufferAlias) {
+    const auto bytes = makeOutputTensorAliasedToIntermediateBufferVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    EXPECT_THROW(session.setTensorTiling(workload.resource(2), vk::TensorTilingARM::eOptimal), std::runtime_error);
+    EXPECT_EQ(session.tensorTiling(workload.resource(2)), vk::TensorTilingARM::eLinear);
+    EXPECT_NO_THROW(session.configure());
+}
+
+TEST_F(VgfSessionExecutionTest, RejectsStridedAliasPeerWithoutChangingSelectedTilings) {
+    const auto bytes = makeOutputTensorAliasedToIntermediateTensorVgf(true);
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    EXPECT_THROW(session.setTensorTiling(workload.resource(1), vk::TensorTilingARM::eOptimal), std::runtime_error);
+    EXPECT_EQ(session.tensorTiling(workload.resource(1)), vk::TensorTilingARM::eLinear);
+    const ResourceCreationRecorder recorder(device);
+    EXPECT_NO_THROW(session.configure());
+    EXPECT_EQ(recorder.pipelineTensorTilings,
+              (std::vector<vk::TensorTilingARM>{vk::TensorTilingARM::eLinear, vk::TensorTilingARM::eLinear}));
+}
+
+TEST_F(VgfSessionExecutionTest, SelectsImageTilingPerSession) {
+    const auto bytes = makeAddInt32BuffersWithExternalImageVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    const auto image = workload.resource(2);
+
+    const Session first(context, workload);
+    Session second(context, workload);
+    EXPECT_EQ(first.imageTiling(image), vk::ImageTiling::eOptimal);
+
+    second.setImageTiling(image, vk::ImageTiling::eLinear);
+    EXPECT_EQ(second.imageTiling(image), vk::ImageTiling::eLinear);
+    EXPECT_EQ(first.imageTiling(image), vk::ImageTiling::eOptimal);
+}
+
+TEST_F(VgfSessionExecutionTest, SuppliesOnlyImageLayoutMetadataForGraphImages) {
+    const auto code = assembleSpirv(R"(
+        OpCapability GraphARM
+        OpCapability TensorsARM
+        OpCapability Shader
+        OpCapability VulkanMemoryModel
+        OpExtension "SPV_ARM_graph"
+        OpExtension "SPV_ARM_tensors"
+        OpExtension "SPV_KHR_vulkan_memory_model"
+        OpMemoryModel Logical Vulkan
+        OpDecorate %input DescriptorSet 0
+        OpDecorate %input Binding 0
+        OpDecorate %output DescriptorSet 0
+        OpDecorate %output Binding 1
+        %float = OpTypeFloat 32
+        %uint = OpTypeInt 32 0
+        %zero = OpConstant %uint 0
+        %one = OpConstant %uint 1
+        %three = OpConstant %uint 3
+        %four = OpConstant %uint 4
+        %five = OpConstant %uint 5
+        %dimensions = OpTypeArray %uint %four
+        %shape = OpConstantComposite %dimensions %one %three %five %four
+        %tensor = OpTypeTensorARM %float %four %shape
+        %pointer = OpTypePointer UniformConstant %tensor
+        %input = OpVariable %pointer UniformConstant
+        %output = OpVariable %pointer UniformConstant
+        %graphType = OpTypeGraphARM 1 %tensor %tensor
+        OpGraphEntryPointARM %main "main" %input %output
+        %main = OpGraphARM %graphType
+        %value = OpGraphInputARM %tensor %zero
+        OpGraphSetOutputARM %value %zero
+        OpGraphEndARM
+    )");
+    auto context = wrappedContext();
+    for (const bool useVgf : {false, true}) {
+        SCOPED_TRACE(useVgf ? "VGF" : "standalone");
+        for (const auto descriptorType :
+             {vk::DescriptorType::eStorageImage, vk::DescriptorType::eCombinedImageSampler}) {
+            SCOPED_TRACE(vk::to_string(descriptorType));
+            const auto layout = descriptorType == vk::DescriptorType::eStorageImage
+                                    ? vk::ImageLayout::eGeneral
+                                    : vk::ImageLayout::eShaderReadOnlyOptimal;
+            auto workload = [&] {
+                if (useVgf) {
+                    const auto bytes = writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
+                        const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::GRAPH, "graph", "main", code);
+                        const auto image = encoder.AddInputResource(static_cast<VkDescriptorType>(descriptorType),
+                                                                    VK_FORMAT_R8G8B8A8_SNORM, {1, 3, 5, 4}, {});
+                        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SNORM,
+                                                                      {1, 3, 5, 4}, {});
+                        const auto inputBinding = encoder.AddBindingSlot(0, image);
+                        const auto outputBinding = encoder.AddBindingSlot(1, output);
+                        const auto descriptorSet = encoder.AddDescriptorSetInfo({inputBinding, outputBinding}, 0);
+                        encoder.AddSegmentInfo(module, "image_metadata", {descriptorSet}, {inputBinding},
+                                               {outputBinding}, noGraphConstants);
+                    });
+                    return Workload::fromVGF(bytes.data(), bytes.size());
+                }
+                auto imageRequirements = makeStorageImageRequirements();
+                imageRequirements.descriptorType = descriptorType;
+                imageRequirements.elementCount = 15;
+                imageRequirements.image.extent = vk::Extent3D(5, 3, 1);
+                imageRequirements.image.usage = descriptorType == vk::DescriptorType::eStorageImage
+                                                    ? vk::ImageUsageFlagBits::eStorage
+                                                    : vk::ImageUsageFlagBits::eSampled;
+                imageRequirements.image.requiredLayout = layout;
+                DataGraphDescription description;
+                description.module.codeKind = ModuleCodeKind::Spirv;
+                description.module.spirv = code;
+                description.resources = {
+                    {"image", 0, 0, ResourceAccess::Read, imageRequirements},
+                    {"output", 0, 1, ResourceAccess::Write, tensorRequirements(vk::Format::eR8Snorm, {1, 3, 5, 4})},
+                };
+                return Workload::fromDataGraph(std::move(description));
+            }();
+            for (const auto tiling : {vk::ImageTiling::eLinear, vk::ImageTiling::eOptimal}) {
+                SCOPED_TRACE(vk::to_string(tiling));
+                Session session(context, workload);
+                const auto image = workload.resource(0);
+                session.setImageTiling(image, tiling);
+                ResourceCreationRecorder recorder(device);
+                const auto allocation = context.createImage(image, session.imageTiling(image));
+                // Inspect the Vulkan arguments directly: the local graph emulation
+                // layer expects tensor descriptions for every resource, including images.
+                recorder.forwardPipelineCreation = false;
+                EXPECT_THROW(session.configure(), std::runtime_error);
+
+                EXPECT_EQ(recorder.pipelineResourceChains,
+                          (std::vector<std::vector<vk::StructureType>>{
+                              {vk::StructureType::eDataGraphPipelineResourceInfoImageLayoutARM},
+                              {vk::StructureType::eTensorDescriptionARM}}));
+                EXPECT_EQ(recorder.pipelineTensorTilings,
+                          (std::vector<vk::TensorTilingARM>{vk::TensorTilingARM::eLinear}));
+                EXPECT_EQ(recorder.pipelineTensorFormats, (std::vector<vk::Format>{vk::Format::eR8Snorm}));
+                EXPECT_EQ(recorder.pipelineTensorShapes, (std::vector<std::vector<int64_t>>{{1, 3, 5, 4}}));
+                EXPECT_EQ(recorder.pipelineTensorHasStrides, (std::vector<bool>{false}));
+                EXPECT_EQ(recorder.pipelineImageLayouts, (std::vector<vk::ImageLayout>{layout}));
+                EXPECT_EQ(recorder.imageFormats, (std::vector<vk::Format>{vk::Format::eR8G8B8A8Snorm}));
+                EXPECT_EQ(recorder.imageTilings, (std::vector<vk::ImageTiling>{tiling}));
+                EXPECT_EQ(image.requirements().format(), vk::Format::eR8G8B8A8Snorm);
+                EXPECT_EQ(session.imageTiling(image), tiling);
+            }
+        }
+    }
+}
+
+TEST_F(VgfSessionExecutionTest, RejectsOptimalTilingForStridedTensor) {
+    const auto &code = assembleMaxpool16x16To8x8Spirv("maxpool_set0", {0, 0, 1, 1});
+    const auto bytes = writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
+        const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::GRAPH, "graph", "main", code);
+        const auto input = encoder.AddInputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 16, 16, 16},
+                                                    {4096, 256, 16, 1});
+        const auto output =
+            encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 8, 8, 16}, {});
+        const auto inputBinding = encoder.AddBindingSlot(0, input);
+        const auto outputBinding = encoder.AddBindingSlot(1, output);
+        const auto inputSet = encoder.AddDescriptorSetInfo({inputBinding}, 0);
+        const auto outputSet = encoder.AddDescriptorSetInfo({outputBinding}, 1);
+        encoder.AddSegmentInfo(module, "graph_segment", {inputSet, outputSet}, {inputBinding}, {outputBinding},
+                               noGraphConstants);
+    });
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    const auto input = workload.resource(0);
+    Session session(context, workload);
+
+    EXPECT_THROW(session.setTensorTiling(input, vk::TensorTilingARM::eOptimal), std::runtime_error);
+    EXPECT_THROW((void)context.createTensor(input, vk::TensorTilingARM::eOptimal), std::runtime_error);
+    EXPECT_EQ(session.tensorTiling(input), vk::TensorTilingARM::eLinear);
+}
+
+TEST_F(VgfSessionExecutionTest, SelectsLinearTilingForAliasedImage) {
+    const auto bytes = makeOutputImageAliasedToIntermediateImageVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    const auto image = workload.resource(3);
+    Session session(context, workload);
+
+    const auto requirements = image.requirements().asImage();
+    EXPECT_TRUE(requirements.usage(session.imageTiling(image)) & vk::ImageUsageFlagBits::eTensorAliasingARM);
+    EXPECT_FALSE(requirements.usage(vk::ImageTiling::eLinear) & vk::ImageUsageFlagBits::eTensorAliasingARM);
+    session.setImageTiling(image, vk::ImageTiling::eLinear);
+    EXPECT_EQ(session.imageTiling(image), vk::ImageTiling::eLinear);
+}
+
+TEST_F(VgfSessionExecutionTest, RejectsGraphTensorTilingChangeAfterSharedCompilation) {
+    const auto bytes = makeMaxpool16x16To8x8Vgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    CompiledExecution compiled(context, workload);
+
+    Session first(context, workload, compiled);
+    first.configure();
+
+    // NOLINTNEXTLINE(misc-const-correctness)
+    Session second(context, workload, compiled);
+    EXPECT_THROW(second.setTensorTiling(workload.resource(0), vk::TensorTilingARM::eOptimal), std::runtime_error);
+    EXPECT_NO_THROW(second.setTensorTiling(workload.resource(0), vk::TensorTilingARM::eLinear));
+}
+
+TEST_F(VgfSessionExecutionTest, AllowsImageTilingChangeWithSharedComputePipeline) {
+    constexpr vk::DeviceSize bufferSize = 10 * sizeof(int32_t);
+    const auto bytes = makeOutputImageAliasedToIntermediateImageVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    const auto image = workload.resource(3);
+    CompiledExecution compiled(context, workload);
+
+    Session first(context, workload, compiled);
+    first.configure();
+    Session second(context, workload, compiled);
+    EXPECT_EQ(second.imageTiling(image), vk::ImageTiling::eOptimal);
+    second.setImageTiling(image, vk::ImageTiling::eLinear);
+    EXPECT_EQ(first.imageTiling(image), vk::ImageTiling::eOptimal);
+    second.configure();
+
+    const Buffer firstInput(physicalDevice, device, bufferSize);
+    const Buffer secondInput(physicalDevice, device, bufferSize);
+    const Buffer output(physicalDevice, device, bufferSize);
+    const auto publicImage = context.createImage(image, second.imageTiling(image));
+    auto bindings = second.createBindingSet();
+    bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstInput.buffer});
+    bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondInput.buffer});
+    bindings.bindBuffer(workload.resource(2), BufferBindingInfo{*output.buffer});
+    auto imageBinding = publicImage.binding();
+    imageBinding.layout.reset();
+    bindings.bindImage(image, imageBinding);
+
+    const ResourceCreationRecorder recorder(device);
+    const auto prepared = second.prepare(bindings);
+    EXPECT_EQ(recorder.imageTilings, (std::vector<vk::ImageTiling>{vk::ImageTiling::eLinear}));
+}
+
 TEST_F(VgfSessionExecutionTest, ConfigureAcceptsMissingLinearTensorAndConstantStrides) {
     const std::vector<int8_t> weights(16UL * 2 * 2 * 16, 1);
     const auto bytes = makeConv2dRescaleConstantVgf(weights);
@@ -1223,18 +1683,6 @@ TEST_F(VgfSessionExecutionTest, ExposesGraphDiagnostics) {
     Session computeSession(context, computeWorkload);
     computeSession.configure();
     EXPECT_THROW(computeSession.dataGraphPipelineProperties(0), std::runtime_error);
-}
-
-TEST(SessionOptionsTest, RequiresHostVisibleSessionMemory) {
-    SessionOptions options;
-    EXPECT_FALSE(options.requiredSessionMemoryProperties.has_value());
-
-    options.requireHostVisibleSessionMemory();
-
-    const auto requiredProperties =
-        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent;
-    ASSERT_TRUE(options.requiredSessionMemoryProperties.has_value());
-    EXPECT_EQ(*options.requiredSessionMemoryProperties, requiredProperties);
 }
 
 TEST_F(VgfSessionExecutionTest, RunTwoMaxpoolGraphSegments) {

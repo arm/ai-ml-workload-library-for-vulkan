@@ -31,6 +31,12 @@ them across sessions for the same context and workload, pass a
 ``CompiledExecution`` to each session. Each session still has its own binding
 sets and command state.
 
+Each session also has its own tiling selection. Building shared pipelines fixes
+graph tensor tiling and the tiling of its alias peers. Sessions created
+afterward start with those choices; other tiling choices remain independent. A
+session created earlier must select compatible graph tensor tiling before it
+can reuse the pipelines.
+
 The following excerpt from the standalone compute sample shows the common flow
 with a runtime-owned context and buffers. The sample defines the GLSL workload
 description and mapped-memory helpers earlier in the source file.
@@ -141,17 +147,37 @@ Resource binding
 The workload exposes its public resources in order through
 ``Workload::resources()`` or by index through ``Workload::resource(...)``.
 
+Choose public tensor or image tiling with ``Session::setTensorTiling()`` or
+``Session::setImageTiling()`` before calling ``configure()``. Without a
+selection, tensors use Linear tiling and images use Optimal tiling. A tensor
+that requires image aliasing uses Optimal. Alias groups use a common default
+tiling: Optimal if any peer defaults to Optimal, unless a storage-buffer peer
+or explicit tensor strides require Linear. Image/tensor alias groups are
+rejected if a tensor peer's innermost dimension exceeds four, regardless of
+tiling.
+Incompatible alias tiling requirements are rejected. For Optimal image/tensor
+aliases, the required tensor usage includes ``eImageAliasing``.
+
+The allocation overloads without a tiling argument create Linear tensors and
+Optimal images. ``ImageRequirementsView::usage()`` returns the usage for
+Optimal tiling.
+
 To create and bind resources:
 
-#. Use one of these options:
+#. Create each public resource from its kind and requirements, or use
+   ``Context::createTensor()``, ``Context::createBuffer()``, or
+   ``Context::createImage()``. For tensors and images, use the tiling returned
+   by ``session.tensorTiling(resource)`` or ``session.imageTiling(resource)``
+   when creating the Vulkan® object; pass it to the ``Context`` helper if
+   using one. For a tensor created directly, query its required usage with
+   ``resource.requirements().asTensor().usage(session.tensorTiling(resource))``.
+   For an image created directly, query its required usage with
+   ``resource.requirements().asImage().usage(session.imageTiling(resource))``.
 
-   - Inspect the kind and requirements of each resource, and then create the
-     corresponding Vulkan® object.
-   - Use ``Context::createTensor()``, ``Context::createBuffer()``, or
-     ``Context::createImage()`` to create a compatible allocation.
+#. Bind every required public resource with ``bindTensor()``, ``bindBuffer()``,
+   or ``bindImage()`` before preparing an execution.
 
-#. Use ``bindTensor()``, ``bindBuffer()``, or ``bindImage()`` to bind every
-   required public resource before preparing an execution.
+``BindingSet`` cannot inspect a caller-owned Vulkan® handle's creation tiling.
 
 Sample 3 binds every public resource according to its kind:
 

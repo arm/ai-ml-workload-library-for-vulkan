@@ -364,6 +364,36 @@ uint32_t findMemoryType(const vk::raii::PhysicalDevice &physicalDevice, uint32_t
 }
 
 /*******************************************************************************
+ * Resource creation validation
+ *******************************************************************************/
+
+void validateTensorTiling(vk::TensorTilingARM tiling, vk::TensorUsageFlagsARM usage, const std::vector<int64_t> &shape,
+                          bool hasExplicitStrides) {
+    if (tiling != vk::TensorTilingARM::eLinear && tiling != vk::TensorTilingARM::eOptimal) {
+        throw std::runtime_error("Unsupported tensor tiling");
+    }
+    if (tiling == vk::TensorTilingARM::eOptimal && hasExplicitStrides) {
+        throw std::runtime_error("Optimal tensor tiling must not specify strides");
+    }
+    if (tiling == vk::TensorTilingARM::eLinear && (usage & vk::TensorUsageFlagBitsARM::eImageAliasing)) {
+        throw std::runtime_error("Linear tensors cannot use image aliasing");
+    }
+    if (tiling == vk::TensorTilingARM::eOptimal && (usage & vk::TensorUsageFlagBitsARM::eImageAliasing) &&
+        (shape.empty() || shape.back() > 4)) {
+        throw std::runtime_error("Optimal image-aliasing tensors require an innermost dimension of at most 4");
+    }
+}
+
+void validateImageTiling(vk::ImageTiling tiling, vk::ImageUsageFlags usage) {
+    if (tiling != vk::ImageTiling::eLinear && tiling != vk::ImageTiling::eOptimal) {
+        throw std::runtime_error("Unsupported image tiling");
+    }
+    if (tiling == vk::ImageTiling::eLinear && (usage & vk::ImageUsageFlagBits::eTensorAliasingARM)) {
+        throw std::runtime_error("Linear images cannot use tensor aliasing");
+    }
+}
+
+/*******************************************************************************
  * Executable synchronization
  *******************************************************************************/
 
@@ -434,9 +464,18 @@ vk::ImageUsageFlags imageUsage(vk::DescriptorType descriptorType, bool aliased) 
     default:
         throw std::runtime_error("Descriptor type does not have image usage flags");
     }
-    if (aliased) {
-        usage |= vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage |
-                 vk::ImageUsageFlagBits::eTensorAliasingARM;
+    return imageUsageForTiling(usage, aliased, vk::ImageTiling::eOptimal);
+}
+
+vk::ImageUsageFlags imageUsageForTiling(vk::ImageUsageFlags usage, bool aliased, vk::ImageTiling tiling) {
+    if (!aliased) {
+        return usage;
+    }
+    // Alias peers may use either sampled or storage image descriptors.
+    usage |= vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage;
+    usage &= ~vk::ImageUsageFlags(vk::ImageUsageFlagBits::eTensorAliasingARM);
+    if (tiling == vk::ImageTiling::eOptimal) {
+        usage |= vk::ImageUsageFlagBits::eTensorAliasingARM;
     }
     return usage;
 }

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "internal/module_compiler.hpp"
+#include "internal/session_tiling.hpp"
 #include "internal/utils.hpp"
 #include "internal/workload_impl.hpp"
 
@@ -386,6 +387,10 @@ vk::TensorUsageFlagsARM TensorRequirementsView::usage() const {
     return detail::tensorMetadata(workloadResource(*workload_, resourceIndex_)).usage;
 }
 
+vk::TensorUsageFlagsARM TensorRequirementsView::usage(vk::TensorTilingARM tiling) const {
+    return detail::tensorUsageForTiling(*workload_, resourceIndex_, tiling);
+}
+
 ArrayView<const int64_t> TensorRequirementsView::shape() const {
     const auto &shape = workloadResource(*workload_, resourceIndex_).shape;
     return {shape.data(), shape.size()};
@@ -412,16 +417,18 @@ vk::Extent3D ImageRequirementsView::extent() const {
     return workloadResource(*workload_, resourceIndex_).imageExtent();
 }
 
-vk::ImageUsageFlags ImageRequirementsView::usage() const {
+vk::ImageUsageFlags ImageRequirementsView::usage() const { return usage(vk::ImageTiling::eOptimal); }
+
+vk::ImageUsageFlags ImageRequirementsView::usage(vk::ImageTiling selectedTiling) const {
+    if (selectedTiling != vk::ImageTiling::eLinear && selectedTiling != vk::ImageTiling::eOptimal) {
+        throw std::runtime_error("Unsupported image tiling");
+    }
     const auto &resource = workloadResource(*workload_, resourceIndex_);
-    const auto usage = detail::imageMetadata(resource).usage;
-    if (usage) {
-        return usage;
+    auto flags = detail::imageMetadata(resource).usage;
+    if (!flags && resource.descriptorType.has_value()) {
+        flags = detail::imageUsage(*resource.descriptorType, resource.aliasGroupId.has_value());
     }
-    if (!resource.descriptorType.has_value()) {
-        return {};
-    }
-    return detail::imageUsage(*resource.descriptorType, resource.aliasGroupId.has_value());
+    return detail::imageUsageForTiling(flags, resource.aliasGroupId.has_value(), selectedTiling);
 }
 
 bool ImageRequirementsView::isSampled() const {

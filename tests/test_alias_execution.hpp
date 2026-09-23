@@ -16,6 +16,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <ostream>
 #include <vector>
 
@@ -54,7 +55,9 @@ inline void PrintTo(const AliasCase &testCase, std::ostream *os) { *os << testCa
 
 class AliasExecutionTestBase : public RuntimeSessionExecutionTest {
   protected:
-    void runAliasCase(Workload &workload, const AliasCase &testCase, bool provideMemoryInfo) {
+    void runAliasCase(Workload &workload, const AliasCase &testCase, bool provideMemoryInfo,
+                      std::optional<vk::TensorTilingARM> tensorTiling = std::nullopt,
+                      std::optional<vk::ImageTiling> imageTiling = std::nullopt) {
         switch (testCase.scenario) {
         case AliasScenario::OutputBufferAliasedToIntermediateBuffer:
             runOutputBufferAliasedToIntermediateBuffer(workload, testCase, provideMemoryInfo);
@@ -66,10 +69,10 @@ class AliasExecutionTestBase : public RuntimeSessionExecutionTest {
             runOutputTensorAliasedToIntermediateBuffer(workload, testCase, provideMemoryInfo);
             return;
         case AliasScenario::OutputTensorAliasedToIntermediateTensor:
-            runOutputTensorAliasedToIntermediateTensor(workload, testCase, provideMemoryInfo);
+            runOutputTensorAliasedToIntermediateTensor(workload, testCase, provideMemoryInfo, tensorTiling);
             return;
         case AliasScenario::OutputImageAliasedToIntermediateImage:
-            runOutputImageAliasedToIntermediateImage(workload, testCase, provideMemoryInfo);
+            runOutputImageAliasedToIntermediateImage(workload, testCase, provideMemoryInfo, imageTiling);
             return;
         }
         FAIL() << "Unhandled alias scenario";
@@ -222,18 +225,25 @@ class AliasExecutionTestBase : public RuntimeSessionExecutionTest {
     }
 
     void runOutputTensorAliasedToIntermediateTensor(Workload &workload, const AliasCase &testCase,
-                                                    bool provideMemoryInfo) {
+                                                    bool provideMemoryInfo, std::optional<vk::TensorTilingARM> tiling) {
         auto context = wrappedContext();
         ASSERT_EQ(workload.executableCount(), testCase.executableCount);
+        Session session(context, workload);
+        if (tiling.has_value()) {
+            session.setTensorTiling(workload.resource(1), *tiling);
+        }
 
         const Tensor inputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 8, 8, 16});
-        const Tensor outputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 4, 4, 16});
+        const auto outputTiling = session.tensorTiling(workload.resource(1));
+        const Tensor outputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 4, 4, 16}, outputTiling,
+                                  vk::TensorUsageFlagBitsARM::eDataGraph | vk::TensorUsageFlagBitsARM::eTransferSrc);
 
         const auto input = makeMaxpoolInput(inputTensor.shape, 5);
         inputTensor.write(input);
-        outputTensor.fill(0, outputTensor.numElements());
+        if (outputTiling == vk::TensorTilingARM::eLinear) {
+            outputTensor.fill(0, outputTensor.numElements());
+        }
 
-        Session session(context, workload);
         session.configure();
         auto bindings = session.createBindingSet();
         ASSERT_EQ(workload.resourceCount(), testCase.resourceCount);
@@ -254,21 +264,48 @@ class AliasExecutionTestBase : public RuntimeSessionExecutionTest {
         auto execution = session.prepare(bindings);
         execution.run();
 
-        EXPECT_EQ(outputTensor.read(outputTensor.numElements()), expectedMaxpool(input, inputTensor.shape));
+        if (outputTiling == vk::TensorTilingARM::eOptimal) {
+            // Read Optimal tensors through a Linear transfer destination rather
+            // than assuming their device-memory representation is packed.
+            const Tensor readbackTensor(
+                physicalDevice, device, vk::Format::eR8Sint, outputTensor.shape, vk::TensorTilingARM::eLinear,
+                vk::TensorUsageFlagBitsARM::eDataGraph | vk::TensorUsageFlagBitsARM::eTransferDst);
+            recordAndSubmitCommands(device, queue, queueFamilyIndex, [&](vk::CommandBuffer commandBuffer) {
+                const vk::MemoryBarrier2 beforeCopy(
+                    vk::PipelineStageFlagBits2::eAllCommands, vk::AccessFlagBits2::eMemoryWrite,
+                    vk::PipelineStageFlagBits2::eAllTransfer, vk::AccessFlagBits2::eTransferRead);
+                commandBuffer.pipelineBarrier2(vk::DependencyInfo({}, beforeCopy), *device.getDispatcher());
+                const vk::TensorCopyARM region;
+                commandBuffer.copyTensorARM({*outputTensor.tensor, *readbackTensor.tensor, region},
+                                            *device.getDispatcher());
+                const vk::MemoryBarrier2 afterCopy(vk::PipelineStageFlagBits2::eAllTransfer,
+                                                   vk::AccessFlagBits2::eTransferWrite,
+                                                   vk::PipelineStageFlagBits2::eHost, vk::AccessFlagBits2::eHostRead);
+                commandBuffer.pipelineBarrier2(vk::DependencyInfo({}, afterCopy), *device.getDispatcher());
+            });
+            EXPECT_EQ(readbackTensor.read(readbackTensor.numElements()), expectedMaxpool(input, inputTensor.shape));
+        } else {
+            EXPECT_EQ(outputTensor.read(outputTensor.numElements()), expectedMaxpool(input, inputTensor.shape));
+        }
     }
 
-    void runOutputImageAliasedToIntermediateImage(Workload &workload, const AliasCase &testCase,
-                                                  bool provideMemoryInfo) {
+    void runOutputImageAliasedToIntermediateImage(Workload &workload, const AliasCase &testCase, bool provideMemoryInfo,
+                                                  std::optional<vk::ImageTiling> tiling) {
         constexpr std::size_t elements = 10;
         constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
 
         auto context = wrappedContext();
         ASSERT_EQ(workload.executableCount(), testCase.executableCount);
+        Session session(context, workload);
+        if (tiling.has_value()) {
+            session.setImageTiling(workload.resource(3), *tiling);
+        }
 
         const Buffer firstInputBuffer(physicalDevice, device, bufferSize);
         const Buffer secondInputBuffer(physicalDevice, device, bufferSize);
         const Buffer outputBuffer(physicalDevice, device, bufferSize);
-        const Image aliasedOutputImage(physicalDevice, device, vk::ImageUsageFlagBits::eStorage);
+        const auto aliasedOutputImage =
+            context.createImage(workload.resource(3), session.imageTiling(workload.resource(3)));
 
         const std::vector<int32_t> firstInput = {3, 5, 8, 13, 21, 34, 55, 89, 144, 233};
         const std::vector<int32_t> secondInput = {1, -1, 2, -2, 3, -3, 4, -4, 5, -5};
@@ -276,7 +313,6 @@ class AliasExecutionTestBase : public RuntimeSessionExecutionTest {
         secondInputBuffer.write(secondInput);
         outputBuffer.write(std::vector<int32_t>(elements, 0));
 
-        Session session(context, workload);
         session.configure();
         auto bindings = session.createBindingSet();
         ASSERT_EQ(workload.resourceCount(), testCase.resourceCount);
@@ -284,13 +320,11 @@ class AliasExecutionTestBase : public RuntimeSessionExecutionTest {
         bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondInputBuffer.buffer});
         bindings.bindBuffer(workload.resource(2), BufferBindingInfo{*outputBuffer.buffer});
 
-        const auto imageRequirements = workload.resource(3).requirements().asImage();
-        ImageBindingInfo imageBindingInfo;
-        imageBindingInfo.image = *aliasedOutputImage.image;
-        imageBindingInfo.imageView = *aliasedOutputImage.imageView;
-        imageBindingInfo.subresourceRange = imageRequirements.requiredSubresourceRange();
-        if (provideMemoryInfo) {
-            imageBindingInfo.memory = {*aliasedOutputImage.memory, 0, aliasedOutputImage.memorySize};
+        auto imageBindingInfo = aliasedOutputImage.binding();
+        // The public image supplies alias memory and is not dispatched itself.
+        imageBindingInfo.layout.reset();
+        if (!provideMemoryInfo) {
+            imageBindingInfo.memory = {};
         }
         bindings.bindImage(workload.resource(3), imageBindingInfo);
 

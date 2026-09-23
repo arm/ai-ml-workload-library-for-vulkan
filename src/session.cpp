@@ -5,12 +5,14 @@
 #include "internal/binding_set_impl.hpp"
 #include "internal/module_compiler.hpp"
 #include "internal/session_impl.hpp"
+#include "internal/session_tiling.hpp"
 #include "internal/utils.hpp"
 #include "internal/workload_builder.hpp"
 
 #include "mlworkloadlib/session.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -105,7 +107,7 @@ void validateExecutableBindings(const Workload &workload, const Executable &exec
 }
 
 void populateDataGraphResources(DataGraphPipelineCreateStorage &storage, const Executable &executable,
-                                const Workload &workload) {
+                                const Workload &workload, const std::vector<detail::ResourceTiling> &resourceTilings) {
     const auto &workloadState = workloadImpl(workload);
     storage.resourceTensorDescriptions.reserve(executable.bindings.size());
     storage.imageLayouts.reserve(executable.bindings.size());
@@ -113,19 +115,19 @@ void populateDataGraphResources(DataGraphPipelineCreateStorage &storage, const E
     for (const auto &descBinding : executable.bindings) {
         const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
         const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
-        const auto tensorTiling = descriptorType == vk::DescriptorType::eCombinedImageSampler ||
-                                          descriptorType == vk::DescriptorType::eStorageImage
-                                      ? vk::TensorTilingARM::eOptimal
-                                      : vk::TensorTilingARM::eLinear;
-        storage.resourceTensorDescriptions.emplace_back(
-            tensorTiling, resource.format, static_cast<uint32_t>(resource.shape.size()), resource.shape.data(),
-            resource.stride.empty() ? nullptr : resource.stride.data(), vk::TensorUsageFlagBitsARM::eDataGraph);
         if (descriptorType == vk::DescriptorType::eCombinedImageSampler ||
             descriptorType == vk::DescriptorType::eStorageImage) {
-            storage.imageLayouts.emplace_back(detail::imageLayout(descriptorType),
-                                              &storage.resourceTensorDescriptions.back());
+            storage.imageLayouts.emplace_back(resource.requiredImageLayout());
             storage.resourceInfos.emplace_back(descBinding.set, descBinding.binding, 0, &storage.imageLayouts.back());
         } else {
+            const auto tensorTiling = detail::toTensorTiling(resourceTilings.at(descBinding.resourceIndex));
+            auto tensorUsage = vk::TensorUsageFlagsARM{vk::TensorUsageFlagBitsARM::eDataGraph};
+            if (descriptorType == vk::DescriptorType::eTensorARM) {
+                tensorUsage = detail::tensorUsageForTiling(workload, descBinding.resourceIndex, tensorTiling);
+            }
+            storage.resourceTensorDescriptions.emplace_back(
+                tensorTiling, resource.format, static_cast<uint32_t>(resource.shape.size()), resource.shape.data(),
+                resource.stride.empty() ? nullptr : resource.stride.data(), tensorUsage);
             storage.resourceInfos.emplace_back(descBinding.set, descBinding.binding, 0,
                                                &storage.resourceTensorDescriptions.back());
         }
@@ -154,6 +156,8 @@ void populateDataGraphConstants(DataGraphPipelineCreateStorage &storage, const E
                                                nullptr);
             pNext = &storage.sparsityInfos.back();
         }
+        detail::validateTensorTiling(vk::TensorTilingARM::eLinear, detail::tensorMetadata(resource).usage,
+                                     resource.shape, !resource.stride.empty());
         storage.constantTensorDescriptions.emplace_back(
             vk::TensorTilingARM::eLinear, resource.format, static_cast<uint32_t>(resource.shape.size()),
             resource.shape.data(), resource.stride.empty() ? nullptr : resource.stride.data(),
@@ -267,14 +271,15 @@ vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const M
                                            const vk::raii::ShaderModule &shaderModule,
                                            const vk::raii::PipelineLayout &pipelineLayout, const Workload &workload,
                                            const ContextView &contextView, const vk::raii::PipelineCache *pipelineCache,
-                                           bool enableNeuralStatistics) {
+                                           bool enableNeuralStatistics,
+                                           const std::vector<detail::ResourceTiling> &resourceTilings) {
     if (enableNeuralStatistics && (executable.dataGraphPipelineFlags &
                                    vk::PipelineCreateFlagBits2::eProtectedAccessOnly) != vk::PipelineCreateFlags2{}) {
         throw std::runtime_error("Neural statistics cannot be enabled for a protected-access-only data graph pipeline");
     }
 
     DataGraphPipelineCreateStorage storage;
-    populateDataGraphResources(storage, executable, workload);
+    populateDataGraphResources(storage, executable, workload, resourceTilings);
     populateDataGraphConstants(storage, executable, workload);
 
     SpecializationInfoStorage specializationInfo;
@@ -346,7 +351,8 @@ std::vector<vk::BindDataGraphPipelineSessionMemoryInfoARM> allocateDataGraphSess
 
 Session::Impl::Impl(Context &contextIn, const Workload &workloadIn, SessionOptions optionsIn)
     : workload(workloadIn), contextView(contextIn.contextImpl().contextView()),
-      compiledExecutionState(std::make_shared<CompiledExecution::Impl>(contextIn, workloadIn, optionsIn)) {}
+      compiledExecutionState(std::make_shared<CompiledExecution::Impl>(contextIn, workloadIn, optionsIn)),
+      resourceTilings(detail::defaultResourceTilings(workloadIn)) {}
 
 Session::Impl::Impl(Context &contextIn, const Workload &workloadIn, CompiledExecution &compiledExecutionIn)
     : workload(workloadIn), contextView(contextIn.contextImpl().contextView()),
@@ -357,6 +363,27 @@ Session::Impl::Impl(Context &contextIn, const Workload &workloadIn, CompiledExec
     if (compiledExecutionState->workload != &workloadIn) {
         throw std::runtime_error("CompiledExecution was not created for this Workload");
     }
+    resourceTilings = detail::defaultResourceTilings(workloadIn);
+    if (compiledExecutionState->compiledState.has_value()) {
+        const auto &pipelineTilings = compiledExecutionState->compiledState->pipelineTilings;
+        for (std::size_t index = 0; index < pipelineTilings.size(); ++index) {
+            if (pipelineTilings[index].has_value()) {
+                resourceTilings.at(index) = *pipelineTilings[index];
+            }
+        }
+    }
+}
+
+void Session::Impl::selectTiling(uint32_t resourceIndex, detail::ResourceTiling tiling) {
+    if (compiledExecutionState->compiledState.has_value()) {
+        // Pipeline tilings include every peer of a graph-tensor alias group.
+        const auto &compiledTiling = compiledExecutionState->compiledState->pipelineTilings.at(resourceIndex);
+        if (compiledTiling.has_value() && tiling != *compiledTiling) {
+            throw std::runtime_error("Resource " + std::to_string(resourceIndex) +
+                                     " tiling differs from the compiled data graph pipeline");
+        }
+    }
+    detail::selectResourceTiling(workload, resourceTilings, resourceIndex, tiling);
 }
 
 /*******************************************************************************
@@ -389,9 +416,9 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
         return;
     }
 
-    compiledExecutable.pipeline = createDataGraphPipeline(executable, compiledModule, compiledExecutable.shaderModule,
-                                                          compiledExecutable.pipelineLayout, workload, contextView,
-                                                          options.pipelineCache, options.neuralStatistics.has_value());
+    compiledExecutable.pipeline = createDataGraphPipeline(
+        executable, compiledModule, compiledExecutable.shaderModule, compiledExecutable.pipelineLayout, workload,
+        contextView, options.pipelineCache, options.neuralStatistics.has_value(), resourceTilings);
 }
 
 /*******************************************************************************
@@ -404,7 +431,7 @@ void Session::Impl::configureExecutableState(uint32_t executableIndex) {
         throw std::runtime_error("Session only supports data graph and compute shader executables");
     }
 
-    const auto &compiledExecutable = compiledExecutionState->compiledExecutables.value().at(executableIndex);
+    const auto &compiledExecutable = compiledExecutionState->compiledState->executables.at(executableIndex);
     auto &executableState = executableStates.emplace_back(compiledExecutable);
 
     if (executable.type == ExecutableKind::Compute) {
@@ -491,10 +518,11 @@ DataGraphSessionMemoryInfo Session::Impl::dataGraphSessionMemory(uint32_t execut
 }
 
 void Session::Impl::compileOrReuseExecutables() {
-    if (compiledExecutionState->compiledExecutables.has_value()) {
+    if (compiledExecutionState->compiledState.has_value()) {
         if (!moduleImplementations.empty()) {
             throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
         }
+        detail::validateCompiledTilings(resourceTilings, compiledExecutionState->compiledState->pipelineTilings);
         return;
     }
 
@@ -504,7 +532,8 @@ void Session::Impl::compileOrReuseExecutables() {
         auto &compiledExecutable = compiledExecutables.emplace_back();
         createPipeline(compiledExecutable, executableIndex);
     }
-    compiledExecutionState->compiledExecutables.emplace(std::move(compiledExecutables));
+    compiledExecutionState->compiledState.emplace(
+        detail::CompiledState{detail::fixedPipelineTilings(workload, resourceTilings), std::move(compiledExecutables)});
     moduleImplementations.clear();
 }
 
@@ -512,6 +541,8 @@ void Session::Impl::configure() {
     if (configured) {
         throw std::runtime_error("Session::configure() must only be called once");
     }
+
+    detail::validateAliasGroupTilings(workload, resourceTilings);
 
     // Compiled executables
     compileOrReuseExecutables();
@@ -560,7 +591,7 @@ void Session::bindModule(PlaceholderModuleView placeholderModule, ModuleImplemen
     if (sessionState.configured) {
         throw std::runtime_error("Session::bindModule() must be called before Session::configure()");
     }
-    if (sessionState.compiledExecutionState->compiledExecutables.has_value()) {
+    if (sessionState.compiledExecutionState->compiledState.has_value()) {
         throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
     }
     if (placeholderModule.workload_ != &sessionState.workload) {
@@ -578,6 +609,63 @@ void Session::bindModule(PlaceholderModuleView placeholderModule, ModuleImplemen
 
     sessionState.moduleImplementations[moduleIndex] =
         detail::moduleFromImplementation(std::move(implementation), placeholder.name, placeholder.entryPoint);
+}
+
+void Session::validateResourceAccess(const Impl &sessionState, const ResourceView &resource) {
+    if (resource.workload_ != &sessionState.workload) {
+        throw std::runtime_error("ResourceView belongs to a different Workload");
+    }
+}
+
+void Session::validateResourceAccessForSet(const Impl &sessionState, const ResourceView &resource) {
+    if (sessionState.configured) {
+        throw std::runtime_error("Resource tiling must be set before Session::configure()");
+    }
+
+    validateResourceAccess(sessionState, resource);
+}
+
+void Session::setTensorTiling(ResourceView resource, vk::TensorTilingARM tiling) {
+    auto &sessionState = sessionImpl();
+    validateResourceAccessForSet(sessionState, resource);
+    const auto &workloadResource = workloadImpl(sessionState.workload).resources.at(resource.resourceIndex_);
+    if (!std::holds_alternative<detail::Resource::TensorMetadata>(workloadResource.metadata)) {
+        throw std::runtime_error("Session::setTensorTiling() requires a tensor resource");
+    }
+    const auto usage = detail::tensorUsageForTiling(sessionState.workload, resource.resourceIndex_, tiling);
+    detail::validateTensorTiling(tiling, usage, workloadResource.shape, !workloadResource.stride.empty());
+    sessionState.selectTiling(resource.resourceIndex_, detail::toResourceTiling(tiling));
+}
+
+void Session::setImageTiling(ResourceView resource, vk::ImageTiling tiling) {
+    auto &sessionState = sessionImpl();
+    validateResourceAccessForSet(sessionState, resource);
+    const auto &workloadResource = workloadImpl(sessionState.workload).resources.at(resource.resourceIndex_);
+    if (!std::holds_alternative<detail::Resource::ImageMetadata>(workloadResource.metadata)) {
+        throw std::runtime_error("Session::setImageTiling() requires an image resource");
+    }
+    detail::validateImageTiling(tiling, resource.requirements().asImage().usage(tiling));
+    sessionState.selectTiling(resource.resourceIndex_, detail::toResourceTiling(tiling));
+}
+
+vk::TensorTilingARM Session::tensorTiling(ResourceView resource) const {
+    const auto &sessionState = sessionImpl();
+    validateResourceAccess(sessionState, resource);
+    const auto &workloadResource = workloadImpl(sessionState.workload).resources.at(resource.resourceIndex_);
+    if (!std::holds_alternative<detail::Resource::TensorMetadata>(workloadResource.metadata)) {
+        throw std::runtime_error("Session::tensorTiling() requires a tensor resource");
+    }
+    return detail::toTensorTiling(sessionState.resourceTilings.at(resource.resourceIndex_));
+}
+
+vk::ImageTiling Session::imageTiling(ResourceView resource) const {
+    const auto &sessionState = sessionImpl();
+    validateResourceAccess(sessionState, resource);
+    const auto &workloadResource = workloadImpl(sessionState.workload).resources.at(resource.resourceIndex_);
+    if (!std::holds_alternative<detail::Resource::ImageMetadata>(workloadResource.metadata)) {
+        throw std::runtime_error("Session::imageTiling() requires an image resource");
+    }
+    return detail::toImageTiling(sessionState.resourceTilings.at(resource.resourceIndex_));
 }
 
 void Session::configure() { sessionImpl().configure(); }

@@ -4,6 +4,8 @@
  */
 #include "test_standalone_data_graph_utils.hpp"
 
+#include "internal/workload_impl.hpp"
+
 #include <gtest/gtest.h>
 #include <vulkan/vulkan_core.h>
 

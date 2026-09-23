@@ -237,6 +237,10 @@ ContextView Context::contextView() const { return contextImpl().contextView(); }
  *******************************************************************************/
 
 TensorAllocation Context::createTensor(ResourceView resource) const {
+    return createTensor(resource, vk::TensorTilingARM::eLinear);
+}
+
+TensorAllocation Context::createTensor(ResourceView resource, vk::TensorTilingARM tiling) const {
     const auto requirements = resource.requirements();
     const auto resourceKind = requirements.kind();
     if (resourceKind != ResourceKind::Tensor) {
@@ -247,19 +251,21 @@ TensorAllocation Context::createTensor(ResourceView resource) const {
     const auto tensorRequirements = requirements.asTensor();
     const auto shapeView = tensorRequirements.shape();
     const auto strideView = tensorRequirements.stride();
+    const auto usage = tensorRequirements.usage(tiling);
     std::vector<int64_t> shape(shapeView.begin(), shapeView.end());
+    detail::validateTensorTiling(tiling, usage, shape, !strideView.empty());
     std::vector<int64_t> stride(strideView.begin(), strideView.end());
     if (shape.empty()) {
         throw std::runtime_error("Context::createTensor() requires non-empty tensor shape metadata");
     }
 
-    auto usage = tensorRequirements.usage();
-    if (!usage) {
-        usage = vk::TensorUsageFlagBitsARM::eDataGraph;
-    }
-    const vk::TensorDescriptionARM description(vk::TensorTilingARM::eLinear, requirements.format(),
-                                               static_cast<uint32_t>(shape.size()), shape.data(),
-                                               stride.empty() ? nullptr : stride.data(), usage);
+    vk::TensorDescriptionARM description;
+    description.tiling = tiling;
+    description.format = requirements.format();
+    description.dimensionCount = static_cast<uint32_t>(shape.size());
+    description.pDimensions = shape.data();
+    description.pStrides = stride.empty() ? nullptr : stride.data();
+    description.usage = usage;
     const vk::TensorCreateInfoARM createInfo({}, &description, vk::SharingMode::eExclusive);
 
     const auto contextView = this->contextView();
@@ -316,6 +322,10 @@ BufferAllocation Context::createBuffer(ResourceView resource) const {
 }
 
 ImageAllocation Context::createImage(ResourceView resource) const {
+    return createImage(resource, vk::ImageTiling::eOptimal);
+}
+
+ImageAllocation Context::createImage(ResourceView resource, vk::ImageTiling tiling) const {
     const auto requirements = resource.requirements();
     const auto resourceKind = requirements.kind();
     if (resourceKind != ResourceKind::Image) {
@@ -324,6 +334,8 @@ ImageAllocation Context::createImage(ResourceView resource) const {
     }
 
     const auto imageRequirements = requirements.asImage();
+    const auto usage = imageRequirements.usage(tiling);
+    detail::validateImageTiling(tiling, usage);
     const auto extent = imageRequirements.extent();
     if (extent.width == 0 || extent.height == 0 || extent.depth == 0) {
         throw std::runtime_error("Context::createImage() requires non-zero image extent metadata");
@@ -331,12 +343,23 @@ ImageAllocation Context::createImage(ResourceView resource) const {
 
     const auto imageType = extent.depth > 1 ? vk::ImageType::e3D : vk::ImageType::e2D;
     const auto viewType = extent.depth > 1 ? vk::ImageViewType::e3D : vk::ImageViewType::e2D;
-    const auto usage = imageRequirements.usage();
+
     const auto contextView = this->contextView();
-    auto image = vk::raii::Image(contextView.device.get(),
-                                 vk::ImageCreateInfo({}, imageType, requirements.format(), extent, 1, 1,
-                                                     vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal, usage,
-                                                     vk::SharingMode::eExclusive, {}, vk::ImageLayout::eUndefined));
+
+    vk::ImageCreateInfo createInfo;
+    createInfo.imageType = imageType;
+    createInfo.format = requirements.format();
+    createInfo.extent = extent;
+    createInfo.mipLevels = 1;
+    createInfo.arrayLayers = 1;
+    createInfo.samples = vk::SampleCountFlagBits::e1;
+    createInfo.tiling = tiling;
+    createInfo.usage = usage;
+    createInfo.sharingMode = vk::SharingMode::eExclusive;
+    createInfo.initialLayout = vk::ImageLayout::eUndefined;
+
+    auto image = vk::raii::Image(contextView.device.get(), createInfo);
+
     const auto memoryRequirements = image.getMemoryRequirements();
     const auto memoryType = detail::findMemoryType(contextView.physicalDevice.get(), memoryRequirements.memoryTypeBits,
                                                    vk::MemoryPropertyFlagBits::eDeviceLocal);

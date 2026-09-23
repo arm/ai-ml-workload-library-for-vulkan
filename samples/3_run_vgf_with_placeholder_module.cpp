@@ -68,7 +68,8 @@ struct RuntimeResources {
     std::vector<ImageAllocation> images;
 };
 
-RuntimeResources bindRuntimeResources(Context &context, const Workload &workload, BindingSet &bindings) {
+RuntimeResources bindRuntimeResources(Context &context, const Workload &workload, const Session &session,
+                                      BindingSet &bindings) {
     RuntimeResources allocations;
     const auto contextView = context.contextView();
 
@@ -80,7 +81,7 @@ RuntimeResources bindRuntimeResources(Context &context, const Workload &workload
 
         switch (requirements.kind()) {
         case ResourceKind::Tensor: {
-            auto allocation = context.createTensor(resource);
+            auto allocation = context.createTensor(resource, session.tensorTiling(resource));
             utils::clearDeviceMemory(contextView.device, allocation.memory());
             bindings.bindTensor(resource, {allocation.handle(), allocation.memory()});
             allocations.tensors.push_back(std::move(allocation));
@@ -98,7 +99,7 @@ RuntimeResources bindRuntimeResources(Context &context, const Workload &workload
                 throw std::runtime_error("The sample cannot provide a caller-owned sampler for image resource " +
                                          std::to_string(resource.index()));
             }
-            auto allocation = context.createImage(resource);
+            auto allocation = context.createImage(resource, session.imageTiling(resource));
             bindings.bindImage(resource, allocation.binding());
             allocations.images.push_back(std::move(allocation));
             break;
@@ -138,7 +139,7 @@ int main() {
         // [placeholder-module-binding-end]
 
         auto bindings = session.createBindingSet();
-        const auto allocations = bindRuntimeResources(context, workload, bindings);
+        const auto allocations = bindRuntimeResources(context, workload, session, bindings);
         if (allocations.buffers.size() != 3) {
             throw std::runtime_error("The sample expects three VGF buffer resources");
         }

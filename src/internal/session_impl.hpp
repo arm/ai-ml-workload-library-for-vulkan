@@ -61,6 +61,7 @@ struct Session::Impl {
     void compileOrReuseExecutables();
 
   public:
+    void selectTiling(uint32_t resourceIndex, detail::ResourceTiling tiling);
     void configure();
     std::vector<vk::DataGraphPipelinePropertyARM> dataGraphPipelineProperties(uint32_t executableIndex) const;
     DataGraphPipelinePropertyData dataGraphPipelineProperty(uint32_t executableIndex,
@@ -77,6 +78,7 @@ struct Session::Impl {
 
     // Keep compiled pipelines alive until after executableStates are destroyed.
     std::shared_ptr<CompiledExecution::Impl> compiledExecutionState;
+    std::vector<detail::ResourceTiling> resourceTilings;
 
     std::map<uint32_t, Module> moduleImplementations;
 

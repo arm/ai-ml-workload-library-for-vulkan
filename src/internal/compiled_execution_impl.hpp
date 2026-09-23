@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "session_tiling.hpp"
+
 #include "mlworkloadlib/compiled_execution.hpp"
 
 #include <vulkan/vulkan.hpp>
@@ -26,6 +28,12 @@ struct CompiledExecutable {
     vk::raii::Pipeline pipeline{nullptr};
 };
 
+struct CompiledState {
+    // Only graph tensors and their alias peers have a tiling entry.
+    std::vector<std::optional<ResourceTiling>> pipelineTilings;
+    std::vector<CompiledExecutable> executables;
+};
+
 } // namespace mlsdk::workloadlib::detail
 
 namespace mlsdk::workloadlib {
@@ -39,8 +47,7 @@ struct CompiledExecution::Impl {
      * Lifetime
      **************************************************************************/
 
-    Impl(Context &contextIn, const Workload &workloadIn, SessionOptions optionsIn)
-        : context(&contextIn), workload(&workloadIn), options(optionsIn) {}
+    Impl(Context &contextIn, const Workload &workloadIn, SessionOptions optionsIn);
 
     /***************************************************************************
      * Stored state
@@ -49,7 +56,8 @@ struct CompiledExecution::Impl {
     Context *context = nullptr;
     const Workload *workload = nullptr;
     SessionOptions options;
-    std::optional<std::vector<detail::CompiledExecutable>> compiledExecutables;
+
+    std::optional<detail::CompiledState> compiledState;
 };
 
 } // namespace mlsdk::workloadlib

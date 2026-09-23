@@ -156,6 +156,27 @@ TEST(VgfWorkload, DecodesFileBackedImageSamplerAndHidesConstants) {
     EXPECT_FALSE(image.requirements().asImage().requiresSamplerBinding());
 }
 
+TEST(VgfWorkload, ReportsAliasedImageUsageForSelectedTiling) {
+    const auto &code = assembleMaxpool16x16To8x8Spirv("maxpool_set0", {0, 0, 0, 1});
+    const auto data = writeVgf([&](Encoder &encoder) {
+        const auto module = encoder.AddModule(ModuleType::GRAPH, "graph", "main", code);
+        const auto image =
+            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_FORMAT_R8G8B8A8_SNORM, {1, 4, 4, 4}, {}, 17);
+        const auto tensor =
+            encoder.AddIntermediateResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 4, 4, 4}, {}, 17);
+        const auto imageBinding = encoder.AddBindingSlot(0, image);
+        const auto tensorBinding = encoder.AddBindingSlot(1, tensor);
+        const auto descriptorSet = encoder.AddDescriptorSetInfo({imageBinding, tensorBinding}, 0);
+        encoder.AddSegmentInfo(module, "alias", {descriptorSet}, {imageBinding}, {tensorBinding}, noGraphConstants);
+    });
+
+    const auto workload = Workload::fromVGF(data.data(), data.size());
+    const auto requirements = workload.resource(0).requirements().asImage();
+    const auto aliasedUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage;
+    EXPECT_EQ(requirements.usage(vk::ImageTiling::eLinear), aliasedUsage);
+    EXPECT_EQ(requirements.usage(vk::ImageTiling::eOptimal), aliasedUsage | vk::ImageUsageFlagBits::eTensorAliasingARM);
+}
+
 TEST(VgfWorkload, DecodesImageWithoutSamplerConfigRequiresSamplerBinding) {
     const auto &code = assembleMaxpool16x16To8x8Spirv("maxpool_set0", {0, 0, 0, 1});
     const auto data = writeVgf([&](Encoder &encoder) {

@@ -16,6 +16,9 @@ namespace mlsdk::workloadlib {
  * Lifetime
  *******************************************************************************/
 
+CompiledExecution::Impl::Impl(Context &contextIn, const Workload &workloadIn, SessionOptions optionsIn)
+    : context(&contextIn), workload(&workloadIn), options(optionsIn) {}
+
 CompiledExecution::CompiledExecution(Context &context, const Workload &workload, SessionOptions options)
     : impl_(std::make_shared<Impl>(context, workload, options)) {}
 

@@ -300,6 +300,19 @@ TEST_P(ComposedAliasExecutionTest, PrepareRequiresBoundMemoryInfo) {
 
 INSTANTIATE_TEST_SUITE_P(AliasCases, ComposedAliasExecutionTest, testing::ValuesIn(aliasCases), aliasCaseName);
 
+TEST_F(ComposedSessionExecutionTest, RejectsIncompatibleBufferAndImageAliasingRequirements) {
+    auto context = wrappedContext();
+    constexpr uint32_t aliasGroup = 47;
+    auto tensor = tensorRequirements(vk::Format::eR8Sint, {1, 2, 2, 4});
+    tensor.tensor.usage |= vk::TensorUsageFlagBitsARM::eImageAliasing;
+    WorkloadBuilder builder;
+    (void)builder.addResource("tensor", tensor, Resource::Role::Output, aliasGroup);
+    (void)builder.addResource("buffer", makeBufferRequirements(16), Resource::Role::Intermediate, aliasGroup);
+    auto workload = builder.finish();
+
+    EXPECT_THROW((void)Session(context, workload), std::runtime_error);
+}
+
 TEST_F(ComposedSessionExecutionTest, RecordTwoSagWorkloadsWithAppTensorHandoff) {
     /***************************************************************************
      * Workloads and context

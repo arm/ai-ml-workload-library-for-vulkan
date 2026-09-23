@@ -208,6 +208,7 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderWorkloadWithRuntim
 TEST_F(StandaloneComputeSessionExecutionTest, MovesRuntimeOwnedBufferAndImageAllocations) {
     auto workload = Workload::fromComputeShader(makeAddInt32BuffersWithSampledImagesDescription());
     auto context = wrappedContext();
+    const Session session(context, workload);
 
     auto buffer = context.createBuffer(workload.resource(0));
     auto movedBuffer(std::move(buffer));
@@ -218,9 +219,9 @@ TEST_F(StandaloneComputeSessionExecutionTest, MovesRuntimeOwnedBufferAndImageAll
     EXPECT_NE(assignedBuffer.handle(), nullptr);
     EXPECT_NE(assignedBuffer.memory().memory, nullptr);
 
-    auto image = context.createImage(workload.resource(3));
+    auto image = context.createImage(workload.resource(3), session.imageTiling(workload.resource(3)));
     auto movedImage(std::move(image));
-    auto assignedImage = context.createImage(workload.resource(4));
+    auto assignedImage = context.createImage(workload.resource(4), session.imageTiling(workload.resource(4)));
     EXPECT_NE(assignedImage.handle(), nullptr);
     assignedImage = std::move(movedImage);
 
@@ -513,9 +514,9 @@ TEST_F(StandaloneComputeSessionExecutionTest, RejectsRuntimeAllocationForWrongRe
     auto workload = Workload::fromComputeShader(makeAddInt32BuffersWithSampledImagesDescription());
     auto context = wrappedContext();
 
-    EXPECT_THROW((void)context.createTensor(workload.resource(0)), std::runtime_error);
+    EXPECT_THROW((void)context.createTensor(workload.resource(0), vk::TensorTilingARM::eLinear), std::runtime_error);
     EXPECT_THROW((void)context.createBuffer(workload.resource(3)), std::runtime_error);
-    EXPECT_THROW((void)context.createImage(workload.resource(0)), std::runtime_error);
+    EXPECT_THROW((void)context.createImage(workload.resource(0), vk::ImageTiling::eOptimal), std::runtime_error);
 }
 
 TEST_F(StandaloneComputeSessionExecutionTest, ConfigureRejectsDuplicateDescriptorBindings) {
@@ -564,12 +565,12 @@ TEST_F(StandaloneComputeSessionExecutionTest, PrepareRejectsMissingBindings) {
 TEST_F(StandaloneComputeSessionExecutionTest, RejectsImageSamplerPolicyViolations) {
     auto workload = Workload::fromComputeShader(makeAddInt32BuffersWithSampledImagesDescription());
     auto context = wrappedContext();
+    Session session(context, workload);
 
-    auto runtimeSamplerImage = context.createImage(workload.resource(3));
-    auto callerSamplerImage = context.createImage(workload.resource(4));
+    auto runtimeSamplerImage = context.createImage(workload.resource(3), session.imageTiling(workload.resource(3)));
+    auto callerSamplerImage = context.createImage(workload.resource(4), session.imageTiling(workload.resource(4)));
     auto sampler = makeNearestSampler(device);
 
-    Session session(context, workload);
     session.configure();
     auto bindings = session.createBindingSet();
 

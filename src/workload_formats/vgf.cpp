@@ -201,7 +201,7 @@ uint32_t addDecodedResource(WorkloadBuilder &builder, const vgflib::ModelResourc
     case ResourceKind::Image:
         return builder.addImageResource(
             {}, role, *descriptorType, format, std::move(shape), std::move(stride), elementCount, aliasGroupId,
-            requiresBoundMemoryInfo, {}, detail::imageUsage(*descriptorType, aliasGroupId.has_value()),
+            requiresBoundMemoryInfo, {}, detail::imageUsage(*descriptorType, false),
             detail::imageLayout(*descriptorType), {}, samplerConfigFromVgfResource(decoder, resourceIndex));
     case ResourceKind::Unknown:
         throw std::runtime_error("Unsupported VGF resource descriptor type");

@@ -25,11 +25,11 @@ namespace mlsdk::workloadlib::test {
 
 struct Tensor {
     Tensor(const vk::raii::PhysicalDevice &physicalDevice, const vk::raii::Device &device, vk::Format format,
-           std::vector<int64_t> shapeIn)
+           std::vector<int64_t> shapeIn, vk::TensorTilingARM tiling = vk::TensorTilingARM::eLinear,
+           vk::TensorUsageFlagsARM usage = vk::TensorUsageFlagBitsARM::eDataGraph)
         : shape(std::move(shapeIn)) {
-        const vk::TensorDescriptionARM description(vk::TensorTilingARM::eLinear, format,
-                                                   static_cast<uint32_t>(shape.size()), shape.data(), nullptr,
-                                                   vk::TensorUsageFlagBitsARM::eDataGraph);
+        const vk::TensorDescriptionARM description(tiling, format, static_cast<uint32_t>(shape.size()), shape.data(),
+                                                   nullptr, usage);
         const vk::TensorCreateInfoARM createInfo({}, &description, vk::SharingMode::eExclusive);
         tensor = vk::raii::TensorARM(device, createInfo);
 

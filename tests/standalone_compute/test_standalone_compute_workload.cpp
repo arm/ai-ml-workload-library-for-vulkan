@@ -127,7 +127,7 @@ TEST(StandaloneComputeWorkload, ExposesImageSamplerRequirements) {
     EXPECT_FALSE(runtimeSamplerRequirements.isStorage());
     EXPECT_TRUE(runtimeSamplerRequirements.hasRuntimeSampler());
     EXPECT_FALSE(runtimeSamplerRequirements.requiresSamplerBinding());
-    EXPECT_EQ(runtimeSamplerRequirements.usage(), vk::ImageUsageFlagBits::eSampled);
+    EXPECT_EQ(runtimeSamplerRequirements.usage(vk::ImageTiling::eOptimal), vk::ImageUsageFlagBits::eSampled);
     EXPECT_EQ(runtimeSamplerRequirements.requiredLayout(), vk::ImageLayout::eShaderReadOnlyOptimal);
     EXPECT_EQ(runtimeSamplerRequirements.requiredSubresourceRange().aspectMask, vk::ImageAspectFlagBits::eColor);
 

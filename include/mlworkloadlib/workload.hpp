@@ -36,8 +36,11 @@ class WorkloadBuilder;
 /** @brief Non-owning view of tensor-specific workload requirements. */
 class TensorRequirementsView {
   public:
-    /** @brief Returns the Vulkan tensor usage flags required by the workload. */
+    /** @brief Returns the tensor usage flags configured in workload metadata. */
     vk::TensorUsageFlagsARM usage() const;
+
+    /** @brief Returns the required tensor usage flags for the selected tiling, including image aliasing. */
+    vk::TensorUsageFlagsARM usage(vk::TensorTilingARM tiling) const;
 
     /** @brief Returns a borrowed view of the tensor dimensions. */
     ArrayView<const int64_t> shape() const;
@@ -77,8 +80,11 @@ class ImageRequirementsView {
     /** @brief Returns the required image extent. */
     vk::Extent3D extent() const;
 
-    /** @brief Returns the required Vulkan image usage flags. */
+    /** @brief Returns the required image usage flags for Optimal tiling. */
     vk::ImageUsageFlags usage() const;
+
+    /** @brief Returns the required image usage flags for the selected tiling. */
+    vk::ImageUsageFlags usage(vk::ImageTiling tiling) const;
 
     /** @brief Returns true for a combined image-sampler descriptor. */
     bool isSampled() const;
@@ -182,6 +188,7 @@ class ResourceView {
 
     friend class Workload;
     friend class BindingSet;
+    friend class Session;
 
     const Workload *workload_ = nullptr;
     uint32_t index_ = 0;
