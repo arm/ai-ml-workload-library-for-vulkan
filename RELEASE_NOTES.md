@@ -1,14 +1,14 @@
 # ML Workload Library for Vulkan® — Release Notes
 
-## Unreleased – *Initial Public Release*
+## Version 0.11.0 – *Initial Public Release*
 
 ## Purpose
 
-The ML Workload Library for Vulkan® provides an embeddable C++17 API for constructing,
-inspecting, and executing Vulkan® ML workloads. Applications can retain ownership
-of their Vulkan® objects and bound resources, or use library-owned Vulkan® contexts
-and resource allocations, while the library manages the workload's execution
-state.
+The ML Workload Library for Vulkan® provides an embeddable C++17 API for
+constructing, inspecting, and executing Vulkan® ML workloads. Applications can
+retain ownership of their Vulkan® objects and bound resources, or use
+library-owned Vulkan® contexts and resource allocations, while the library
+manages the workload's execution state.
 
 ## Features
 
