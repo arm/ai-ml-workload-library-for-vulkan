@@ -4,7 +4,6 @@
 #
 import os
 import pathlib
-import platform
 import shutil
 import sys
 
@@ -78,15 +77,16 @@ class BuildPy(build_py):
         native_build_dir = pathlib.Path(build_command.build_temp) / "workload_lib"
         native_install_dir = pathlib.Path(self.build_lib) / "mlworkloadlib" / "binaries"
 
-        result = build_workload_lib(
-            [
-                "--build-dir",
-                str(native_build_dir),
-                "--install",
-                str(native_install_dir),
-                "--build-shared",
-            ]
-        )
+        build_args = [
+            "--build-dir",
+            str(native_build_dir),
+            "--install",
+            str(native_install_dir),
+            "--build-shared",
+        ]
+        build_args.extend(["--package-version", self.distribution.get_version()])
+
+        result = build_workload_lib(build_args)
         if result:
             raise RuntimeError(f"Workload Lib native build failed with code {result}")
 
@@ -102,24 +102,8 @@ class BDistWheel(bdist_wheel):
         self.root_is_pure = False
 
     def get_tag(self):
-        system = platform.system()
-        machine = platform.machine()
-        if system == "Windows":
-            assert machine == "AMD64"
-            platform_name = "win_amd64"
-        elif system == "Linux":
-            if machine == "aarch64":
-                platform_name = "manylinux2014_aarch64"
-            else:
-                assert machine == "x86_64"
-                platform_name = "manylinux2014_x86_64"
-        elif system == "Darwin":
-            assert machine == "arm64"
-            platform_name = "macosx_11_0_arm64"
-        else:
-            raise RuntimeError(f"Unsupported platform: {system} {machine}")
-
-        return ("py3", "none", platform_name)
+        _, _, platform_tag = super().get_tag()
+        return ("py3", "none", platform_tag)
 
 
 setup(
