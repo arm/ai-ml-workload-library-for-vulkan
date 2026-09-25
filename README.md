@@ -1,8 +1,8 @@
 # ML Workload Library for Vulkan®
 
-`mlworkloadlib` provides a public C++ API for constructing executable ML workloads
-for Vulkan® and running them through a common resource-binding and execution
-model.
+The Workload Library provides an **experimental** C++ API for constructing executable
+ML workloads for Vulkan® and running them through a common resource-binding
+and execution model.
 
 ## Public API
 
