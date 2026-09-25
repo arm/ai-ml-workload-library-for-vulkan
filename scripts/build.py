@@ -83,6 +83,7 @@ class Builder:
 
         if self.package_release_pip:
             self.package_pip = True
+        self.install_libdir = "lib" if self.package_pip else args.install_libdir
 
         if self.package_tgz or self.package_zip or self.package_pip:
             self.build_shared = True
@@ -241,6 +242,9 @@ class Builder:
                 )
                 return 1
             cmake_setup_cmd.append("-DML_WORKLOAD_LIB_ENABLE_FUZZER=ON")
+
+        if self.install_libdir:
+            cmake_setup_cmd.append(f"-DCMAKE_INSTALL_LIBDIR={self.install_libdir}")
 
         if self.prefix_path:
             cmake_setup_cmd.append(f"-DCMAKE_PREFIX_PATH={self.prefix_path}")
@@ -563,6 +567,10 @@ def parse_arguments(argv=None):
         "--gtest-path",
         help="Path to googletest repo. Default: %(default)s",
         default=f"{DEPENDENCY_DIR / 'googletest'}",
+    )
+    parser.add_argument(
+        "--install-libdir",
+        help="Library installation directory (pip packages always use lib)",
     )
     parser.add_argument(
         "--install",
