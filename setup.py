@@ -81,6 +81,8 @@ class BuildPy(build_py):
         build_args = [
             "--build-dir",
             str(native_build_dir),
+            "--install-libdir",
+            "lib",
             "--install",
             str(native_install_dir),
             "--build-shared",
