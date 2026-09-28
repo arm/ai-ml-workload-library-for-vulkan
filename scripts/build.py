@@ -43,7 +43,8 @@ class Builder:
         self.build_dir = str(pathlib.Path(args.build_dir).resolve())
         self.prefix_path = args.prefix_path
         self.threads = args.threads
-        self.run_tests = args.test
+        self.coverage = args.coverage
+        self.run_tests = args.test or self.coverage
         self.lint = args.lint
         self.build_type = args.build_type
         self.doc_only = args.doc_only
@@ -257,6 +258,15 @@ class Builder:
             )
             cmake_setup_cmd.append(f"-DGTEST_PATH={self.gtest_path}")
 
+        if self.coverage:
+            if self.target_platform != "host" or platform.system() != "Linux":
+                print(
+                    "ERROR: Coverage requires a native Linux GCC build",
+                    file=sys.stderr,
+                )
+                return 1
+            cmake_setup_cmd.append("-DML_WORKLOAD_LIB_ENABLE_COVERAGE=ON")
+
         if self.lint:
             cmake_setup_cmd.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
 
@@ -350,6 +360,10 @@ class Builder:
                 subprocess.run(cmake_install_cmd, check=True)
 
             if self.run_tests:
+                if self.coverage:
+                    for coverage_data in pathlib.Path(self.build_dir).rglob("*.gcda"):
+                        coverage_data.unlink()
+
                 test_cmd = [
                     "ctest",
                     "--test-dir",
@@ -359,6 +373,29 @@ class Builder:
                     "--output-on-failure",
                 ]
                 subprocess.run(test_cmd, check=True)
+
+            if self.coverage:
+                coverage_dir = pathlib.Path(self.build_dir, "coverage")
+                coverage_dir.mkdir(parents=True, exist_ok=True)
+                coverage_cmd = [
+                    "gcovr",
+                    "--root",
+                    str(ML_WORKLOAD_LIB_DIR),
+                    "--filter",
+                    str(ML_WORKLOAD_LIB_DIR / "src"),
+                    "--filter",
+                    str(ML_WORKLOAD_LIB_DIR / "include"),
+                    "--object-directory",
+                    self.build_dir,
+                    "--html-details",
+                    str(coverage_dir / "index.html"),
+                    "--json-summary-pretty",
+                    "--json-summary",
+                    str(coverage_dir / "summary.json"),
+                    "--print-summary",
+                    self.build_dir,
+                ]
+                subprocess.run(coverage_cmd, check=True)
 
             if self.package_tgz:
                 self.generate_cmake_package("TGZ")
@@ -470,6 +507,12 @@ def parse_arguments(argv=None):
         "-l",
         "--lint",
         help="Run linter. Default: %(default)s",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--coverage",
+        help="Run unit tests with GCC coverage and generate reports. Default: %(default)s",
         action="store_true",
         default=False,
     )

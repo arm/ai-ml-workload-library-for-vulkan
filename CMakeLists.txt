@@ -57,13 +57,23 @@ configure_file(
 
 option(ML_WORKLOAD_LIB_BUILD_TESTS "Build ML Workload Library unit tests" OFF)
 option(ML_WORKLOAD_LIB_BUILD_DOCS "Build ML Workload Library documentation" OFF)
-option(ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT "Build ML Workload Library with VGF workload support" ON)
+option(ML_WORKLOAD_LIB_BUILD_SHARED "Build ML Workload Library as a shared library" OFF)
+option(ML_WORKLOAD_LIB_ENABLE_COVERAGE "Enable GCC code coverage instrumentation" OFF)
+option(ML_WORKLOAD_LIB_ENABLE_FUZZER "Enable mlworkloadlib_fuzzer, it requires clang/LLVM libFuzzer." OFF)
 option(ML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT "Build ML Workload Library with GLSL source module support" OFF)
 option(ML_WORKLOAD_LIB_ENABLE_HLSL_SUPPORT "Build ML Workload Library with HLSL source module support" OFF)
-option(ML_WORKLOAD_LIB_BUILD_SHARED "Build ML Workload Library as a shared library" OFF)
-option(ML_WORKLOAD_LIB_ENABLE_FUZZER "Enable mlworkloadlib_fuzzer, it requires clang/LLVM libFuzzer." OFF)
+option(ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT "Build ML Workload Library with VGF workload support" ON)
 set(ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS "${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS}" CACHE STRING
     "Additional compile options for ML Workload Library")
+
+if(ML_WORKLOAD_LIB_ENABLE_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        message(FATAL_ERROR "ML_WORKLOAD_LIB_ENABLE_COVERAGE requires GCC")
+    endif()
+    if(CMAKE_CROSSCOMPILING)
+        message(FATAL_ERROR "ML_WORKLOAD_LIB_ENABLE_COVERAGE is only supported for native builds")
+    endif()
+endif()
 
 include(vulkan-headers)
 if(ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT)
@@ -98,6 +108,22 @@ if(ANDROID)
         "-Wl,-z,common-page-size=16384"
     )
 endif()
+
+function(mlworkloadlib_enable_coverage target_name)
+    if(NOT ML_WORKLOAD_LIB_ENABLE_COVERAGE)
+        return()
+    endif()
+
+    target_compile_options(${target_name} PRIVATE --coverage -O0 -g)
+
+    set(coverage_private_link_types EXECUTABLE SHARED_LIBRARY MODULE_LIBRARY)
+    get_target_property(target_type ${target_name} TYPE)
+    if(target_type STREQUAL "STATIC_LIBRARY")
+        target_link_options(${target_name} INTERFACE --coverage)
+    elseif(target_type IN_LIST coverage_private_link_types)
+        target_link_options(${target_name} PRIVATE --coverage)
+    endif()
+endfunction()
 
 function(mlworkloadlib_configure_target target_name)
     target_include_directories(${target_name}
@@ -135,6 +161,7 @@ function(mlworkloadlib_configure_target target_name)
     )
 
     target_compile_options(${target_name} PRIVATE ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS})
+    mlworkloadlib_enable_coverage(${target_name})
 endfunction()
 
 add_library(mlworkloadlib STATIC ${ML_WORKLOAD_LIB_SOURCES})
@@ -158,6 +185,7 @@ endif()
 function(mlworkloadlib_add_source_module_backend target_name source)
     set(object_target "${target_name}_objects")
     add_library(${object_target} OBJECT ${source})
+    mlworkloadlib_enable_coverage(${object_target})
 
     target_include_directories(${object_target}
         PRIVATE

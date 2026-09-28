@@ -65,6 +65,7 @@ target_compile_definitions(mlworkloadlib_tests PRIVATE
 )
 
 target_compile_options(mlworkloadlib_tests PRIVATE ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS})
+mlworkloadlib_enable_coverage(mlworkloadlib_tests)
 
 if(ML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT)
     target_link_libraries(mlworkloadlib_tests PRIVATE mlworkloadlib_glsl_glslang)
