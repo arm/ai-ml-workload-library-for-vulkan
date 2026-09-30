@@ -39,8 +39,8 @@ The build system must have:
   Windows®.
 - CMake 3.25 or later.
 - Ninja 1.8.2 or later.
-- Python 3.10 or later. Required python libraries for building are listed in
-  `tooling-requirements.txt`.
+- Python 3.10 or later and `uv` 0.9.26. Python tooling dependencies are
+  declared in `pyproject.toml` and locked in `uv.lock`.
 - Doxygen 1.9.1 or later. (When building documentation)
 
 To create an archive containing the build artifacts, pass the `--package-type`
@@ -124,8 +124,8 @@ Applications can query the source backends available in the linked library with
 Install Doxygen and the Python documentation tool dependencies and build the HTML documentation:
 
 ```sh
-python3 -m pip install -r tooling-requirements.txt
-python3 scripts/build.py --doc
+uv sync --locked --no-install-project --no-default-groups --group tooling
+uv run --no-sync python scripts/build.py --doc
 ```
 
 The generated documentation is available at `build/docs/out/index.html`.

@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+### Build, Packaging & Dependencies
+
+- Locked development tooling with `uv.lock` in place of the tooling
+  requirements file.
+
 ### Resource Binding and Execution
 
 - Added optional `CompiledExecution` for sharing compiled pipelines and layouts
