@@ -301,13 +301,12 @@ vk::raii::Image createIntermediateImage(const Workload &workload, const ContextV
     return {contextView.device.get(), createInfo};
 }
 
-void planRuntimeResourceAllocations(const Workload &workload, const std::vector<uint32_t> &executableIndices,
+void planRuntimeResourceAllocations(const Workload &workload,
                                     std::vector<DescriptorBinding> &unaliasedIntermediateDescBindings,
                                     std::map<uint32_t, std::vector<DescriptorBinding>> &aliasGroups) {
     std::vector<uint32_t> plannedResourceIndices;
     const auto &workloadState = workloadImpl(workload);
-    for (const auto executableIndex : executableIndices) {
-        const auto &executable = workloadState.executables.at(executableIndex);
+    for (const auto &executable : workloadState.executables) {
         for (const auto &descBinding : executable.bindings) {
             if (std::find(plannedResourceIndices.begin(), plannedResourceIndices.end(), descBinding.resourceIndex) !=
                 plannedResourceIndices.end()) {
@@ -337,16 +336,9 @@ PreparedExecution::Impl::Impl(Session &sessionIn, const BindingSet &bindingsIn) 
     addBindingSetResources(bindingState);
     addBoundPushConstants(bindingState);
 
-    std::vector<uint32_t> executableIndices;
-    executableIndices.reserve(sessionImpl.executableStates.size());
-    for (const auto &executableState : sessionImpl.executableStates) {
-        executableIndices.push_back(executableState.executableIndex);
-    }
-
     std::vector<DescriptorBinding> unaliasedIntermediateDescBindings;
     std::map<uint32_t, std::vector<DescriptorBinding>> aliasGroups;
-    planRuntimeResourceAllocations(sessionImpl.workload, executableIndices, unaliasedIntermediateDescBindings,
-                                   aliasGroups);
+    planRuntimeResourceAllocations(sessionImpl.workload, unaliasedIntermediateDescBindings, aliasGroups);
     resolveUnaliasedIntermediateAllocations(unaliasedIntermediateDescBindings);
     resolveAliasGroups(aliasGroups);
 
@@ -708,10 +700,10 @@ void PreparedExecution::Impl::adoptAliasGroupResources(PendingAliasGroupAllocati
 void PreparedExecution::Impl::createDescriptorSets() {
     descriptorSetStates.reserve(sessionImpl.executableStates.size());
     const auto &workloadState = workloadImpl(sessionImpl.workload);
-    for (const auto &executableState : sessionImpl.executableStates) {
+    for (std::size_t executableIndex = 0; executableIndex < sessionImpl.executableStates.size(); ++executableIndex) {
         auto &descriptors = descriptorSetStates.emplace_back();
         std::map<vk::DescriptorType, uint32_t> descriptorCounts;
-        const auto &executable = workloadState.executables.at(executableState.executableIndex);
+        const auto &executable = workloadState.executables.at(executableIndex);
         for (const auto &descBinding : executable.bindings) {
             ++descriptorCounts[workloadState.descriptorTypeForBinding(descBinding)];
         }
@@ -720,6 +712,7 @@ void PreparedExecution::Impl::createDescriptorSets() {
         for (const auto &[type, count] : descriptorCounts) {
             poolSizes.emplace_back(type, count);
         }
+        const auto &executableState = sessionImpl.executableStates[executableIndex];
         descriptors.descriptorPool =
             vk::raii::DescriptorPool(sessionImpl.contextView.device.get(),
                                      {vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
@@ -732,10 +725,9 @@ void PreparedExecution::Impl::createDescriptorSets() {
 
 void PreparedExecution::Impl::writeDescriptors() const {
     const auto &workloadState = workloadImpl(sessionImpl.workload);
-    for (uint32_t executableIndex = 0; executableIndex < sessionImpl.executableStates.size(); ++executableIndex) {
-        const auto &executableState = sessionImpl.executableStates[executableIndex];
+    for (std::size_t executableIndex = 0; executableIndex < sessionImpl.executableStates.size(); ++executableIndex) {
         const auto &descriptorSets = descriptorSetStates[executableIndex].descriptorSets;
-        const auto &executable = workloadState.executables.at(executableState.executableIndex);
+        const auto &executable = workloadState.executables.at(executableIndex);
 
         for (const auto &descBinding : executable.bindings) {
             const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
@@ -797,14 +789,14 @@ void PreparedExecution::Impl::insertInitialImageLayoutTransitions(vk::CommandBuf
         // First workload consumer
         const auto imageResourceIndex = boundImage.descBinding.resourceIndex;
         const auto firstConsumerExecutableIt = std::find_if(
-            sessionImpl.executableStates.begin(), sessionImpl.executableStates.end(),
-            [&workloadState, imageResourceIndex](const auto &executableState) {
-                const auto &bindings = workloadState.executables.at(executableState.executableIndex).bindings;
+            workloadState.executables.begin(), workloadState.executables.end(),
+            [imageResourceIndex](const auto &executable) {
+                const auto &bindings = executable.bindings;
                 return std::any_of(bindings.begin(), bindings.end(), [imageResourceIndex](const auto &descBinding) {
                     return descBinding.resourceIndex == imageResourceIndex;
                 });
             });
-        if (firstConsumerExecutableIt == sessionImpl.executableStates.end()) {
+        if (firstConsumerExecutableIt == workloadState.executables.end()) {
             throw std::runtime_error("No executable uses workload image resource " +
                                      std::to_string(imageResourceIndex));
         }
@@ -817,7 +809,7 @@ void PreparedExecution::Impl::insertInitialImageLayoutTransitions(vk::CommandBuf
                                                                              : vk::PipelineStageFlagBits2::eAllCommands;
         imageBarrier.srcAccessMask =
             oldLayout == vk::ImageLayout::eUndefined ? vk::AccessFlags2{} : vk::AccessFlagBits2::eMemoryWrite;
-        const auto firstConsumerType = workloadState.executables.at(firstConsumerExecutableIt->executableIndex).type;
+        const auto firstConsumerType = firstConsumerExecutableIt->type;
         const auto descriptorType = workloadState.descriptorTypeForBinding(boundImage.descBinding);
         imageBarrier.dstStageMask = detail::pipelineStage(firstConsumerType);
         imageBarrier.dstAccessMask = detail::imageAccess(firstConsumerType, descriptorType);
@@ -844,13 +836,11 @@ void PreparedExecution::Impl::insertInitialImageLayoutTransitions(vk::CommandBuf
 }
 
 void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandBuffer,
-                                                      const Session::Impl::ExecutableState &producer,
-                                                      const Session::Impl::ExecutableState &consumer) const {
+                                                      const detail::Executable &producer,
+                                                      const detail::Executable &consumer) const {
     const auto &workloadState = workloadImpl(sessionImpl.workload);
-    const auto &producerExecutable = workloadState.executables.at(producer.executableIndex);
-    const auto &consumerExecutable = workloadState.executables.at(consumer.executableIndex);
-    const auto producerType = producerExecutable.type;
-    const auto consumerType = consumerExecutable.type;
+    const auto producerType = producer.type;
+    const auto consumerType = consumer.type;
 
     // Barrier buckets
     std::vector<vk::MemoryBarrier2> memoryBarriers;
@@ -861,7 +851,7 @@ void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandB
     std::vector<uint32_t> barrierResourceIndices;
 
     // Producer-visible writes
-    for (const auto &producerBinding : producerExecutable.bindings) {
+    for (const auto &producerBinding : producer.bindings) {
         const auto &resource = workloadState.resources.at(producerBinding.resourceIndex);
         if ((resource.role != Resource::Role::Output && resource.role != Resource::Role::Intermediate) ||
             std::find(barrierResourceIndices.begin(), barrierResourceIndices.end(), producerBinding.resourceIndex) !=
@@ -991,9 +981,9 @@ void PreparedExecution::Impl::record(vk::CommandBuffer commandBuffer) {
 
     // Executable dispatch
     const auto &workloadState = workloadImpl(sessionState.workload);
-    for (size_t executableIndex = 0; executableIndex < sessionState.executableStates.size(); ++executableIndex) {
+    for (std::size_t executableIndex = 0; executableIndex < sessionState.executableStates.size(); ++executableIndex) {
         const auto &executableState = sessionState.executableStates[executableIndex];
-        const auto &executable = workloadState.executables.at(executableState.executableIndex);
+        const auto &executable = workloadState.executables.at(executableIndex);
         const auto &descriptors = descriptorSetStates[executableIndex];
         const auto pipelineBindPoint = detail::pipelineBindPoint(executable.type);
         for (uint32_t set = 0; set < static_cast<uint32_t>(descriptors.descriptorSets.size()); ++set) {
@@ -1024,7 +1014,7 @@ void PreparedExecution::Impl::record(vk::CommandBuffer commandBuffer) {
         }
 
         if (executable.implicitBarrier && executableIndex + 1 < sessionState.executableStates.size()) {
-            insertExecutableBarrier(commandBuffer, executableState, sessionState.executableStates[executableIndex + 1]);
+            insertExecutableBarrier(commandBuffer, executable, workloadState.executables.at(executableIndex + 1));
         }
     }
 }

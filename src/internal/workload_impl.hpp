@@ -133,7 +133,6 @@ struct Constant {
 };
 
 struct Executable {
-    uint32_t executableIndex = 0;
     std::string name;
     ExecutableKind type = ExecutableKind::Graph;
     uint32_t moduleIndex = 0;

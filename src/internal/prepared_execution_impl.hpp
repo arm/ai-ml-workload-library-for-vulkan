@@ -114,8 +114,8 @@ struct PreparedExecution::Impl {
      **************************************************************************/
 
     void insertInitialImageLayoutTransitions(vk::CommandBuffer commandBuffer);
-    void insertExecutableBarrier(vk::CommandBuffer commandBuffer, const Session::Impl::ExecutableState &producer,
-                                 const Session::Impl::ExecutableState &consumer) const;
+    void insertExecutableBarrier(vk::CommandBuffer commandBuffer, const detail::Executable &producer,
+                                 const detail::Executable &consumer) const;
 
     /***************************************************************************
      * Recording and submission

@@ -10,9 +10,6 @@
 #include "mlworkloadlib/prepared_execution.hpp"
 #include "mlworkloadlib/workload.hpp"
 
-#include <vulkan/vulkan.hpp>
-#include <vulkan/vulkan_raii.hpp>
-
 #include <memory>
 
 namespace mlsdk::workloadlib {

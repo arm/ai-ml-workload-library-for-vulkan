@@ -307,7 +307,6 @@ uint32_t WorkloadBuilder::addExecutable(std::string name, ExecutableKind type, u
 
     const auto executableIndex = static_cast<uint32_t>(workloadState_->executables.size());
     Executable workloadExecutable;
-    workloadExecutable.executableIndex = executableIndex;
     workloadExecutable.name = std::move(name);
     workloadExecutable.type = type;
     workloadExecutable.moduleIndex = moduleIndex;
