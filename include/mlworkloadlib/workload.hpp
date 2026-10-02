@@ -206,7 +206,7 @@ class ModuleView {
     /** @brief Returns the representation of the module code. */
     ModuleCodeKind codeKind() const;
 
-    /** @brief Returns true if Session::bindModule() must supply this module's code. */
+    /** @brief Returns true if this module has no implementation in the Workload. */
     bool requiresImplementation() const;
 
   private:
@@ -223,7 +223,7 @@ class ModuleView {
 /**
  * @brief Non-owning view of a module whose code is absent from the Workload.
  *
- * Use Session::bindModule() before configuring the Session.
+ * Use Session::bindModule() to supply code when needed.
  */
 class PlaceholderModuleView {
   public:

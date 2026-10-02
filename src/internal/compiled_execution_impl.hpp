@@ -5,22 +5,18 @@
 
 #pragma once
 
-#include "workload_impl.hpp"
-
 #include "mlworkloadlib/compiled_execution.hpp"
 
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
 
-#include <cstdint>
-#include <map>
 #include <optional>
 #include <vector>
 
 namespace mlsdk::workloadlib::detail {
 
 /*******************************************************************************
- * Compiled execution data
+ * Compiled executable state
  *******************************************************************************/
 
 struct CompiledExecutable {
@@ -28,11 +24,6 @@ struct CompiledExecutable {
     std::vector<vk::raii::DescriptorSetLayout> descriptorSetLayouts;
     vk::raii::PipelineLayout pipelineLayout{nullptr};
     vk::raii::Pipeline pipeline{nullptr};
-};
-
-struct CompiledExecutionData {
-    std::map<uint32_t, Module> moduleImplementations;
-    std::vector<CompiledExecutable> compiledExecutables;
 };
 
 } // namespace mlsdk::workloadlib::detail
@@ -58,7 +49,7 @@ struct CompiledExecution::Impl {
     Context *context = nullptr;
     const Workload *workload = nullptr;
     SessionOptions options;
-    std::optional<detail::CompiledExecutionData> compiledData;
+    std::optional<std::vector<detail::CompiledExecutable>> compiledExecutables;
 };
 
 } // namespace mlsdk::workloadlib

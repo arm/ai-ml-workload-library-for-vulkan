@@ -184,12 +184,6 @@ Module moduleForExecutable(const Workload &workload, const std::map<uint32_t, Mo
     return moduleImplementationIt->second;
 }
 
-bool sameModuleImplementation(const Module &lhs, const Module &rhs) {
-    // Name and entry point are fixed by the shared Workload.
-    return lhs.codeKind == rhs.codeKind && lhs.code == rhs.code && lhs.source == rhs.source &&
-           lhs.buildOptions == rhs.buildOptions && lhs.includeDirs == rhs.includeDirs;
-}
-
 /*******************************************************************************
  * Executable configuration
  *******************************************************************************/
@@ -380,21 +374,6 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
 }
 
 /*******************************************************************************
- * Compiled executable access
- *******************************************************************************/
-
-const detail::CompiledExecutable &Session::Impl::compiledExecutable(uint32_t executableIndex) const {
-    if (!compiledExecutionState->compiledData.has_value()) {
-        throw std::runtime_error("Session compiled execution is not configured");
-    }
-    const auto &compiledExecutables = compiledExecutionState->compiledData->compiledExecutables;
-    if (executableIndex >= compiledExecutables.size()) {
-        throw std::runtime_error("Session compiled executable index is invalid");
-    }
-    return compiledExecutables[executableIndex];
-}
-
-/*******************************************************************************
  * Configuration
  *******************************************************************************/
 
@@ -404,13 +383,13 @@ void Session::Impl::configureExecutableState(uint32_t executableIndex) {
         throw std::runtime_error("Session only supports data graph and compute shader executables");
     }
 
-    auto &executableState = executableStates.emplace_back(compiledExecutable(executableIndex));
+    const auto &compiledExecutable = compiledExecutionState->compiledExecutables.value().at(executableIndex);
+    auto &executableState = executableStates.emplace_back(compiledExecutable);
 
     if (executable.type == ExecutableKind::Compute) {
         return;
     }
 
-    const auto &compiledExecutable = executableState.compiledExecutable.get();
     const vk::DataGraphPipelineSessionCreateInfoARM sessionCreateInfo({}, *compiledExecutable.pipeline);
     executableState.graphSession = vk::raii::DataGraphPipelineSessionARM(contextView.device.get(), sessionCreateInfo);
 
@@ -422,26 +401,21 @@ void Session::Impl::configureExecutableState(uint32_t executableIndex) {
 }
 
 void Session::Impl::compileOrReuseExecutables() {
-    if (compiledExecutionState->compiledData.has_value()) {
-        const auto &compiledModules = compiledExecutionState->compiledData->moduleImplementations;
-        for (const auto &[moduleIndex, implementation] : moduleImplementations) {
-            const auto compiledModuleIt = compiledModules.find(moduleIndex);
-            if (compiledModuleIt == compiledModules.end() ||
-                !sameModuleImplementation(implementation, compiledModuleIt->second)) {
-                throw std::runtime_error("Session module implementations do not match the compiled execution");
-            }
+    if (compiledExecutionState->compiledExecutables.has_value()) {
+        if (!moduleImplementations.empty()) {
+            throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
         }
         return;
     }
 
-    detail::CompiledExecutionData compiledData;
-    compiledData.compiledExecutables.reserve(workload.executableCount());
+    std::vector<detail::CompiledExecutable> compiledExecutables;
+    compiledExecutables.reserve(workload.executableCount());
     for (uint32_t executableIndex = 0; executableIndex < workload.executableCount(); ++executableIndex) {
-        auto &compiledExecutable = compiledData.compiledExecutables.emplace_back();
+        auto &compiledExecutable = compiledExecutables.emplace_back();
         createPipeline(compiledExecutable, executableIndex);
     }
-    compiledData.moduleImplementations = std::move(moduleImplementations);
-    compiledExecutionState->compiledData.emplace(std::move(compiledData));
+    compiledExecutionState->compiledExecutables.emplace(std::move(compiledExecutables));
+    moduleImplementations.clear();
 }
 
 void Session::Impl::configure() {
@@ -495,6 +469,9 @@ void Session::bindModule(PlaceholderModuleView placeholderModule, ModuleImplemen
     auto &sessionState = sessionImpl();
     if (sessionState.configured) {
         throw std::runtime_error("Session::bindModule() must be called before Session::configure()");
+    }
+    if (sessionState.compiledExecutionState->compiledExecutables.has_value()) {
+        throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
     }
     if (placeholderModule.workload_ != &sessionState.workload) {
         throw std::runtime_error("PlaceholderModuleView belongs to a different Workload");

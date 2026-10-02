@@ -21,8 +21,7 @@ namespace mlsdk::workloadlib {
 /**
  * @brief Configured runtime state for a Workload on a Context.
  *
- * Context and Workload are borrowed and must outlive the Session. Bind any
- * placeholder modules before calling configure().
+ * Context and Workload are borrowed and must outlive the Session.
  */
 class Session final {
   public:

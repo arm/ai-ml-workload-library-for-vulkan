@@ -696,7 +696,7 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRetriesAfterFailedConfigu
     EXPECT_EQ(outputBuffer.read(elements), addVectors(firstInput, secondInput));
 }
 
-TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionChecksPlaceholderModules) {
+TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRejectsModuleBindingsAfterCompilation) {
     const auto bytes = makePlaceholderAddInt32BuffersVgf();
     auto workload = Workload::fromVGF(bytes.data(), bytes.size());
     auto context = wrappedContext();
@@ -710,32 +710,33 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionChecksPlaceholderModules)
         session.bindModule(workload.placeholderModule(0), std::move(implementation));
     };
 
+    Session preboundSession(context, workload, compiledExecution);
+    bindPlaceholder(preboundSession, spirv);
+
     {
         Session firstSession(context, workload, compiledExecution);
         bindPlaceholder(firstSession, spirv);
         firstSession.configure();
     }
 
+    try {
+        preboundSession.configure();
+        FAIL() << "Pre-bound placeholder module was silently ignored";
+    } catch (const std::runtime_error &error) {
+        EXPECT_STREQ("Compilation inputs cannot be rebound after compiled execution is configured", error.what());
+    }
+
     Session unboundSession(context, workload, compiledExecution);
     EXPECT_NO_THROW(unboundSession.configure());
 
-    Session matchingSession(context, workload, compiledExecution);
-    bindPlaceholder(matchingSession, spirv);
-    EXPECT_NO_THROW(matchingSession.configure());
-
-    Session mismatchingSession(context, workload, compiledExecution);
-    auto differentSpirv = spirv;
-    differentSpirv.push_back(0);
-    bindPlaceholder(mismatchingSession, std::move(differentSpirv));
+    Session lateBindingSession(context, workload, compiledExecution);
     try {
-        mismatchingSession.configure();
-        FAIL() << "Mismatching placeholder module was accepted";
+        bindPlaceholder(lateBindingSession, spirv);
+        FAIL() << "Late placeholder module binding was accepted";
     } catch (const std::runtime_error &error) {
-        EXPECT_STREQ("Session module implementations do not match the compiled execution", error.what());
+        EXPECT_STREQ("Compilation inputs cannot be rebound after compiled execution is configured", error.what());
     }
-
-    bindPlaceholder(mismatchingSession, spirv);
-    EXPECT_NO_THROW(mismatchingSession.configure());
+    EXPECT_NO_THROW(lateBindingSession.configure());
 }
 
 TEST_F(VgfSessionExecutionTest, RunGlslComputeShaderSegmentWithPushConstants) {
