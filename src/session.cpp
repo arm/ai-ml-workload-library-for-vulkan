@@ -248,7 +248,8 @@ vk::raii::ShaderModule createShaderModule(const Module &compiledModule, const Co
 vk::raii::Pipeline createComputePipeline(const Executable &executable, const Module &compiledModule,
                                          const vk::raii::ShaderModule &shaderModule,
                                          const vk::raii::PipelineLayout &pipelineLayout, const ContextView &contextView,
-                                         const vk::raii::PipelineCache *pipelineCache) {
+                                         const vk::raii::PipelineCache *pipelineCache,
+                                         const std::optional<PipelineRobustnessOptions> &pipelineRobustness) {
     const auto &dispatchShape = executable.dispatchShape;
     if (dispatchShape[0] == 0 || dispatchShape[1] == 0 || dispatchShape[2] == 0) {
         throw std::runtime_error("Compute shader executables must have a non-zero 3D dispatch shape");
@@ -258,26 +259,43 @@ vk::raii::Pipeline createComputePipeline(const Executable &executable, const Mod
     const vk::PipelineShaderStageCreateInfo shaderStageCreateInfo(
         {}, vk::ShaderStageFlagBits::eCompute, *shaderModule, compiledModule.entryPoint.c_str(),
         specializationInfo.populate(executable.specializationInfo));
-    const vk::ComputePipelineCreateInfo pipelineCreateInfo({}, shaderStageCreateInfo, *pipelineLayout);
+    vk::ComputePipelineCreateInfo pipelineCreateInfo({}, shaderStageCreateInfo, *pipelineLayout);
+    vk::PipelineRobustnessCreateInfo pipelineRobustnessInfo;
+    if (pipelineRobustness.has_value()) {
+        pipelineRobustnessInfo.storageBuffers = pipelineRobustness->storageBuffers;
+        pipelineRobustnessInfo.uniformBuffers = pipelineRobustness->uniformBuffers;
+        pipelineRobustnessInfo.vertexInputs = pipelineRobustness->vertexInputs;
+        pipelineRobustnessInfo.images = pipelineRobustness->images;
+        detail::insertPNextAfter(pipelineCreateInfo, pipelineRobustnessInfo);
+    }
     return {contextView.device.get(), pipelineCache, pipelineCreateInfo};
 }
 
 vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const Module &compiledModule,
                                            const vk::raii::ShaderModule &shaderModule,
                                            const vk::raii::PipelineLayout &pipelineLayout, const Workload &workload,
-                                           const ContextView &contextView,
-                                           const vk::raii::PipelineCache *pipelineCache) {
+                                           const ContextView &contextView, const vk::raii::PipelineCache *pipelineCache,
+                                           bool enableNeuralStatistics) {
+    if (enableNeuralStatistics && (executable.dataGraphPipelineFlags &
+                                   vk::PipelineCreateFlagBits2::eProtectedAccessOnly) != vk::PipelineCreateFlags2{}) {
+        throw std::runtime_error("Neural statistics cannot be enabled for a protected-access-only data graph pipeline");
+    }
+
     DataGraphPipelineCreateStorage storage;
     populateDataGraphResources(storage, executable, workload);
     populateDataGraphConstants(storage, executable, workload);
 
     SpecializationInfoStorage specializationInfo;
-    const vk::DataGraphPipelineShaderModuleCreateInfoARM shaderModuleInfo(
+    vk::DataGraphPipelineShaderModuleCreateInfoARM shaderModuleInfo(
         *shaderModule, compiledModule.entryPoint.c_str(), specializationInfo.populate(executable.specializationInfo),
         static_cast<uint32_t>(storage.constants.size()), storage.constants.data(), nullptr);
     const vk::DataGraphPipelineCreateInfoARM pipelineCreateInfo(executable.dataGraphPipelineFlags, *pipelineLayout,
                                                                 static_cast<uint32_t>(storage.resourceInfos.size()),
                                                                 storage.resourceInfos.data(), &shaderModuleInfo);
+    vk::DataGraphPipelineNeuralStatisticsCreateInfoARM neuralStatisticsInfo(enableNeuralStatistics);
+    if (enableNeuralStatistics) {
+        detail::insertPNextAfter(shaderModuleInfo, neuralStatisticsInfo);
+    }
     const vk::raii::DeferredOperationKHR deferredOperation(nullptr);
     return {contextView.device.get(), deferredOperation, pipelineCache, pipelineCreateInfo};
 }
@@ -361,16 +379,17 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
     compiledExecutable.shaderModule = createShaderModule(compiledModule, contextView);
 
     // Executable-specific pipeline state
+    const auto &options = compiledExecutionState->options;
     if (executable.type == ExecutableKind::Compute) {
         compiledExecutable.pipeline = createComputePipeline(executable, compiledModule, compiledExecutable.shaderModule,
                                                             compiledExecutable.pipelineLayout, contextView,
-                                                            compiledExecutionState->options.pipelineCache);
+                                                            options.pipelineCache, options.pipelineRobustness);
         return;
     }
 
     compiledExecutable.pipeline = createDataGraphPipeline(executable, compiledModule, compiledExecutable.shaderModule,
                                                           compiledExecutable.pipelineLayout, workload, contextView,
-                                                          compiledExecutionState->options.pipelineCache);
+                                                          options.pipelineCache, options.neuralStatistics.has_value());
 }
 
 /*******************************************************************************
@@ -390,7 +409,12 @@ void Session::Impl::configureExecutableState(uint32_t executableIndex) {
         return;
     }
 
-    const vk::DataGraphPipelineSessionCreateInfoARM sessionCreateInfo({}, *compiledExecutable.pipeline);
+    vk::DataGraphPipelineSessionCreateInfoARM sessionCreateInfo({}, *compiledExecutable.pipeline);
+    vk::DataGraphPipelineSessionNeuralStatisticsCreateInfoARM neuralStatisticsInfo;
+    if (compiledExecutionState->options.neuralStatistics.has_value()) {
+        neuralStatisticsInfo.mode = compiledExecutionState->options.neuralStatistics->mode;
+        detail::insertPNextAfter(sessionCreateInfo, neuralStatisticsInfo);
+    }
     executableState.graphSession = vk::raii::DataGraphPipelineSessionARM(contextView.device.get(), sessionCreateInfo);
 
     auto bindInfos =

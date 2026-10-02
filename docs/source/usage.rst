@@ -193,6 +193,14 @@ name, and kind identify the executable, together with an
 dispatch. This supports timestamps and debug labels without transferring
 ownership of their Vulkan® objects to the library.
 
+Pipeline diagnostics
+--------------------
+
+``SessionOptions`` accepts optional compute-pipeline robustness and neural
+statistics settings. The application must enable the corresponding Vulkan®
+extensions and device features before requesting them. Neural statistics
+settings are applied during graph pipeline and graph session creation.
+
 Ownership and lifetimes
 -----------------------
 
