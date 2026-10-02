@@ -374,6 +374,46 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, PrepareMultipleExecutionsFromOne
     EXPECT_EQ(secondOutputTensor.read(secondOutputTensor.numElements()), expectedMaxpool(secondInput, inputShape));
 }
 
+TEST_F(StandaloneDataGraphSessionExecutionTest, RunTwoSessionsWithSharedCompiledExecution) {
+    auto workload = Workload::fromDataGraph(makeMaxpoolDescription());
+    auto context = Context::wrap({instance, physicalDevice, device, queueFamilyIndex, queue});
+    CompiledExecution compiledExecution(context, workload);
+
+    const Tensor firstInputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 16, 16, 16});
+    const Tensor firstOutputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 8, 8, 16});
+    const Tensor secondInputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 16, 16, 16});
+    const Tensor secondOutputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 8, 8, 16});
+
+    const auto firstInput = makeMaxpoolInput(firstInputTensor.shape, 9);
+    const auto secondInput = makeMaxpoolInput(secondInputTensor.shape, 17);
+    firstInputTensor.write(firstInput);
+    firstOutputTensor.fill(0, firstOutputTensor.numElements());
+    secondInputTensor.write(secondInput);
+    secondOutputTensor.fill(0, secondOutputTensor.numElements());
+
+    Session firstSession(context, workload, compiledExecution);
+    firstSession.configure();
+    auto firstBindings = firstSession.createBindingSet();
+    firstBindings.bindTensor(workload.resource(0), TensorBindingInfo{*firstInputTensor.tensor});
+    firstBindings.bindTensor(workload.resource(1), TensorBindingInfo{*firstOutputTensor.tensor});
+    auto firstExecution = firstSession.prepare(firstBindings);
+
+    Session secondSession(context, workload, compiledExecution);
+    secondSession.configure();
+    auto secondBindings = secondSession.createBindingSet();
+    secondBindings.bindTensor(workload.resource(0), TensorBindingInfo{*secondInputTensor.tensor});
+    secondBindings.bindTensor(workload.resource(1), TensorBindingInfo{*secondOutputTensor.tensor});
+    auto secondExecution = secondSession.prepare(secondBindings);
+
+    firstExecution.run();
+    secondExecution.run();
+
+    EXPECT_EQ(firstOutputTensor.read(firstOutputTensor.numElements()),
+              expectedMaxpool(firstInput, firstInputTensor.shape));
+    EXPECT_EQ(secondOutputTensor.read(secondOutputTensor.numElements()),
+              expectedMaxpool(secondInput, secondInputTensor.shape));
+}
+
 TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWithBorrowedConstant) {
     const std::vector<int64_t> inputShape = {1, 16, 16, 16};
     const std::vector<int64_t> outputShape = {1, 8, 8, 16};

@@ -5,13 +5,16 @@
 
 #pragma once
 
+#include "compiled_execution_impl.hpp"
 #include "context_impl.hpp"
 #include "workload_impl.hpp"
 
 #include "mlworkloadlib/session.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <map>
+#include <memory>
 #include <vector>
 
 namespace mlsdk::workloadlib {
@@ -28,10 +31,11 @@ struct Session::Impl {
      **************************************************************************/
 
     struct ExecutableState {
-        vk::raii::ShaderModule shaderModule{nullptr};
-        std::vector<vk::raii::DescriptorSetLayout> descriptorSetLayouts;
-        vk::raii::PipelineLayout pipelineLayout{nullptr};
-        vk::raii::Pipeline pipeline{nullptr};
+        explicit ExecutableState(const detail::CompiledExecutable &compiledExecutableIn)
+            : compiledExecutable(compiledExecutableIn) {}
+
+        std::reference_wrapper<const detail::CompiledExecutable> compiledExecutable;
+
         // Members are destroyed in reverse declaration order. Keep sessionMemory before
         // graphSession so a graph session is destroyed before its bound memory.
         std::vector<vk::raii::DeviceMemory> sessionMemory;
@@ -42,15 +46,25 @@ struct Session::Impl {
      * Lifetime
      **************************************************************************/
 
-    Impl(Context &contextIn, const Workload &workloadIn)
-        : workload(workloadIn), contextView(contextIn.contextImpl().contextView()) {}
+    Impl(Context &contextIn, const Workload &workloadIn, SessionOptions optionsIn);
+    Impl(Context &contextIn, const Workload &workloadIn, CompiledExecution &compiledExecutionIn);
+
+  private:
+    /***************************************************************************
+     * Compiled executable access
+     **************************************************************************/
+
+    const detail::CompiledExecutable &compiledExecutable(uint32_t executableIndex) const;
 
     /***************************************************************************
      * Configuration
      **************************************************************************/
 
-    void createPipeline(ExecutableState &executableState, uint32_t executableIndex) const;
+    void createPipeline(detail::CompiledExecutable &compiledExecutable, uint32_t executableIndex) const;
     void configureExecutableState(uint32_t executableIndex);
+    void compileOrReuseExecutables();
+
+  public:
     void configure();
 
     /***************************************************************************
@@ -59,6 +73,9 @@ struct Session::Impl {
 
     const Workload &workload;
     ContextView contextView;
+
+    // Keep compiled pipelines alive until after executableStates are destroyed.
+    std::shared_ptr<CompiledExecution::Impl> compiledExecutionState;
 
     std::map<uint32_t, Module> moduleImplementations;
 

@@ -22,6 +22,17 @@ A workload is executed through the following sequence:
 5. Prepare a binding snapshot and either run it or record it into an
    application command buffer.
 
+By default, each ``Session`` owns the compiled pipelines and layouts produced
+by ``Session::configure()``. Applications that create multiple sessions for
+the same context and workload can optionally construct one
+``CompiledExecution`` and pass it to each session. The first session compiles
+the shared state; later sessions reuse it while retaining their own bindings
+and command state. Each session keeps the compiled state alive even if the
+``CompiledExecution`` object is destroyed. Placeholder module implementations
+need only be supplied by the first session that successfully configures the
+shared state; later supplied implementations must match it. Configuration
+calls using the same shared state must be serialized.
+
 The following excerpt from the standalone compute sample shows the common flow
 with a runtime-owned context and buffers. The sample defines the GLSL workload
 description and mapped-memory helpers earlier in the source file.
@@ -189,6 +200,10 @@ Ownership and lifetimes
   sessions, allocations created through it, and submitted work that uses them.
 - A ``Workload`` must outlive its non-owning views and every ``Session`` created
   from it. A ``Session`` must outlive its binding sets and prepared executions.
+- ``CompiledExecution`` is tied to the ``Context`` and ``Workload`` supplied at
+  creation. Sessions keep its compiled state alive if the ``CompiledExecution``
+  object is destroyed; the context and workload must still outlive those
+  sessions.
 - VGF memory passed to ``Workload::fromVGF(data, size)`` must remain valid for
   the workload lifetime. The same applies to caller-owned constant payloads in
   a standalone data-graph description.

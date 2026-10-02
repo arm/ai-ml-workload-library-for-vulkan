@@ -78,6 +78,7 @@ endif()
 
 set(ML_WORKLOAD_LIB_SOURCES
     src/binding_set.cpp
+    src/compiled_execution.cpp
     src/context.cpp
     src/internal/module_compiler.cpp
     src/internal/utils.cpp
@@ -244,6 +245,7 @@ install(FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/array_view.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/binding_set.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/binding_types.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/compiled_execution.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/context.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/prepared_execution.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/session.hpp
