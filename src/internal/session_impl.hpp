@@ -40,6 +40,7 @@ struct Session::Impl {
         // graphSession so a graph session is destroyed before its bound memory.
         std::vector<vk::raii::DeviceMemory> sessionMemory;
         vk::raii::DataGraphPipelineSessionARM graphSession{nullptr};
+        std::vector<DataGraphSessionMemoryInfo> sessionMemoryInfo;
     };
 
     /***************************************************************************
@@ -56,10 +57,16 @@ struct Session::Impl {
 
     void createPipeline(detail::CompiledExecutable &compiledExecutable, uint32_t executableIndex) const;
     void configureExecutableState(uint32_t executableIndex);
+    const ExecutableState &graphExecutableState(uint32_t executableIndex) const;
     void compileOrReuseExecutables();
 
   public:
     void configure();
+    std::vector<vk::DataGraphPipelinePropertyARM> dataGraphPipelineProperties(uint32_t executableIndex) const;
+    DataGraphPipelinePropertyData dataGraphPipelineProperty(uint32_t executableIndex,
+                                                            vk::DataGraphPipelinePropertyARM property) const;
+    uint32_t dataGraphSessionMemoryCount(uint32_t executableIndex) const;
+    DataGraphSessionMemoryInfo dataGraphSessionMemory(uint32_t executableIndex, uint32_t memoryIndex) const;
 
     /***************************************************************************
      * Stored state

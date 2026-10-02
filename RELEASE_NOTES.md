@@ -15,8 +15,9 @@
 - Added optional `CompiledExecution` for sharing compiled pipelines and layouts
   across sessions for the same context and workload, while retaining separate
   per-session state.
-- Added execution instrumentation controls for caller-owned per-executable
-  profiling commands, compute-pipeline robustness, and graph neural statistics.
+- Added execution instrumentation and graph diagnostics for caller-owned
+  per-executable profiling, pipeline robustness, neural statistics, graph
+  properties, and session-memory inspection.
 - Placeholder modules can be rebound before shared pipelines are compiled, but
   cannot be bound after compilation.
 
