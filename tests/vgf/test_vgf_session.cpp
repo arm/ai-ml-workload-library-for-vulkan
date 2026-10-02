@@ -1207,7 +1207,20 @@ TEST_F(VgfSessionExecutionTest, RunTwoMaxpoolGraphSegments) {
     bindings.bindTensor(workload.resource(1), TensorBindingInfo{*secondOutputTensor.tensor});
 
     auto execution = session.prepare(bindings);
-    execution.run();
+    std::vector<std::string> hookEvents;
+    RecordOptions recordOptions;
+    recordOptions.executableHook = [&hookEvents](const ExecutableRecordContext &recordContext) {
+        EXPECT_NE(recordContext.commandBuffer, vk::CommandBuffer{});
+        const auto *phase = recordContext.phase == ExecutableRecordPhase::Before ? "before/" : "after/";
+        hookEvents.push_back(phase + std::string(recordContext.executable.name()));
+    };
+    recordAndSubmitCommands(device, queue, queueFamilyIndex,
+                            [&execution, &recordOptions](vk::CommandBuffer commandBuffer) {
+                                execution.record(commandBuffer, recordOptions);
+                            });
+
+    EXPECT_EQ(hookEvents, (std::vector<std::string>{"before/first_graph_segment", "after/first_graph_segment",
+                                                    "before/second_graph_segment", "after/second_graph_segment"}));
 
     const auto firstExpected = expectedMaxpool(firstInput, firstInputTensor.shape);
     EXPECT_EQ(secondOutputTensor.read(secondOutputTensor.numElements()), expectedMaxpool(firstExpected, {1, 8, 8, 16}));
