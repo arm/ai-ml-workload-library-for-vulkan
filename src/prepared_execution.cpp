@@ -964,7 +964,7 @@ void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandB
  * Recording and submission
  *******************************************************************************/
 
-void PreparedExecution::Impl::record(vk::CommandBuffer commandBuffer) {
+void PreparedExecution::Impl::record(vk::CommandBuffer commandBuffer, const RecordOptions &options) {
     if (commandBuffer == nullptr) {
         throw std::runtime_error("PreparedExecution::record() requires a valid command buffer");
     }
@@ -1002,6 +1002,13 @@ void PreparedExecution::Impl::record(vk::CommandBuffer commandBuffer) {
                                            static_cast<VkShaderStageFlags>(range.stageFlags), range.offset, range.size,
                                            pushConstants.data() + range.offset);
         }
+        const auto executableView = sessionState.workload.executable(static_cast<uint32_t>(executableIndex));
+        const auto invokeExecutableHook = [&](ExecutableRecordPhase phase) {
+            if (options.executableHook) {
+                options.executableHook({commandBuffer, executableView, phase});
+            }
+        };
+        invokeExecutableHook(ExecutableRecordPhase::Before);
         if (executable.type == ExecutableKind::Graph) {
             if (!dispatcher->vkCmdDispatchDataGraphARM) {
                 throw std::runtime_error("vkCmdDispatchDataGraphARM is not available");
@@ -1013,6 +1020,7 @@ void PreparedExecution::Impl::record(vk::CommandBuffer commandBuffer) {
             dispatcher->vkCmdDispatch(static_cast<VkCommandBuffer>(commandBuffer), executable.dispatchShape[0],
                                       executable.dispatchShape[1], executable.dispatchShape[2]);
         }
+        invokeExecutableHook(ExecutableRecordPhase::After);
 
         if (executable.implicitBarrier && executableIndex + 1 < sessionState.executableStates.size()) {
             insertExecutableBarrier(commandBuffer, executable, workloadState.executables.at(executableIndex + 1));
@@ -1063,5 +1071,9 @@ const PreparedExecution::Impl &PreparedExecution::preparedExecutionImpl() const 
 void PreparedExecution::run() { preparedExecutionImpl().run(); }
 
 void PreparedExecution::record(vk::CommandBuffer commandBuffer) { preparedExecutionImpl().record(commandBuffer); }
+
+void PreparedExecution::record(vk::CommandBuffer commandBuffer, const RecordOptions &options) {
+    preparedExecutionImpl().record(commandBuffer, options);
+}
 
 } // namespace mlsdk::workloadlib

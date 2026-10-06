@@ -6,12 +6,35 @@
 #pragma once
 
 #include "mlworkloadlib/binding_set.hpp"
+#include "mlworkloadlib/workload.hpp"
 
+#include <functional>
 #include <memory>
 
 namespace mlsdk::workloadlib {
 
 class Session;
+
+/** @brief Point relative to an executable dispatch at which a recording hook runs. */
+enum class ExecutableRecordPhase {
+    Before,
+    After,
+};
+
+/** @brief Context passed to a hook around one executable dispatch. */
+struct ExecutableRecordContext {
+    vk::CommandBuffer commandBuffer;
+    ExecutableView executable;
+    ExecutableRecordPhase phase;
+};
+
+/** @brief Callable invoked around one executable dispatch. */
+using ExecutableRecordHook = std::function<void(const ExecutableRecordContext &)>;
+
+/** @brief Optional caller-owned commands recorded around each executable dispatch. */
+struct RecordOptions {
+    ExecutableRecordHook executableHook;
+};
 
 /**
  * @brief Prepared binding snapshot that can run or record a workload.
@@ -51,6 +74,15 @@ class PreparedExecution {
      * family. The caller ends, submits, and synchronizes the command buffer.
      */
     void record(vk::CommandBuffer commandBuffer);
+
+    /**
+     * @brief Records a workload and invokes optional hooks immediately before
+     * and after each executable dispatch.
+     *
+     * Hooks may record commands into the supplied command buffer. Their
+     * callable state and any Vulkan objects they use remain caller-owned.
+     */
+    void record(vk::CommandBuffer commandBuffer, const RecordOptions &options);
 
   private:
     // Implementation type

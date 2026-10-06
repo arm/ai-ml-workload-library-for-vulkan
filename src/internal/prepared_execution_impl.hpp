@@ -121,7 +121,7 @@ struct PreparedExecution::Impl {
      * Recording and submission
      **************************************************************************/
 
-    void record(vk::CommandBuffer commandBuffer);
+    void record(vk::CommandBuffer commandBuffer, const RecordOptions &options = {});
     void run();
 
     /***************************************************************************

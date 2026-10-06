@@ -187,6 +187,14 @@ synchronization.
    :end-before: // [recorded-execution-end]
    :dedent: 8
 
+Pass ``RecordOptions`` to the ``record()`` overload to record caller-owned
+commands immediately before and after each executable dispatch. The hook
+receives the recording command buffer and an ``ExecutableView`` whose index,
+name, and kind identify the executable, together with an
+``ExecutableRecordPhase`` indicating whether it runs before or after the
+dispatch. This supports timestamps and debug labels without transferring
+ownership of their Vulkan® objects to the library.
+
 Ownership and lifetimes
 -----------------------
 
