@@ -15,23 +15,21 @@ A workload is executed through the following sequence:
 1. Construct a ``Workload``.
 2. Create a runtime-owned ``Context``, or wrap the application's Vulkan® instance,
    physical device, device, queue family, and queue.
-3. Create a ``Session``, provide any missing module implementations, and
-   configure it.
+3. Create a ``Session``, supply any required compilation inputs, then call
+   ``Session::configure()``.
+
+   - For a placeholder module, call
+     ``Session::bindModule(workload.placeholderModule(index), implementation)``.
+
 4. Create a ``BindingSet`` and bind each public resource using caller-owned or
    runtime-owned allocations.
 5. Prepare a binding snapshot and either run it or record it into an
    application command buffer.
 
-By default, each ``Session`` owns the compiled pipelines and layouts produced
-by ``Session::configure()``. Applications that create multiple sessions for
-the same context and workload can optionally construct one
-``CompiledExecution`` and pass it to each session. The first session compiles
-the shared state; later sessions reuse it while retaining their own bindings
-and command state. Each session keeps the compiled state alive even if the
-``CompiledExecution`` object is destroyed. Placeholder module implementations
-need only be supplied by the first session that successfully configures the
-shared state; later supplied implementations must match it. Configuration
-calls using the same shared state must be serialized.
+By default, each ``Session`` owns its compiled pipelines and layouts. To share
+them across sessions for the same context and workload, pass a
+``CompiledExecution`` to each session. Each session still has its own binding
+sets and command state.
 
 The following excerpt from the standalone compute sample shows the common flow
 with a runtime-owned context and buffers. The sample defines the GLSL workload

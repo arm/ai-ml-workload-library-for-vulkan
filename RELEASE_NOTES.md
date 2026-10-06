@@ -17,6 +17,8 @@
   per-session state.
 - Added per-executable recording hooks for caller-owned profiling commands
   around internal workload dispatches.
+- Placeholder modules can be rebound before shared pipelines are compiled, but
+  cannot be bound after compilation.
 
 ## Version 0.11.0 – *Initial Public Release*
 

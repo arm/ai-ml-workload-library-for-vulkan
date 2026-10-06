@@ -67,9 +67,9 @@ enum class ModuleCodeKind {
 /**
  * @brief Module code and compilation options used to construct or complete a workload.
  *
- * Exactly one of @ref spirv or @ref source is consumed according to
- * @ref codeKind. GLSL and HLSL require the corresponding Feature to be
- * available when the Session is configured.
+ * Either @ref spirv or @ref source is consumed according to @ref codeKind.
+ * Optional representations require the corresponding Feature to be available
+ * when the Session is configured.
  */
 struct ModuleImplementation {
     ModuleCodeKind codeKind = ModuleCodeKind::Missing;

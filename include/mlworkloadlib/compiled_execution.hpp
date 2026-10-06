@@ -36,8 +36,9 @@ class Session;
  * A Session builds it during configure(); later Sessions reuse it. Context and
  * Workload must outlive this object and Sessions using its state. Sessions keep
  * the compiled state alive if this object is moved or destroyed. The compiling
- * Session supplies required placeholder modules; any later bindings must
- * match. Session::configure() calls sharing this state must be serialized.
+ * Session supplies compilation inputs before the shared pipelines are created.
+ * Later Sessions reuse the pipelines without rebinding those inputs.
+ * Session::configure() calls sharing this state must be serialized.
  */
 class CompiledExecution final {
   public:
