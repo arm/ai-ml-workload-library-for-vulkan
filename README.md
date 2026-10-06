@@ -130,6 +130,22 @@ uv run --no-sync python scripts/build.py --doc
 
 The generated documentation is available at `build/docs/out/index.html`.
 
+## Code coverage
+
+Sync the locked Python tooling dependencies, then run the unit tests on Linux
+with GCC coverage instrumentation:
+
+```sh
+uv sync --locked --no-install-project --no-default-groups --group tooling
+uv run --no-sync python scripts/build.py --coverage --build-dir build-coverage
+```
+
+The coverage command writes a detailed HTML report to
+`build-coverage/coverage/index.html` and a machine-readable JSON summary to
+`build-coverage/coverage/summary.json`. Coverage is collected for the library
+sources and public headers; tests and bundled dependencies are excluded from
+the report.
+
 ## Consumption model
 
 - `mlworkloadlib` is install-tree consumable today via `find_package(MLWorkloadLibraryForVulkan)`.
