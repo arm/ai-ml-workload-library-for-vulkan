@@ -47,6 +47,15 @@ void appendExtension(std::vector<const char *> &extensions, const char *name);
 std::vector<const char *> requiredWorkloadDeviceExtensions(const std::vector<const char *> &additionalExtensions = {});
 
 /*******************************************************************************
+ * Vulkan structure chains
+ *******************************************************************************/
+
+template <typename Current, typename Next> void insertPNextAfter(Current &current, Next &next) noexcept {
+    next.pNext = current.pNext;
+    current.pNext = &next;
+}
+
+/*******************************************************************************
  * Device configuration
  *******************************************************************************/
 

@@ -11,17 +11,40 @@
 #include <vulkan/vulkan_raii.hpp>
 
 #include <memory>
+#include <optional>
 
 namespace mlsdk::workloadlib {
+
+/** @brief Typed robustness state chained into compute pipeline creation. */
+struct PipelineRobustnessOptions {
+    using BufferBehavior = vk::PipelineRobustnessBufferBehavior;
+    using ImageBehavior = vk::PipelineRobustnessImageBehavior;
+
+    BufferBehavior storageBuffers = BufferBehavior::eDeviceDefault;
+    BufferBehavior uniformBuffers = BufferBehavior::eDeviceDefault;
+    BufferBehavior vertexInputs = BufferBehavior::eDeviceDefault;
+    ImageBehavior images = ImageBehavior::eDeviceDefault;
+};
+
+/** @brief Neural-statistics state used for graph pipeline and session creation. */
+struct NeuralStatisticsOptions {
+    vk::NeuralAcceleratorStatisticsModeARM mode = vk::NeuralAcceleratorStatisticsModeARM::eStatistics1;
+};
 
 /*******************************************************************************
  * Session options
  *******************************************************************************/
 
-/** @brief Pipeline compilation options. */
+/** @brief Pipeline compilation and graph-session configuration options. */
 struct SessionOptions {
     /** @brief Borrowed pipeline cache; keep valid through the first successful Session::configure(). */
     const vk::raii::PipelineCache *pipelineCache = nullptr;
+
+    /** @brief Optional compute-pipeline robustness state. */
+    std::optional<PipelineRobustnessOptions> pipelineRobustness;
+
+    /** @brief Enables graph-pipeline neural statistics using the selected session mode. */
+    std::optional<NeuralStatisticsOptions> neuralStatistics;
 };
 
 /*******************************************************************************

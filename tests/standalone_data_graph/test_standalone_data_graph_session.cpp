@@ -2,6 +2,7 @@
  * SPDX-FileCopyrightText: Copyright 2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
  * SPDX-License-Identifier: Apache-2.0
  */
+#include "internal/utils.hpp"
 #include "test_expected_results.hpp"
 #include "test_standalone_data_graph_utils.hpp"
 #include "test_vulkan_fixture.hpp"
@@ -44,6 +45,22 @@ std::vector<int8_t> makeSparse2To4Weights(std::size_t elements) {
 }
 
 } // namespace
+
+/*******************************************************************************
+ * Pipeline creation
+ *******************************************************************************/
+
+TEST(DataGraphPipelineCreateInfoTest, NeuralStatisticsPreserveShaderModuleCreateInfo) {
+    vk::DataGraphPipelineShaderModuleCreateInfoARM shaderModuleInfo;
+    const vk::DataGraphPipelineCreateInfoARM pipelineCreateInfo({}, {}, {}, {}, &shaderModuleInfo);
+    vk::DataGraphPipelineNeuralStatisticsCreateInfoARM neuralStatisticsInfo(vk::True);
+
+    detail::insertPNextAfter(shaderModuleInfo, neuralStatisticsInfo);
+
+    EXPECT_EQ(pipelineCreateInfo.pNext, &shaderModuleInfo);
+    EXPECT_EQ(shaderModuleInfo.pNext, &neuralStatisticsInfo);
+    EXPECT_EQ(neuralStatisticsInfo.pNext, nullptr);
+}
 
 /*******************************************************************************
  * Positive coverage
@@ -103,6 +120,19 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkloadWithPipeline
     execution.run();
 
     EXPECT_EQ(outputTensor.read(outputTensor.numElements()), expectedMaxpool(input, inputShape));
+}
+
+TEST_F(StandaloneDataGraphSessionExecutionTest, RejectNeuralStatisticsForProtectedAccessOnlyPipeline) {
+    auto description = makeMaxpoolDescription();
+    description.pipeline.flags = vk::PipelineCreateFlagBits2::eProtectedAccessOnly;
+    auto workload = Workload::fromDataGraph(std::move(description));
+    auto context = wrappedContext();
+
+    SessionOptions options;
+    options.neuralStatistics.emplace();
+    Session session(context, workload, options);
+
+    EXPECT_THROW(session.configure(), std::runtime_error);
 }
 
 TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkloadWithPipelineSpecializationConstants) {
