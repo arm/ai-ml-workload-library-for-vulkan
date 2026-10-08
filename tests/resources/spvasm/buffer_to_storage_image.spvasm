@@ -1,0 +1,63 @@
+;
+; SPDX-FileCopyrightText: Copyright 2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
+; SPDX-License-Identifier: Apache-2.0
+;
+; Copy signed integer RGBA components from a storage buffer to an RGBA8 SNORM image.
+               OpCapability Shader
+               OpCapability ImageQuery
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %main "main" %aliasImage %inputBuffer %globalId
+               OpExecutionMode %main LocalSize 1 1 1
+               OpDecorate %aliasImage NonReadable
+               OpDecorate %aliasImage DescriptorSet 0
+               OpDecorate %aliasImage Binding 0
+               OpDecorate %inputValues ArrayStride 16
+               OpMemberDecorate %inputBlock 0 Offset 0
+               OpDecorate %inputBlock Block
+               OpDecorate %inputBuffer NonWritable
+               OpDecorate %inputBuffer DescriptorSet 0
+               OpDecorate %inputBuffer Binding 1
+               OpDecorate %globalId BuiltIn GlobalInvocationId
+       %void = OpTypeVoid
+   %function = OpTypeFunction %void
+      %float = OpTypeFloat 32
+    %v4float = OpTypeVector %float 4
+        %int = OpTypeInt 32 1
+       %uint = OpTypeInt 32 0
+      %v2int = OpTypeVector %int 2
+      %v4int = OpTypeVector %int 4
+     %v3uint = OpTypeVector %uint 3
+     %uint_0 = OpConstant %uint 0
+     %scale = OpConstant %float 127
+   %v4scale = OpConstantComposite %v4float %scale %scale %scale %scale
+      %image = OpTypeImage %float 2D 0 0 0 2 Rgba8Snorm
+  %image_ptr = OpTypePointer UniformConstant %image
+ %aliasImage = OpVariable %image_ptr UniformConstant
+%inputValues = OpTypeRuntimeArray %v4int
+ %inputBlock = OpTypeStruct %inputValues
+  %input_ptr = OpTypePointer StorageBuffer %inputBlock
+%inputBuffer = OpVariable %input_ptr StorageBuffer
+  %v4int_ptr = OpTypePointer StorageBuffer %v4int
+ %global_ptr = OpTypePointer Input %v3uint
+   %globalId = OpVariable %global_ptr Input
+       %main = OpFunction %void None %function
+      %entry = OpLabel
+         %id = OpLoad %v3uint %globalId
+          %x = OpCompositeExtract %uint %id 0
+          %y = OpCompositeExtract %uint %id 1
+         %ix = OpBitcast %int %x
+         %iy = OpBitcast %int %y
+ %coordinate = OpCompositeConstruct %v2int %ix %iy
+     %loaded = OpLoad %image %aliasImage
+       %size = OpImageQuerySize %v2int %loaded
+ %signedWidth = OpCompositeExtract %int %size 0
+      %width = OpBitcast %uint %signedWidth
+        %row = OpIMul %uint %y %width
+   %position = OpIAdd %uint %row %x
+    %address = OpAccessChain %v4int_ptr %inputBuffer %uint_0 %position
+      %value = OpLoad %v4int %address
+  %converted = OpConvertSToF %v4float %value
+      %pixel = OpFDiv %v4float %converted %v4scale
+               OpImageWrite %loaded %coordinate %pixel
+               OpReturn
+               OpFunctionEnd

@@ -101,6 +101,14 @@ inline std::vector<uint32_t> assembleWritePushConstantSpirv(uint32_t offset = 0)
     return assembleSpirv(spvasm);
 }
 
+inline std::vector<uint32_t> assembleReadStorageImageSpirv() {
+    return assembleSpirv(readSpvasmFile(ML_WORKLOAD_LIB_READ_STORAGE_IMAGE_SPVASM));
+}
+
+inline std::vector<uint32_t> assembleBufferToStorageImageSpirv() {
+    return assembleSpirv(readSpvasmFile(ML_WORKLOAD_LIB_BUFFER_TO_STORAGE_IMAGE_SPVASM));
+}
+
 inline std::vector<uint32_t> assembleAddF32ConstantSpirv(std::string_view name, GraphSpvasmBindings bindings) {
     return assembleGraphSpirvFromTemplate(name, ML_WORKLOAD_LIB_ADD_F32_CONSTANT_SPVASM, bindings);
 }

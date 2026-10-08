@@ -44,9 +44,12 @@ struct BufferBindingInfo {
  *
  * The subresource range must match
  * ImageRequirementsView::requiredSubresourceRange(). If @ref layout has a
- * value, PreparedExecution transitions the image from that layout to
- * ImageRequirementsView::requiredLayout() before its first workload use. If it
- * has no value, image layout transitions remain the caller's responsibility.
+ * value, it declares the entry layout. Otherwise, the caller establishes
+ * ImageRequirementsView::requiredLayout() before execution. PreparedExecution
+ * manages transitions for workload accesses and internal alias peers, including
+ * images used only as external backing. Images return to the supplied entry
+ * layout after execution so the same prepared commands can be recorded again,
+ * except for Undefined and Preinitialized entries which return to requiredLayout().
  */
 struct ImageBindingInfo {
     vk::Image image = nullptr;

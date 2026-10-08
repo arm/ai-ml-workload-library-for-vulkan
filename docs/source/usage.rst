@@ -267,10 +267,37 @@ offsets are relative to it and default to zero. ``Context::create*()`` allocates
 for one resource only. The caller guarantees that the allocation's actual memory
 type is supported by every alias.
 
+Image layouts and synchronization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+An optional image layout declares the entry layout. Prepared execution manages
+transitions required by executable accesses and internal alias peers. Optimal
+tensor aliases may transition even an image used only as external backing.
+For entry layouts other than ``eUndefined`` and ``ePreinitialized``, images return
+to their supplied entry layouts, including images accessed directly by an
+executable. This lets the same prepared commands be recorded and executed
+repeatedly without caller layout transitions between calls.
+
+An ``eUndefined`` entry discards prior image contents on each execution and
+finishes in the workload-required layout. These commands can be repeated when
+discarding the prior contents is appropriate.
+
+An ``ePreinitialized`` entry preserves initial image contents but permits only
+one execution of the prepared commands since Vulkan® does not permit transitioning them
+back to ``ePreinitialized``.
+
+Without a supplied layout, the caller establishes the workload-required image
+layout before execution; internal alias transitions still return to that layout.
+Linear tensor peers do not require tensor-alias image layout transitions.
+
 Alias groups share one memory dependency scope, independent of peer placement
 offsets. One executable may access multiple tensor/buffer peers when they require
 the same image layout state. Simultaneous accesses to distinct image peers, or to
 both an optimal tensor and an image peer in the same group, are rejected.
+
+Resources may share memory only within a workload-declared alias group.
+Keep ``implicitBarrier`` enabled when a later image layout transition is
+required, including restoration of the entry layout.
 
 Push constants
 --------------
@@ -310,9 +337,10 @@ Running and recording
 ``PreparedExecution::run()`` records, submits, and waits for completion using
 library-managed command and fence state.
 
-``PreparedExecution::record()`` records into a caller-owned command buffer. The
-application is responsible for the command-buffer lifecycle, submission, and
-synchronization.
+``PreparedExecution::record()`` records into a caller-owned command buffer and
+manages dependencies between workload executables according to their
+``implicitBarrier`` settings. The application is responsible for the command-buffer
+lifecycle, submission, and synchronization with work outside the call.
 
 .. literalinclude:: ../sources/samples/4_record_glsl_compute_with_wrapped_context.cpp
    :language: cpp

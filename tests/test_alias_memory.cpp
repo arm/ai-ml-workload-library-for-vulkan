@@ -21,8 +21,11 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <string_view>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace {
 using namespace mlsdk::workloadlib;
@@ -200,6 +203,91 @@ class TensorMemoryCalls {
     const TensorMemoryCalls *previous_ = active_;
     inline static thread_local const TensorMemoryCalls *active_ = nullptr;
 };
+
+// Observe recording without emitting dispatches or barriers for unsynchronized workloads.
+class AliasRecordingCalls {
+  public:
+    explicit AliasRecordingCalls(vk::raii::Device &device)
+        : dispatch_(device, &vk::raii::detail::DeviceDispatcher::vkCmdDispatchDataGraphARM, dispatch),
+          barrier_(device, &vk::raii::detail::DeviceDispatcher::vkCmdPipelineBarrier2, barrier) {
+        active_ = this;
+    }
+    ~AliasRecordingCalls() { active_ = previous_; }
+    AliasRecordingCalls(const AliasRecordingCalls &) = delete;
+    AliasRecordingCalls &operator=(const AliasRecordingCalls &) = delete;
+    AliasRecordingCalls(AliasRecordingCalls &&) = delete;
+    AliasRecordingCalls &operator=(AliasRecordingCalls &&) = delete;
+
+    MOCK_METHOD(void, dispatchGraph, ());
+    MOCK_METHOD(void, pipelineBarrier, (const VkDependencyInfo &));
+
+  private:
+    static void VKAPI_CALL dispatch(VkCommandBuffer, VkDataGraphPipelineSessionARM,
+                                    const VkDataGraphPipelineDispatchInfoARM *) {
+        active_->dispatchGraph();
+    }
+    static void VKAPI_CALL barrier(VkCommandBuffer, const VkDependencyInfo *info) { active_->pipelineBarrier(*info); }
+
+    ScopedDeviceDispatcherHook<PFN_vkCmdDispatchDataGraphARM> dispatch_;
+    ScopedDeviceDispatcherHook<PFN_vkCmdPipelineBarrier2> barrier_;
+    AliasRecordingCalls *previous_ = active_;
+    inline static thread_local AliasRecordingCalls *active_ = nullptr;
+};
+
+class ImplicitBarrierSession : public RuntimeSessionExecutionTest, public ::testing::WithParamInterface<bool> {};
+
+TEST_P(ImplicitBarrierSession, RecordsDependencyAccordingToProducerSetting) {
+    const bool producerBarrier = GetParam();
+    detail::WorkloadBuilder builder;
+    using Role = detail::Resource::Role;
+    const auto input =
+        builder.addResource("input", tensorRequirements(vk::Format::eR8Sint, {1, 16, 16, 16}), Role::Input);
+    const auto requirements = tensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 16});
+    const auto external = builder.addResource("shared", requirements, Role::Output, 17);
+    const auto intermediate = builder.addResource("intermediate_alias", requirements, Role::Intermediate, 17);
+    const auto output =
+        builder.addResource("output", tensorRequirements(vk::Format::eR8Sint, {1, 4, 4, 16}), Role::Output);
+    ModuleImplementation producerModule;
+    producerModule.codeKind = ModuleCodeKind::Spirv;
+    producerModule.spirv = assembleMaxpool16x16To8x8Spirv("producer", {0, 0, 0, 1});
+    const auto producer = builder.addExecutable("producer", ExecutableKind::Graph,
+                                                builder.addModule(std::move(producerModule), "producer", "main"));
+    builder.addDescriptorBinding(producer, input, 0, 0, ResourceAccess::Read);
+    builder.addDescriptorBinding(producer, intermediate, 0, 1, ResourceAccess::Write);
+    builder.setImplicitBarrier(producer, producerBarrier);
+    ModuleImplementation consumerModule;
+    consumerModule.codeKind = ModuleCodeKind::Spirv;
+    consumerModule.spirv = assembleMaxpool8x8To4x4Spirv("consumer", {0, 0, 0, 1});
+    const auto consumer = builder.addExecutable("consumer", ExecutableKind::Graph,
+                                                builder.addModule(std::move(consumerModule), "consumer", "main"));
+    builder.addDescriptorBinding(consumer, external, 0, 0, ResourceAccess::Read);
+    builder.addDescriptorBinding(consumer, output, 0, 1, ResourceAccess::Write);
+    builder.setImplicitBarrier(consumer, !producerBarrier);
+    auto workload = builder.finish();
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.configure();
+    const Tensor inputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 16, 16, 16});
+    const Tensor aliasTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 8, 8, 16});
+    const Tensor outputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 4, 4, 16});
+    auto bindings = session.createBindingSet();
+    bindings.bindTensor(workload.resource(0), {*inputTensor.tensor});
+    bindings.bindTensor(workload.resource(1), {*aliasTensor.tensor, {*aliasTensor.memory, 0, aliasTensor.memorySize}});
+    bindings.bindTensor(workload.resource(2), {*outputTensor.tensor});
+    auto execution = session.prepare(bindings);
+
+    const vk::raii::CommandPool commandPool(device, {{}, queueFamilyIndex});
+    auto commandBuffer =
+        std::move(device.allocateCommandBuffers({*commandPool, vk::CommandBufferLevel::ePrimary, 1}).front());
+    commandBuffer.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
+    AliasRecordingCalls calls(device);
+    EXPECT_CALL(calls, dispatchGraph()).Times(2);
+    EXPECT_CALL(calls, pipelineBarrier(::testing::_)).Times(producerBarrier ? 1 : 0);
+    execution.record(*commandBuffer);
+    commandBuffer.end();
+}
+
+INSTANTIATE_TEST_SUITE_P(ProducerSetting, ImplicitBarrierSession, ::testing::Bool());
 
 class AliasMemoryExecutionTest : public RuntimeSessionExecutionTest {};
 

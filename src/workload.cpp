@@ -423,7 +423,7 @@ ImageRequirementsView ResourceRequirementsView::asImage() const {
  *******************************************************************************/
 
 vk::TensorUsageFlagsARM TensorRequirementsView::usage() const {
-    return detail::tensorMetadata(workloadResource(*workload_, resourceIndex_)).usage;
+    return detail::tensorUsageForTiling(*workload_, resourceIndex_, vk::TensorTilingARM::eLinear);
 }
 
 vk::TensorUsageFlagsARM TensorRequirementsView::usage(vk::TensorTilingARM tiling) const {

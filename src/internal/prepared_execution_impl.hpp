@@ -31,6 +31,9 @@ struct PreparedExecution::Impl {
     struct BoundImage;
 
     struct DescriptorSetState;
+    struct ResourceUse;
+    struct SynchronizationState;
+    struct BarrierBatch;
 
     /***************************************************************************
      * Runtime resource storage
@@ -115,9 +118,8 @@ struct PreparedExecution::Impl {
      * Barrier recording
      **************************************************************************/
 
-    void insertInitialImageLayoutTransitions(vk::CommandBuffer commandBuffer);
-    void insertExecutableBarrier(vk::CommandBuffer commandBuffer, const detail::Executable &producer,
-                                 const detail::Executable &consumer) const;
+    void buildExecutionBarriers();
+    SynchronizationState buildSynchronizationState() const;
 
     /***************************************************************************
      * Recording and submission
@@ -139,6 +141,8 @@ struct PreparedExecution::Impl {
     std::vector<BoundImage> boundImages;
 
     std::vector<DescriptorSetState> descriptorSetStates;
+
+    std::vector<BarrierBatch> executableBarriers;
 };
 
 } // namespace mlsdk::workloadlib
