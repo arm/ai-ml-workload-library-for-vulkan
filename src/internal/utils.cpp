@@ -4,16 +4,35 @@
  */
 
 #include "utils.hpp"
+#include "workload_impl.hpp"
 
 #include <vulkan/vulkan_beta.h>
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
 namespace mlsdk::workloadlib::detail {
+namespace {
+
+vk::DeviceSize checkedDeviceSizeAdd(vk::DeviceSize lhs, vk::DeviceSize rhs, std::string_view description) {
+    if (rhs > std::numeric_limits<vk::DeviceSize>::max() - lhs) {
+        throw std::runtime_error(std::string(description) + " overflow");
+    }
+    return lhs + rhs;
+}
+
+vk::DeviceSize checkedDeviceSizeMultiply(vk::DeviceSize lhs, vk::DeviceSize rhs, std::string_view description) {
+    if (lhs != 0 && rhs > std::numeric_limits<vk::DeviceSize>::max() / lhs) {
+        throw std::runtime_error(std::string(description) + " overflow");
+    }
+    return lhs * rhs;
+}
+
+} // namespace
 
 /*******************************************************************************
  * Workload metadata
@@ -47,7 +66,7 @@ std::string_view resourceKindName(ResourceKind kind) noexcept {
     return "unknown";
 }
 
-vk::DeviceSize elementCount(const std::vector<int64_t> &shape) noexcept {
+vk::DeviceSize elementCount(const std::vector<int64_t> &shape) {
     if (shape.empty()) {
         return 0;
     }
@@ -57,9 +76,33 @@ vk::DeviceSize elementCount(const std::vector<int64_t> &shape) noexcept {
         if (dimension <= 0) {
             return 0;
         }
-        count *= static_cast<vk::DeviceSize>(dimension);
+        count = checkedDeviceSizeMultiply(count, static_cast<vk::DeviceSize>(dimension), "Workload element count");
     }
     return count;
+}
+
+vk::DeviceSize byteSizeFromShapeAndStride(const std::vector<int64_t> &shape, const std::vector<int64_t> &stride,
+                                          vk::DeviceSize elementSize, std::string_view description) {
+    if (stride.empty()) {
+        return checkedDeviceSizeMultiply(elementCount(shape), elementSize, description);
+    }
+    if (stride.size() != shape.size()) {
+        throw std::runtime_error(std::string(description) + " stride rank must match shape rank");
+    }
+
+    vk::DeviceSize size = elementSize;
+    for (std::size_t i = 0; i < shape.size(); ++i) {
+        if (shape[i] <= 0) {
+            throw std::runtime_error(std::string(description) + " shape dimensions must be positive");
+        }
+        if (stride[i] < 0) {
+            throw std::runtime_error(std::string(description) + " strides must not be negative");
+        }
+        const auto dimensionSpan = checkedDeviceSizeMultiply(static_cast<vk::DeviceSize>(shape[i] - 1),
+                                                             static_cast<vk::DeviceSize>(stride[i]), description);
+        size = checkedDeviceSizeAdd(size, dimensionSpan, description);
+    }
+    return size;
 }
 
 vk::DeviceSize storageBufferByteSize(vk::DeviceSize explicitByteSize, vk::Format format,
@@ -85,18 +128,11 @@ vk::DeviceSize storageBufferByteSize(vk::DeviceSize explicitByteSize, vk::Format
                                  std::to_string(static_cast<uint32_t>(format)));
     }
 
-    if (!stride.empty()) {
-        vk::DeviceSize size = elementSize;
-        for (uint32_t i = 0; i < shape.size(); ++i) {
-            if (shape[i] <= 0 || stride[i] < 0) {
-                return 0;
-            }
-            size += static_cast<vk::DeviceSize>(shape[i] - 1) * static_cast<vk::DeviceSize>(stride[i]);
-        }
-        return size;
+    const auto size = byteSizeFromShapeAndStride(shape, stride, elementSize, "Storage buffer byte size");
+    if (size == 0) {
+        throw std::runtime_error("Storage buffer byte size must not be zero");
     }
-
-    return elementCount(shape) * elementSize;
+    return size;
 }
 
 void validateSpecializationInfo(const SpecializationInfo &specializationInfo, std::string_view description) {
@@ -360,6 +396,22 @@ vk::AccessFlags2 imageAccess(ExecutableKind executableKind, vk::DescriptorType d
 /*******************************************************************************
  * Descriptor sets
  *******************************************************************************/
+
+std::vector<std::vector<DescriptorBinding>> splitBindingsBySet(const std::vector<DescriptorBinding> &descBindings,
+                                                               uint32_t maxDescriptorSets) {
+    std::vector<std::vector<DescriptorBinding>> sets;
+    for (const auto &descBinding : descBindings) {
+        if (descBinding.set >= maxDescriptorSets) {
+            throw std::runtime_error("Workload descriptor set " + std::to_string(descBinding.set) +
+                                     " exceeds device maxBoundDescriptorSets " + std::to_string(maxDescriptorSets));
+        }
+        while (sets.size() <= descBinding.set) {
+            sets.emplace_back();
+        }
+        sets[descBinding.set].push_back(descBinding);
+    }
+    return sets;
+}
 
 std::vector<vk::DescriptorSetLayout>
 rawDescriptorSetLayouts(const std::vector<vk::raii::DescriptorSetLayout> &descriptorSetLayouts) {

@@ -18,6 +18,7 @@ set(ML_WORKLOAD_LIB_TEST_SOURCES
     test_alias_execution.hpp
     test_array_view.cpp
     test_expected_results.hpp
+    test_internal_utils.cpp
     test_resource_requirements.hpp
     test_spirv_utils.hpp
     test_vulkan_fixture.hpp

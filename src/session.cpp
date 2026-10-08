@@ -192,16 +192,8 @@ std::vector<vk::raii::DescriptorSetLayout>
 createDescriptorSetLayouts(const std::vector<DescriptorBinding> &descBindings, const Workload &workload,
                            const ContextView &contextView) {
     const auto &workloadState = workloadImpl(workload);
-    const auto descBindingSets = [&descBindings] {
-        std::vector<std::vector<DescriptorBinding>> sets;
-        for (const auto &descBinding : descBindings) {
-            while (sets.size() <= descBinding.set) {
-                sets.emplace_back();
-            }
-            sets[descBinding.set].push_back(descBinding);
-        }
-        return sets;
-    }();
+    const auto maxDescriptorSets = contextView.physicalDevice.get().getProperties().limits.maxBoundDescriptorSets;
+    const auto descBindingSets = detail::splitBindingsBySet(descBindings, maxDescriptorSets);
 
     std::vector<vk::raii::DescriptorSetLayout> descriptorSetLayouts;
     descriptorSetLayouts.reserve(descBindingSets.size());

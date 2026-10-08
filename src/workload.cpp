@@ -348,18 +348,11 @@ vk::DeviceSize ResourceRequirementsView::byteSize() const {
         return 0;
     }
 
-    if (!resource.stride.empty()) {
-        vk::DeviceSize size = elementSize;
-        for (uint32_t i = 0; i < resource.shape.size(); ++i) {
-            if (resource.shape[i] <= 0) {
-                return 0;
-            }
-            size +=
-                static_cast<vk::DeviceSize>(resource.shape[i] - 1) * static_cast<vk::DeviceSize>(resource.stride[i]);
-        }
-        return size;
+    try {
+        return detail::byteSizeFromShapeAndStride(resource.shape, resource.stride, elementSize, "Workload byte size");
+    } catch (const std::runtime_error &) {
+        return 0;
     }
-    return detail::elementCount(resource.shape) * elementSize;
 }
 
 TensorRequirementsView ResourceRequirementsView::asTensor() const {

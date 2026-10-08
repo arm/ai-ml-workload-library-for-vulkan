@@ -13,6 +13,7 @@
 #include <llvm/Support/FileSystem.h>
 
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <sstream>
 
@@ -53,17 +54,39 @@ class HlslCompiler {
     HlslCompiler() = default;
 };
 
+#if !defined(_WIN32)
+bool isUtf8ContinuationByte(unsigned char c) noexcept { return (c & 0xC0U) == 0x80U; }
+
+int utf8ContinuationPayload(const std::string &inputString, std::size_t index) {
+    if (index >= inputString.size() || !isUtf8ContinuationByte(static_cast<unsigned char>(inputString[index]))) {
+        throw std::runtime_error("Invalid UTF-8");
+    }
+    return static_cast<unsigned char>(inputString[index]) & 0x3F;
+}
+#endif
+
 std::wstring stringToWstring(const std::string &inputString) {
+    if (inputString.empty()) {
+        return {};
+    }
+
 #if defined(_WIN32)
+    if (inputString.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        throw std::runtime_error("String is too large to convert to UTF-16");
+    }
+
     const int len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, inputString.data(),
                                         static_cast<int>(inputString.size()), nullptr, 0);
-    if (len < 0) {
+    if (len == 0) {
         throw std::runtime_error("Invalid UTF-8");
     }
 
-    std::wstring wide(len, 0);
-    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, inputString.data(), static_cast<int>(inputString.size()),
-                        wide.data(), len);
+    std::wstring wide(static_cast<std::size_t>(len), 0);
+    const int converted = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, inputString.data(),
+                                              static_cast<int>(inputString.size()), wide.data(), len);
+    if (converted != len) {
+        throw std::runtime_error("Invalid UTF-8");
+    }
     return wide;
 #else
     std::wstring wide;
@@ -76,15 +99,29 @@ std::wstring stringToWstring(const std::string &inputString) {
         if (c < 0x80) {
             codePoint = c;
             i += 1;
-        } else if ((c >> 5) == 0x6) {
-            codePoint = ((c & 0x1F) << 6) | (inputString[i + 1] & 0x3F);
+        } else if ((c & 0xE0U) == 0xC0U) {
+            if (c < 0xC2U) {
+                throw std::runtime_error("Invalid UTF-8");
+            }
+            codePoint = ((c & 0x1F) << 6) | utf8ContinuationPayload(inputString, i + 1);
             i += 2;
-        } else if ((c >> 4) == 0xE) {
-            codePoint = ((c & 0x0F) << 12) | ((inputString[i + 1] & 0x3F) << 6) | (inputString[i + 2] & 0x3F);
+        } else if ((c & 0xF0U) == 0xE0U) {
+            const auto second = utf8ContinuationPayload(inputString, i + 1);
+            if ((c == 0xE0U && second < 0x20) || (c == 0xEDU && second >= 0x20)) {
+                throw std::runtime_error("Invalid UTF-8");
+            }
+            codePoint = ((c & 0x0F) << 12) | (second << 6) | utf8ContinuationPayload(inputString, i + 2);
             i += 3;
-        } else if ((c >> 3) == 0x1E) {
-            codePoint = ((c & 0x07) << 18) | ((inputString[i + 1] & 0x3F) << 12) | ((inputString[i + 2] & 0x3F) << 6) |
-                        (inputString[i + 3] & 0x3F);
+        } else if ((c & 0xF8U) == 0xF0U) {
+            if (c > 0xF4U) {
+                throw std::runtime_error("Invalid UTF-8");
+            }
+            const auto second = utf8ContinuationPayload(inputString, i + 1);
+            if ((c == 0xF0U && second < 0x10) || (c == 0xF4U && second >= 0x10)) {
+                throw std::runtime_error("Invalid UTF-8");
+            }
+            codePoint = ((c & 0x07) << 18) | (second << 12) | (utf8ContinuationPayload(inputString, i + 2) << 6) |
+                        utf8ContinuationPayload(inputString, i + 3);
             i += 4;
         } else {
             throw std::runtime_error("Invalid UTF-8");
@@ -176,8 +213,8 @@ void ensureStaticDxcInitialized() {
 
 std::string dxcOutput(IDxcResult &result, DXC_OUT_KIND outputKind) {
     CComPtr<IDxcBlobUtf8> blob;
-    result.GetOutput(outputKind, IID_PPV_ARGS(&blob), nullptr);
-    if (blob == nullptr || blob->GetStringLength() == 0) {
+    const auto outputResult = result.GetOutput(outputKind, IID_PPV_ARGS(&blob), nullptr);
+    if (FAILED(outputResult) || blob == nullptr || blob->GetStringLength() == 0) {
         return {};
     }
     return {blob->GetStringPointer(), blob->GetStringLength()};
@@ -231,7 +268,10 @@ HlslCompiler::compile(const std::string &source, const std::string &entryPoint, 
     buffer.Encoding = DXC_CP_UTF8;
 
     CComPtr<IDxcIncludeHandler> includeHandler;
-    utils->CreateDefaultIncludeHandler(&includeHandler);
+    result = utils->CreateDefaultIncludeHandler(&includeHandler);
+    if (FAILED(result) || includeHandler == nullptr) {
+        throw std::runtime_error("Failed to create HLSL include handler");
+    }
 
     const auto name = stringToWstring(debugName);
     const auto entry = stringToWstring(entryPoint);
@@ -250,20 +290,33 @@ HlslCompiler::compile(const std::string &source, const std::string &entryPoint, 
     auto defines = parsePreprocessorOptions(preprocessorOptions, defineStorage);
 
     CComPtr<IDxcCompilerArgs> args;
-    utils->BuildArguments(name.c_str(), entry.c_str(), L"cs_6_2", compileArgs.data(),
-                          static_cast<uint32_t>(compileArgs.size()), defines.data(),
-                          static_cast<uint32_t>(defines.size()), &args);
+    result = utils->BuildArguments(
+        name.c_str(), entry.c_str(), L"cs_6_2", compileArgs.data(), static_cast<uint32_t>(compileArgs.size()),
+        defines.empty() ? nullptr : defines.data(), static_cast<uint32_t>(defines.size()), &args);
+    if (FAILED(result) || args == nullptr) {
+        throw std::runtime_error("Failed to build HLSL compiler arguments");
+    }
 
     CComPtr<IDxcResult> compileResult;
-    compiler->Compile(&buffer, args->GetArguments(), args->GetCount(), includeHandler, IID_PPV_ARGS(&compileResult));
+    result = compiler->Compile(&buffer, args->GetArguments(), args->GetCount(), includeHandler,
+                               IID_PPV_ARGS(&compileResult));
+    if (FAILED(result) || compileResult == nullptr) {
+        throw std::runtime_error("Failed to invoke HLSL compiler");
+    }
+
     const auto log = dxcOutput(*compileResult, DXC_OUT_ERRORS);
-    if (!log.empty()) {
-        return {log, {}};
+    HRESULT compileStatus = S_OK;
+    result = compileResult->GetStatus(&compileStatus);
+    if (FAILED(result)) {
+        throw std::runtime_error("Failed to query HLSL compilation status");
+    }
+    if (FAILED(compileStatus)) {
+        return {log.empty() ? "HLSL compilation failed" : log, {}};
     }
 
     CComPtr<IDxcBlob> object;
-    compileResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&object), nullptr);
-    if (object == nullptr) {
+    result = compileResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&object), nullptr);
+    if (FAILED(result) || object == nullptr) {
         return {"HLSL compilation produced no object output", {}};
     }
 
