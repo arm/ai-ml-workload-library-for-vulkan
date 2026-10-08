@@ -45,6 +45,20 @@ struct SessionOptions {
 
     /** @brief Enables graph-pipeline neural statistics using the selected session mode. */
     std::optional<NeuralStatisticsOptions> neuralStatistics;
+
+    /**
+     * @brief Required properties for all graph-session memory allocations.
+     *
+     * When unset, regular allocations require device-local memory and neural
+     * statistics allocations require host-visible, host-coherent memory.
+     */
+    std::optional<vk::MemoryPropertyFlags> requiredSessionMemoryProperties;
+
+    /** @brief Requires host-visible, host-coherent graph-session memory. */
+    void requireHostVisibleSessionMemory() noexcept {
+        requiredSessionMemoryProperties =
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent;
+    }
 };
 
 /*******************************************************************************

@@ -1187,6 +1187,56 @@ TEST_F(VgfSessionExecutionTest, RunTwoSessionsWithSharedCompiledExecution) {
               expectedMaxpool(secondInput, secondInputTensor.shape));
 }
 
+TEST_F(VgfSessionExecutionTest, ExposesGraphDiagnostics) {
+    const auto graphBytes = makeMaxpool16x16To8x8Vgf();
+    auto graphWorkload = Workload::fromVGF(graphBytes.data(), graphBytes.size());
+    auto context = wrappedContext();
+
+    Session graphSession(context, graphWorkload);
+    EXPECT_THROW(graphSession.dataGraphPipelineProperties(0), std::runtime_error);
+    graphSession.configure();
+
+    const auto graphProperties = graphSession.dataGraphPipelineProperties(0);
+    ASSERT_FALSE(graphProperties.empty());
+    const auto propertyData = graphSession.dataGraphPipelineProperty(0, graphProperties.front());
+    EXPECT_EQ(propertyData.property, graphProperties.front());
+    if (propertyData.isText) {
+        ASSERT_FALSE(propertyData.data.empty());
+        EXPECT_EQ(propertyData.data.back(), 0);
+    }
+
+    const auto statisticsProperty = vk::DataGraphPipelinePropertyARM::eNeuralAcceleratorStatisticsInfo;
+    EXPECT_EQ(std::find(graphProperties.begin(), graphProperties.end(), statisticsProperty), graphProperties.end());
+    EXPECT_THROW(graphSession.dataGraphPipelineProperty(0, statisticsProperty), std::runtime_error);
+    EXPECT_THROW(graphSession.dataGraphPipelineProperties(graphWorkload.executableCount()), std::runtime_error);
+
+    const auto sessionMemoryCount = graphSession.dataGraphSessionMemoryCount(0);
+    for (uint32_t memoryIndex = 0; memoryIndex < sessionMemoryCount; ++memoryIndex) {
+        const auto memoryInfo = graphSession.dataGraphSessionMemory(0, memoryIndex);
+        EXPECT_NE(memoryInfo.memory, vk::DeviceMemory{});
+        EXPECT_GT(memoryInfo.size, 0);
+    }
+    EXPECT_THROW(graphSession.dataGraphSessionMemory(0, sessionMemoryCount), std::runtime_error);
+
+    const auto computeBytes = makeAddInt32BuffersVgf();
+    auto computeWorkload = Workload::fromVGF(computeBytes.data(), computeBytes.size());
+    Session computeSession(context, computeWorkload);
+    computeSession.configure();
+    EXPECT_THROW(computeSession.dataGraphPipelineProperties(0), std::runtime_error);
+}
+
+TEST(SessionOptionsTest, RequiresHostVisibleSessionMemory) {
+    SessionOptions options;
+    EXPECT_FALSE(options.requiredSessionMemoryProperties.has_value());
+
+    options.requireHostVisibleSessionMemory();
+
+    const auto requiredProperties =
+        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent;
+    ASSERT_TRUE(options.requiredSessionMemoryProperties.has_value());
+    EXPECT_EQ(*options.requiredSessionMemoryProperties, requiredProperties);
+}
+
 TEST_F(VgfSessionExecutionTest, RunTwoMaxpoolGraphSegments) {
     const auto bytes = makeTwoSegmentMaxpoolVgf();
     auto workload = Workload::fromVGF(bytes.data(), bytes.size());

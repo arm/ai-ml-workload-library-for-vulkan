@@ -296,10 +296,10 @@ vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const M
  * Data graph session memory
  *******************************************************************************/
 
-std::vector<vk::BindDataGraphPipelineSessionMemoryInfoARM>
-allocateDataGraphSessionMemory(const ContextView &contextView,
-                               const vk::raii::DataGraphPipelineSessionARM &graphSession,
-                               std::vector<vk::raii::DeviceMemory> &sessionMemory) {
+std::vector<vk::BindDataGraphPipelineSessionMemoryInfoARM> allocateDataGraphSessionMemory(
+    const ContextView &contextView, const vk::raii::DataGraphPipelineSessionARM &graphSession,
+    std::vector<vk::raii::DeviceMemory> &sessionMemory, std::vector<DataGraphSessionMemoryInfo> &sessionMemoryInfo,
+    const SessionOptions &options) {
     const vk::DataGraphPipelineSessionBindPointRequirementsInfoARM bindPointInfo(*graphSession);
     const auto bindPointRequirements =
         contextView.device.get().getDataGraphPipelineSessionBindPointRequirementsARM(bindPointInfo);
@@ -317,12 +317,22 @@ allocateDataGraphSessionMemory(const ContextView &contextView,
                 continue;
             }
 
-            const auto memoryType =
-                detail::findMemoryType(contextView.physicalDevice.get(), memReqs.memoryRequirements.memoryTypeBits,
-                                       vk::MemoryPropertyFlagBits::eDeviceLocal);
+            const bool neuralStatistics = bindPointRequirement.bindPoint ==
+                                          vk::DataGraphPipelineSessionBindPointARM::eNeuralAcceleratorStatistics;
+            const vk::MemoryPropertyFlags defaultMemoryProperties =
+                options.neuralStatistics.has_value() && neuralStatistics
+                    ? vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+                    : vk::MemoryPropertyFlagBits::eDeviceLocal;
+            const auto memoryProperties = options.requiredSessionMemoryProperties.value_or(defaultMemoryProperties);
+            const auto memoryType = detail::findMemoryType(contextView.physicalDevice.get(),
+                                                           memReqs.memoryRequirements.memoryTypeBits, memoryProperties);
+            const auto selectedMemoryProperties =
+                contextView.physicalDevice.get().getMemoryProperties().memoryTypes[memoryType].propertyFlags;
             const vk::MemoryAllocateInfo allocateInfo(memReqs.memoryRequirements.size, memoryType);
-            sessionMemory.emplace_back(contextView.device.get(), allocateInfo);
-            bindInfos.emplace_back(*graphSession, bindPointRequirement.bindPoint, objectIndex, *sessionMemory.back());
+            const auto &deviceMemory = sessionMemory.emplace_back(contextView.device.get(), allocateInfo);
+            sessionMemoryInfo.push_back({*deviceMemory, memReqs.memoryRequirements.size, bindPointRequirement.bindPoint,
+                                         objectIndex, selectedMemoryProperties, neuralStatistics});
+            bindInfos.emplace_back(*graphSession, bindPointRequirement.bindPoint, objectIndex, *deviceMemory);
         }
     }
     return bindInfos;
@@ -410,10 +420,74 @@ void Session::Impl::configureExecutableState(uint32_t executableIndex) {
     executableState.graphSession = vk::raii::DataGraphPipelineSessionARM(contextView.device.get(), sessionCreateInfo);
 
     auto bindInfos =
-        allocateDataGraphSessionMemory(contextView, executableState.graphSession, executableState.sessionMemory);
+        allocateDataGraphSessionMemory(contextView, executableState.graphSession, executableState.sessionMemory,
+                                       executableState.sessionMemoryInfo, compiledExecutionState->options);
     if (!bindInfos.empty()) {
         contextView.device.get().bindDataGraphPipelineSessionMemoryARM(bindInfos);
     }
+}
+
+const Session::Impl::ExecutableState &Session::Impl::graphExecutableState(uint32_t executableIndex) const {
+    if (!configured) {
+        throw std::runtime_error("Session::configure() must be called before querying graph diagnostics");
+    }
+    if (executableIndex >= executableStates.size() ||
+        workloadImpl(workload).executables.at(executableIndex).type != ExecutableKind::Graph) {
+        throw std::runtime_error("Executable index does not reference a configured graph executable");
+    }
+    return executableStates[executableIndex];
+}
+
+std::vector<vk::DataGraphPipelinePropertyARM>
+Session::Impl::dataGraphPipelineProperties(uint32_t executableIndex) const {
+    const auto &pipeline = graphExecutableState(executableIndex).compiledExecutable.get().pipeline;
+    return contextView.device.get().getDataGraphPipelineAvailablePropertiesARM(vk::DataGraphPipelineInfoARM(*pipeline));
+}
+
+DataGraphPipelinePropertyData
+Session::Impl::dataGraphPipelineProperty(uint32_t executableIndex, vk::DataGraphPipelinePropertyARM property) const {
+    const auto availableProperties = dataGraphPipelineProperties(executableIndex);
+    if (std::find(availableProperties.begin(), availableProperties.end(), property) == availableProperties.end()) {
+        throw std::runtime_error("Requested graph-pipeline property is not available");
+    }
+
+    const auto &pipeline = graphExecutableState(executableIndex).compiledExecutable.get().pipeline;
+    const vk::DataGraphPipelineInfoARM pipelineInfo(*pipeline);
+    vk::DataGraphPipelinePropertyQueryResultARM query(property);
+    auto result = contextView.device.get().getDataGraphPipelinePropertiesARM(&pipelineInfo, 1, &query);
+    if (result != vk::Result::eSuccess) {
+        throw std::runtime_error("Failed to query graph-pipeline property size");
+    }
+
+    DataGraphPipelinePropertyData propertyData{property, query.isText == vk::True, {}};
+    propertyData.data.resize(query.dataSize);
+    if (propertyData.data.empty()) {
+        return propertyData;
+    }
+
+    query.pData = propertyData.data.data();
+    result = contextView.device.get().getDataGraphPipelinePropertiesARM(&pipelineInfo, 1, &query);
+    if (result == vk::Result::eIncomplete) {
+        throw std::runtime_error("Graph-pipeline property data changed size while being queried");
+    }
+    if (result != vk::Result::eSuccess) {
+        throw std::runtime_error("Failed to query graph-pipeline property data");
+    }
+    propertyData.isText = query.isText == vk::True;
+    propertyData.data.resize(query.dataSize);
+    return propertyData;
+}
+
+uint32_t Session::Impl::dataGraphSessionMemoryCount(uint32_t executableIndex) const {
+    return static_cast<uint32_t>(graphExecutableState(executableIndex).sessionMemoryInfo.size());
+}
+
+DataGraphSessionMemoryInfo Session::Impl::dataGraphSessionMemory(uint32_t executableIndex, uint32_t memoryIndex) const {
+    const auto &memoryInfo = graphExecutableState(executableIndex).sessionMemoryInfo;
+    if (memoryIndex >= memoryInfo.size()) {
+        throw std::runtime_error("Graph-session memory index is invalid");
+    }
+    return memoryInfo[memoryIndex];
 }
 
 void Session::Impl::compileOrReuseExecutables() {
@@ -507,6 +581,27 @@ void Session::bindModule(PlaceholderModuleView placeholderModule, ModuleImplemen
 }
 
 void Session::configure() { sessionImpl().configure(); }
+
+/*******************************************************************************
+ * Graph diagnostics
+ *******************************************************************************/
+
+std::vector<vk::DataGraphPipelinePropertyARM> Session::dataGraphPipelineProperties(uint32_t executableIndex) const {
+    return sessionImpl().dataGraphPipelineProperties(executableIndex);
+}
+
+DataGraphPipelinePropertyData Session::dataGraphPipelineProperty(uint32_t executableIndex,
+                                                                 vk::DataGraphPipelinePropertyARM property) const {
+    return sessionImpl().dataGraphPipelineProperty(executableIndex, property);
+}
+
+uint32_t Session::dataGraphSessionMemoryCount(uint32_t executableIndex) const {
+    return sessionImpl().dataGraphSessionMemoryCount(executableIndex);
+}
+
+DataGraphSessionMemoryInfo Session::dataGraphSessionMemory(uint32_t executableIndex, uint32_t memoryIndex) const {
+    return sessionImpl().dataGraphSessionMemory(executableIndex, memoryIndex);
+}
 
 /*******************************************************************************
  * Session factories

@@ -10,9 +10,28 @@
 #include "mlworkloadlib/prepared_execution.hpp"
 #include "mlworkloadlib/workload.hpp"
 
+#include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace mlsdk::workloadlib {
+
+/** @brief Non-owning information about one graph-session memory allocation. */
+struct DataGraphSessionMemoryInfo {
+    vk::DeviceMemory memory = nullptr;
+    vk::DeviceSize size = 0;
+    vk::DataGraphPipelineSessionBindPointARM bindPoint{};
+    uint32_t objectIndex = 0;
+    vk::MemoryPropertyFlags memoryProperties;
+    bool neuralStatistics = false;
+};
+
+/** @brief Raw data returned for one graph-pipeline property. */
+struct DataGraphPipelinePropertyData {
+    vk::DataGraphPipelinePropertyARM property{};
+    bool isText = false;
+    std::vector<uint8_t> data;
+};
 
 /*******************************************************************************
  * Session
@@ -52,6 +71,23 @@ class Session final {
 
     /** @brief Builds or reuses pipelines and layouts, then creates per-Session data graph and command objects. */
     void configure();
+
+    /***************************************************************************
+     * Graph diagnostics
+     **************************************************************************/
+
+    /** @brief Returns the properties advertised by one configured graph pipeline. */
+    std::vector<vk::DataGraphPipelinePropertyARM> dataGraphPipelineProperties(uint32_t executableIndex) const;
+
+    /** @brief Retrieves raw data for one advertised graph-pipeline property. */
+    DataGraphPipelinePropertyData dataGraphPipelineProperty(uint32_t executableIndex,
+                                                            vk::DataGraphPipelinePropertyARM property) const;
+
+    /** @brief Returns the number of owned memory allocations for one graph session. */
+    uint32_t dataGraphSessionMemoryCount(uint32_t executableIndex) const;
+
+    /** @brief Returns a non-owning view of one graph-session memory allocation. */
+    DataGraphSessionMemoryInfo dataGraphSessionMemory(uint32_t executableIndex, uint32_t memoryIndex) const;
 
     /***************************************************************************
      * Factories
