@@ -2,9 +2,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
 # SPDX-License-Identifier: Apache-2.0
 #
-import os
 import pathlib
-import platform
 import shutil
 import sys
 
@@ -20,27 +18,12 @@ except ImportError:
 
 
 ML_WORKLOAD_LIB_DIR = pathlib.Path(__file__).resolve().parent
-SKIP_NATIVE_BUILD_ENV = "ML_WORKLOAD_LIB_SKIP_NATIVE_BUILD"
+sys.path.insert(0, str(ML_WORKLOAD_LIB_DIR / "pip_package"))
 
-
-def packaged_libraries():
-    binaries_dir = ML_WORKLOAD_LIB_DIR / "pip_package" / "mlworkloadlib" / "binaries"
-    system = platform.system()
-    if system == "Windows":
-        return [
-            binaries_dir / "lib" / "mlworkloadlib_static.lib",
-            binaries_dir / "lib" / "mlworkloadlib.lib",
-            binaries_dir / "bin" / "mlworkloadlib.dll",
-        ]
-    if system == "Darwin":
-        return [
-            binaries_dir / "lib" / "libmlworkloadlib.a",
-            binaries_dir / "lib" / "libmlworkloadlib.dylib",
-        ]
-    return [
-        binaries_dir / "lib" / "libmlworkloadlib.a",
-        binaries_dir / "lib" / "libmlworkloadlib.so",
-    ]
+from wheel_build import STAGED_MODE  # noqa: E402
+from wheel_build import copy_staged_payload  # noqa: E402
+from wheel_build import get_staging_dir  # noqa: E402
+from wheel_build import get_wheel_build_mode  # noqa: E402
 
 
 class Build(setuptools_build):
@@ -53,9 +36,9 @@ class BuildPy(build_py):
     def run(self):
         super().run()
 
-        if os.environ.get(SKIP_NATIVE_BUILD_ENV) == "1" or all(
-            library.is_file() for library in packaged_libraries()
-        ):
+        native_install_dir = pathlib.Path(self.build_lib) / "mlworkloadlib" / "binaries"
+        if get_wheel_build_mode() == STAGED_MODE:
+            copy_staged_payload(get_staging_dir(), native_install_dir)
             return
 
         dependency_dir = ML_WORKLOAD_LIB_DIR.parent.parent / "dependencies"
@@ -76,20 +59,20 @@ class BuildPy(build_py):
 
         build_command = self.get_finalized_command("build")
         native_build_dir = pathlib.Path(build_command.build_temp) / "workload_lib"
-        native_install_dir = pathlib.Path(self.build_lib) / "mlworkloadlib" / "binaries"
 
-        build_args = [
-            "--build-dir",
-            str(native_build_dir),
-            "--install-libdir",
-            "lib",
-            "--install",
-            str(native_install_dir),
-            "--build-shared",
-        ]
-        build_args.extend(["--package-version", self.distribution.get_version()])
-
-        result = build_workload_lib(build_args)
+        result = build_workload_lib(
+            [
+                "--build-dir",
+                str(native_build_dir),
+                "--install-libdir",
+                "lib",
+                "--install",
+                str(native_install_dir),
+                "--build-shared",
+                "--package-version",
+                self.distribution.get_version(),
+            ]
+        )
         if result:
             raise RuntimeError(f"Workload Lib native build failed with code {result}")
 

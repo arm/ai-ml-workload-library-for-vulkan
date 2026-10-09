@@ -19,6 +19,7 @@ authors = [
 requires-python = ">=3.10"
 
 [tool.setuptools]
+license-files = ["LICENSES/*.txt"]
 package-dir = { "" = "pip_package" }
 include-package-data = true
 
@@ -38,6 +39,10 @@ target-version = ['py310']
 managed = true
 
 [dependency-groups]
+test = [
+    "pytest==9.0.3",
+    "pytest-xdist==3.8.0",
+]
 tooling = [
     "argcomplete==3.6.2",
     "breathe==4.36.0",

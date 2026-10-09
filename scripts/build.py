@@ -8,6 +8,7 @@ import os
 import pathlib
 import platform
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -75,6 +76,7 @@ class Builder:
         self.install = args.install
 
         self.package_dir = args.package_dir or self.build_dir
+        self.pip_package_dir = args.pip_package_dir
         self.package_tgz = "tgz" in args.package_type
         self.package_zip = "zip" in args.package_type
         self.package_pip = "pip" in args.package_type
@@ -90,9 +92,7 @@ class Builder:
         if self.package_tgz or self.package_zip or self.package_pip:
             self.build_shared = True
 
-        self.pip_install = str(
-            ML_WORKLOAD_LIB_DIR / "pip_package" / "mlworkloadlib" / "binaries"
-        )
+        self.pip_install = str(pathlib.Path(self.build_dir) / "python-wheel-staging")
         if not self.install and self.package_pip:
             self.install = self.pip_install
 
@@ -206,6 +206,8 @@ class Builder:
         subprocess.run(cmake_package_cmd, check=True)
 
     def run(self):
+        if self.package_pip:
+            shutil.rmtree(self.pip_install, ignore_errors=True)
         cmake_setup_cmd = [
             "cmake",
             "-S",
@@ -406,6 +408,16 @@ class Builder:
                 ]
                 subprocess.run(test_cmd, check=True)
 
+                pytest_cmd = [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-n",
+                    str(self.threads),
+                    str(ML_WORKLOAD_LIB_DIR / "pip_package" / "tests"),
+                ]
+                subprocess.run(pytest_cmd, cwd=ML_WORKLOAD_LIB_DIR, check=True)
+
             if self.coverage:
                 coverage_dir = pathlib.Path(self.build_dir, "coverage")
                 coverage_dir.mkdir(parents=True, exist_ok=True)
@@ -470,15 +482,17 @@ class Builder:
                 ] = package_version
                 if package_version:
                     build_env["ML_SDK_PACKAGE_VERSION"] = package_version
-                build_env["ML_WORKLOAD_LIB_SKIP_NATIVE_BUILD"] = "1"
+                build_env["MLSDK_WHEEL_BUILD_MODE"] = "staged"
+                build_env["MLSDK_WHEEL_STAGING_DIR"] = self.pip_install
 
                 result = subprocess.Popen(
                     [
                         sys.executable,
                         "-m",
                         "build",
+                        "--wheel",
                         "--outdir",
-                        str(ML_WORKLOAD_LIB_DIR / "pip_package" / "dist"),
+                        self.pip_package_dir,
                         str(ML_WORKLOAD_LIB_DIR),
                     ],
                     env=build_env,
@@ -664,6 +678,11 @@ def parse_arguments(argv=None):
             "directory."
         ),
         default="",
+    )
+    parser.add_argument(
+        "--pip-package-dir",
+        help="Specify where pip wheels are written. Default: %(default)s",
+        default=str(ML_WORKLOAD_LIB_DIR / "pip_package" / "dist"),
     )
     parser.add_argument(
         "--package-type",

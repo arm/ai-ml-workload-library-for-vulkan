@@ -136,7 +136,7 @@ Sync the locked Python tooling dependencies, then run the unit tests on Linux
 with GCC coverage instrumentation:
 
 ```sh
-uv sync --locked --no-install-project --no-default-groups --group tooling
+uv sync --locked --no-install-project --no-default-groups --group test --group tooling
 uv run --no-sync python scripts/build.py --coverage --build-dir build-coverage
 ```
 
