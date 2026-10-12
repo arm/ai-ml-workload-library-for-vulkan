@@ -11,6 +11,8 @@
 - Added GCC code coverage reporting for native Linux unit-test builds.
 - Added explicit source and staged wheel modes so release wheels reuse validated
   native install trees without rebuilding them or modifying package sources.
+- Fixed HLSL backend linking on Darwin by omitting unsupported GNU archive group
+  linker options.
 
 ### Resource Binding and Execution
 
