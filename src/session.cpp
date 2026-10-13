@@ -11,8 +11,12 @@
 
 #include "mlworkloadlib/session.hpp"
 
+#include <vulkan/vulkan_beta.h>
+
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -22,6 +26,7 @@
 
 namespace mlsdk::workloadlib {
 
+using DataGraphBinaryInput = detail::DataGraphBinaryInput;
 using DescriptorBinding = detail::DescriptorBinding;
 using Executable = detail::Executable;
 using Module = detail::Module;
@@ -297,6 +302,56 @@ vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const M
     return {contextView.device.get(), deferredOperation, pipelineCache, pipelineCreateInfo};
 }
 
+#ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
+vk::raii::Pipeline createDataGraphBinaryPipeline(const Executable &executable,
+                                                 const vk::raii::PipelineLayout &pipelineLayout,
+                                                 const ContextView &contextView, const DataGraphBinaryInput &input,
+                                                 bool enableNeuralStatistics) {
+    const auto properties =
+        contextView.physicalDevice.get()
+            .getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceDataGraphBinariesPropertiesARM>();
+    const auto alignment =
+        properties.get<vk::PhysicalDeviceDataGraphBinariesPropertiesARM>().dataGraphPipelineBinaryDataAlignment;
+    if (alignment == 0 || alignment > std::numeric_limits<std::size_t>::max() || (alignment & (alignment - 1)) != 0) {
+        throw std::runtime_error("Invalid data graph binary alignment reported by the physical device");
+    }
+    if (reinterpret_cast<std::uintptr_t>(input.bytes.data()) % alignment != 0) {
+        throw std::runtime_error("Data graph binary is not aligned for the physical device");
+    }
+
+    if (enableNeuralStatistics && (executable.dataGraphPipelineFlags &
+                                   vk::PipelineCreateFlagBits2::eProtectedAccessOnly) != vk::PipelineCreateFlags2{}) {
+        throw std::runtime_error("Neural statistics cannot be enabled for a protected-access-only data graph pipeline");
+    }
+
+    const bool useApplicationStorage = input.storageMode == DataGraphBinaryStorageMode::ApplicationBacked;
+    vk::DataGraphPipelineBinaryCreateInfoARM binaryInfo(useApplicationStorage, input.bytes.size(), input.bytes.data());
+    vk::DataGraphPipelineIdentifierCreateInfoARM identifierInfo;
+    if (!input.identifier.empty()) {
+        identifierInfo.identifierSize = static_cast<uint32_t>(input.identifier.size());
+        identifierInfo.pIdentifier = input.identifier.data();
+        detail::insertPNextAfter(binaryInfo, identifierInfo);
+    }
+    vk::DataGraphPipelineNeuralStatisticsCreateInfoARM neuralStatisticsInfo(enableNeuralStatistics);
+    if (enableNeuralStatistics) {
+        detail::insertPNextAfter(binaryInfo, neuralStatisticsInfo);
+    }
+
+    const vk::DataGraphPipelineCreateInfoARM pipelineCreateInfo(executable.dataGraphPipelineFlags, *pipelineLayout, 0,
+                                                                nullptr, &binaryInfo);
+    const vk::raii::DeferredOperationKHR deferredOperation(nullptr);
+    vk::raii::Pipeline pipeline(contextView.device.get(), deferredOperation, nullptr, pipelineCreateInfo);
+    const auto creationResult = pipeline.getConstructorSuccessCode();
+    if (creationResult != vk::Result::eSuccess) {
+        throw std::runtime_error("Data graph binary pipeline creation returned " + vk::to_string(creationResult));
+    }
+    if (!*pipeline) {
+        throw std::runtime_error("Data graph binary pipeline creation returned a null pipeline");
+    }
+    return pipeline;
+}
+#endif
+
 /*******************************************************************************
  * Data graph session memory
  *******************************************************************************/
@@ -396,29 +451,37 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
         throw std::runtime_error("Session only supports data graph and compute shader executables");
     }
 
-    // Module resolution
-    auto compiledModule = moduleForExecutable(workload, moduleImplementations, executableIndex);
-    detail::compileModuleToSpirv(compiledModule, executable.type);
-
-    // Shared pipeline state
+    // Pipeline layout
     validateExecutableBindings(workload, executable);
     compiledExecutable.descriptorSetLayouts = createDescriptorSetLayouts(executable.bindings, workload, contextView);
     compiledExecutable.pipelineLayout =
         createPipelineLayout(compiledExecutable.descriptorSetLayouts, executable, contextView);
-    compiledExecutable.shaderModule = createShaderModule(compiledModule, contextView);
-
-    // Executable-specific pipeline state
     const auto &options = compiledExecutionState->options;
+
     if (executable.type == ExecutableKind::Compute) {
+        auto compiledModule = moduleForExecutable(workload, moduleImplementations, executableIndex);
+        detail::compileModuleToSpirv(compiledModule, executable.type);
+        compiledExecutable.shaderModule = createShaderModule(compiledModule, contextView);
         compiledExecutable.pipeline = createComputePipeline(executable, compiledModule, compiledExecutable.shaderModule,
                                                             compiledExecutable.pipelineLayout, contextView,
                                                             options.pipelineCache, options.pipelineRobustness);
-        return;
-    }
+    } else {
+#ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
+        if (dataGraphBinaryInput.has_value()) {
+            compiledExecutable.pipeline =
+                createDataGraphBinaryPipeline(executable, compiledExecutable.pipelineLayout, contextView,
+                                              *dataGraphBinaryInput, options.neuralStatistics.has_value());
+            return;
+        }
+#endif
 
-    compiledExecutable.pipeline = createDataGraphPipeline(
-        executable, compiledModule, compiledExecutable.shaderModule, compiledExecutable.pipelineLayout, workload,
-        contextView, options.pipelineCache, options.neuralStatistics.has_value(), resourceTilings);
+        auto compiledModule = moduleForExecutable(workload, moduleImplementations, executableIndex);
+        detail::compileModuleToSpirv(compiledModule, executable.type);
+        compiledExecutable.shaderModule = createShaderModule(compiledModule, contextView);
+        compiledExecutable.pipeline = createDataGraphPipeline(
+            executable, compiledModule, compiledExecutable.shaderModule, compiledExecutable.pipelineLayout, workload,
+            contextView, options.pipelineCache, options.neuralStatistics.has_value(), resourceTilings);
+    }
 }
 
 /*******************************************************************************
@@ -519,7 +582,7 @@ DataGraphSessionMemoryInfo Session::Impl::dataGraphSessionMemory(uint32_t execut
 
 void Session::Impl::compileOrReuseExecutables() {
     if (compiledExecutionState->compiledState.has_value()) {
-        if (!moduleImplementations.empty()) {
+        if (!moduleImplementations.empty() || dataGraphBinaryInput.has_value()) {
             throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
         }
         detail::validateCompiledTilings(resourceTilings, compiledExecutionState->compiledState->pipelineTilings);
@@ -535,6 +598,7 @@ void Session::Impl::compileOrReuseExecutables() {
     compiledExecutionState->compiledState.emplace(
         detail::CompiledState{detail::fixedPipelineTilings(workload, resourceTilings), std::move(compiledExecutables)});
     moduleImplementations.clear();
+    dataGraphBinaryInput.reset();
 }
 
 void Session::Impl::configure() {
@@ -606,9 +670,81 @@ void Session::bindModule(PlaceholderModuleView placeholderModule, ModuleImplemen
     if (implementation.codeKind == ModuleCodeKind::Missing) {
         throw std::runtime_error("ModuleImplementation must provide executable module code");
     }
+    if (sessionState.dataGraphBinaryInput.has_value()) {
+        throw std::runtime_error("Placeholder modules and data graph binaries cannot both be bound to a Session");
+    }
 
     sessionState.moduleImplementations[moduleIndex] =
         detail::moduleFromImplementation(std::move(implementation), placeholder.name, placeholder.entryPoint);
+}
+
+void Session::bindDataGraphBinary(ArrayView<const std::byte> binary, DataGraphBinaryStorageMode storageMode,
+                                  ArrayView<const uint8_t> pipelineIdentifier) {
+#ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
+    auto &sessionState = sessionImpl();
+    if (sessionState.configured) {
+        throw std::runtime_error("Session::bindDataGraphBinary() must be called before Session::configure()");
+    }
+    if (sessionState.compiledExecutionState->compiledState.has_value()) {
+        throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
+    }
+    const auto &workloadState = workloadImpl(sessionState.workload);
+    if (workloadState.executables.size() != 1 || workloadState.executables.front().type != ExecutableKind::Graph) {
+        throw std::runtime_error("Data graph binary requires one data graph executable");
+    }
+    if (!sessionState.moduleImplementations.empty()) {
+        throw std::runtime_error("Placeholder modules and data graph binaries cannot both be bound to a Session");
+    }
+    const auto &workloadExecutable = workloadState.executables.at(0);
+    if (binary.data() == nullptr || binary.empty()) {
+        throw std::runtime_error("Data graph binary payload must not be empty");
+    }
+    if (storageMode != DataGraphBinaryStorageMode::ImplementationManaged &&
+        storageMode != DataGraphBinaryStorageMode::ApplicationBacked) {
+        throw std::runtime_error("Invalid data graph binary storage mode");
+    }
+    if (pipelineIdentifier.size() > std::numeric_limits<uint32_t>::max() ||
+        (!pipelineIdentifier.empty() && pipelineIdentifier.data() == nullptr)) {
+        throw std::runtime_error("Data graph pipeline identifier is invalid");
+    }
+    if (!workloadExecutable.constantIndexes.empty()) {
+        throw std::runtime_error("Data graph binary executables cannot declare graph constants");
+    }
+    if (!workloadExecutable.specializationInfo.empty()) {
+        throw std::runtime_error("Data graph binary executables cannot declare specialization constants");
+    }
+    constexpr std::size_t headerSize = 16;
+    if (binary.size() < headerSize) {
+        throw std::runtime_error("Data graph binary header is truncated");
+    }
+
+    const auto readLittleEndian = [](const std::byte *bytes, std::size_t count) {
+        std::uint64_t value = 0;
+        for (std::size_t index = 0; index < count; ++index) {
+            value |= static_cast<std::uint64_t>(std::to_integer<uint8_t>(bytes[index])) << (index * 8);
+        }
+        return value;
+    };
+    if (readLittleEndian(binary.data(), 4) != 0x1122DDFFU) {
+        throw std::runtime_error("Data graph binary header has an invalid magic value");
+    }
+    if (readLittleEndian(binary.data() + 8, 8) != binary.size() - headerSize) {
+        throw std::runtime_error("Data graph binary payload size does not match its header");
+    }
+
+    DataGraphBinaryInput input;
+    input.bytes = binary;
+    input.storageMode = storageMode;
+    if (!pipelineIdentifier.empty()) {
+        input.identifier.assign(pipelineIdentifier.begin(), pipelineIdentifier.end());
+    }
+    sessionState.dataGraphBinaryInput = std::move(input);
+#else
+    static_cast<void>(binary);
+    static_cast<void>(storageMode);
+    static_cast<void>(pipelineIdentifier);
+    throw std::runtime_error("Vulkan headers do not support VK_ARM_data_graph_binaries");
+#endif
 }
 
 void Session::validateResourceAccess(const Impl &sessionState, const ResourceView &resource) {

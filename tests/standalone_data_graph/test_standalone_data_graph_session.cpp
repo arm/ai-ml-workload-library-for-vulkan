@@ -10,12 +10,15 @@
 
 #include "mlworkloadlib/context.hpp"
 #include "mlworkloadlib/session.hpp"
+#include "mlworkloadlib_utils/application_context.hpp"
 #include "mlworkloadlib_utils/mapped_device_memory.hpp"
 
 #include <gtest/gtest.h>
+#include <vulkan/vulkan_beta.h>
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -531,3 +534,97 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RejectsRuntimeAllocationForWrong
     EXPECT_THROW((void)context.createBuffer(workload.resource(0)), std::runtime_error);
     EXPECT_THROW((void)context.createImage(workload.resource(0), vk::ImageTiling::eOptimal), std::runtime_error);
 }
+
+/*******************************************************************************
+ * Data graph binary inputs
+ *******************************************************************************/
+
+#ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
+struct NullVulkanContext : utils::ApplicationContext {
+    Context wrap() const { return Context::wrap({instance, physicalDevice, device, 0, queue}); }
+};
+
+constexpr std::array<std::byte, 17> binaryWithValidHeader = {
+    std::byte{0xff}, std::byte{0xdd}, std::byte{0x22}, std::byte{0x11}, std::byte{0},   std::byte{0},
+    std::byte{0},    std::byte{0},    std::byte{1},    std::byte{0},    std::byte{0},   std::byte{0},
+    std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0xaa}};
+constexpr ArrayView<const std::byte> validBinary(binaryWithValidHeader.data(), binaryWithValidHeader.size());
+
+TEST(DataGraphBinary, RejectsComputeWorkload) {
+    const NullVulkanContext vulkan;
+    auto context = vulkan.wrap();
+    ComputeShaderDescription description;
+    description.module.codeKind = ModuleCodeKind::Spirv;
+    description.module.spirv = {0x07230203};
+    auto workload = Workload::fromComputeShader(std::move(description));
+    Session session(context, workload);
+    const std::byte byte{1};
+
+    EXPECT_THROW(session.bindDataGraphBinary({&byte, 1}), std::runtime_error);
+}
+
+TEST(DataGraphBinary, RejectsMalformedHeader) {
+    const NullVulkanContext vulkan;
+    auto context = vulkan.wrap();
+    auto workload = Workload::fromDataGraph(makeMaxpoolDescription());
+    Session session(context, workload);
+
+    const auto expectError = [&](const std::vector<std::byte> &bytes, const char *message) {
+        try {
+            session.bindDataGraphBinary({bytes.data(), bytes.size()});
+            FAIL() << "Data graph binary header was accepted";
+        } catch (const std::runtime_error &error) {
+            EXPECT_STREQ(message, error.what());
+        }
+    };
+
+    std::vector<std::byte> bytes(binaryWithValidHeader.begin(), binaryWithValidHeader.end());
+    bytes.resize(15);
+    expectError(bytes, "Data graph binary header is truncated");
+
+    bytes.assign(binaryWithValidHeader.begin(), binaryWithValidHeader.end());
+    bytes[0] = std::byte{0};
+    expectError(bytes, "Data graph binary header has an invalid magic value");
+
+    bytes.assign(binaryWithValidHeader.begin(), binaryWithValidHeader.end());
+    bytes[8] = std::byte{2};
+    expectError(bytes, "Data graph binary payload size does not match its header");
+}
+
+TEST(DataGraphBinary, BindsStandaloneGraph) {
+    const NullVulkanContext vulkan;
+    auto context = vulkan.wrap();
+    auto workload = Workload::fromDataGraph(DataGraphDescription{});
+    Session session(context, workload);
+    auto bytes = binaryWithValidHeader;
+    bytes[4] = std::byte{1};
+    const std::array<uint8_t, 2> identifier = {0, 0xff};
+
+    EXPECT_EQ(workload.executable(0).module().codeKind(), ModuleCodeKind::Missing);
+    EXPECT_NO_THROW(session.bindDataGraphBinary({bytes.data(), bytes.size()},
+                                                DataGraphBinaryStorageMode::ApplicationBacked,
+                                                {identifier.data(), identifier.size()}));
+}
+
+TEST(DataGraphBinary, RejectsConflictingCompilationInputs) {
+    const NullVulkanContext vulkan;
+    auto context = vulkan.wrap();
+    auto workload = Workload::fromDataGraph(DataGraphDescription{});
+    ASSERT_EQ(workload.placeholderModuleCount(), 1);
+
+    const auto bindModule = [&workload](Session &session) {
+        ModuleImplementation implementation;
+        implementation.codeKind = ModuleCodeKind::Spirv;
+        implementation.spirv = {0x07230203};
+        session.bindModule(workload.placeholderModule(0), std::move(implementation));
+    };
+
+    Session moduleFirst(context, workload);
+    bindModule(moduleFirst);
+    EXPECT_THROW(moduleFirst.bindDataGraphBinary(validBinary), std::runtime_error);
+
+    Session binaryFirst(context, workload);
+    binaryFirst.bindDataGraphBinary(validBinary);
+    EXPECT_THROW(bindModule(binaryFirst), std::runtime_error);
+}
+#endif

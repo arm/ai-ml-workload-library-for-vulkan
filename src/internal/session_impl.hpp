@@ -9,13 +9,26 @@
 #include "context_impl.hpp"
 #include "workload_impl.hpp"
 
+#include "mlworkloadlib/array_view.hpp"
 #include "mlworkloadlib/session.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <vector>
+
+namespace mlsdk::workloadlib::detail {
+
+struct DataGraphBinaryInput {
+    ArrayView<const std::byte> bytes;
+    DataGraphBinaryStorageMode storageMode = DataGraphBinaryStorageMode::ImplementationManaged;
+    std::vector<uint8_t> identifier;
+};
+
+} // namespace mlsdk::workloadlib::detail
 
 namespace mlsdk::workloadlib {
 
@@ -24,6 +37,7 @@ namespace mlsdk::workloadlib {
  *******************************************************************************/
 
 struct Session::Impl {
+    using DataGraphBinaryInput = detail::DataGraphBinaryInput;
     using Module = detail::Module;
 
     /***************************************************************************
@@ -81,6 +95,7 @@ struct Session::Impl {
     std::vector<detail::ResourceTiling> resourceTilings;
 
     std::map<uint32_t, Module> moduleImplementations;
+    std::optional<DataGraphBinaryInput> dataGraphBinaryInput;
 
     std::vector<ExecutableState> executableStates;
 

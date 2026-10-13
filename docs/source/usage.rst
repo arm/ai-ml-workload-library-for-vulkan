@@ -15,11 +15,16 @@ A workload is executed through the following sequence:
 1. Construct a ``Workload``.
 2. Create a runtime-owned ``Context``, or wrap the application's Vulkan® instance,
    physical device, device, queue family, and queue.
-3. Create a ``Session``, supply any required compilation inputs, then call
-   ``Session::configure()``.
+
+3. Create a ``Session``, bind any needed placeholder module or data-graph
+   binary, then call ``Session::configure()``.
 
    - For a placeholder module, call
      ``Session::bindModule(workload.placeholderModule(index), implementation)``.
+   - For a standalone data graph backed by a binary, call
+     ``Session::bindDataGraphBinary(binary)``.
+
+   These compilation inputs are alternatives; a Session cannot bind both.
 
 4. Create a ``BindingSet`` and bind each public resource using caller-owned or
    runtime-owned allocations.
@@ -77,8 +82,8 @@ directly:
    :end-before: // [compute-description-end]
 
 Standalone data-graph workloads use the same resource model and add graph
-pipeline metadata. Sample 5 omits the module implementation so it can be
-supplied to a session later:
+pipeline metadata. Sample 5 leaves its module implementation unspecified so
+the Session can bind a module or binary later:
 
 .. literalinclude:: ../sources/samples/5_create_standalone_data_graph.cpp
    :language: cpp
@@ -219,13 +224,15 @@ name, and kind identify the executable, together with an
 dispatch. This supports timestamps and debug labels without transferring
 ownership of their Vulkan® objects to the library.
 
-Pipeline diagnostics
---------------------
+Pipeline options
+----------------
 
-``SessionOptions`` accepts optional compute-pipeline robustness and neural
-statistics settings. The application must enable the corresponding Vulkan®
-extensions and device features before requesting them. Neural statistics
-settings are applied during graph pipeline and graph session creation.
+``SessionOptions`` accepts a pipeline cache and optional compute-pipeline
+robustness and neural statistics settings. The application must enable the
+corresponding Vulkan® extensions and device features before requesting them.
+Neural statistics settings are applied during graph pipeline and graph session
+creation.
+The pipeline cache is not used for binary-backed pipeline creation.
 
 Ownership and lifetimes
 -----------------------
@@ -247,5 +254,15 @@ Ownership and lifetimes
 - VGF memory passed to ``Workload::fromVGF(data, size)`` must remain valid for
   the workload lifetime. The same applies to caller-owned constant payloads in
   a standalone data-graph description.
+- The library borrows data-graph binary bytes when they are bound to a
+  ``Session``. The pointer must meet the device's
+  ``dataGraphPipelineBinaryDataAlignment`` requirement. With the default
+  ``DataGraphBinaryStorageMode::ImplementationManaged`` mode, keep the bytes
+  valid until ``Session::configure()`` returns. If pipeline creation fails and
+  is retried, keep them alive or bind a replacement binary before retrying. The optional
+  identifier is copied when bound.
+- With ``DataGraphBinaryStorageMode::ApplicationBacked``, Vulkan® may use the
+  supplied bytes directly. Keep them accessible and unchanged until every
+  pipeline created from them is destroyed, including compiled state shared by Sessions.
 - ``Session::prepare()`` snapshots a binding set. Later changes to that binding
   set do not change the prepared execution.

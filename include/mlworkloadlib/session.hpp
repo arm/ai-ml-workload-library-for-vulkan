@@ -5,11 +5,13 @@
 
 #pragma once
 
+#include "mlworkloadlib/array_view.hpp"
 #include "mlworkloadlib/binding_set.hpp"
 #include "mlworkloadlib/compiled_execution.hpp"
 #include "mlworkloadlib/prepared_execution.hpp"
 #include "mlworkloadlib/workload.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -31,6 +33,16 @@ struct DataGraphPipelinePropertyData {
     vk::DataGraphPipelinePropertyARM property{};
     bool isText = false;
     std::vector<uint8_t> data;
+};
+
+/*******************************************************************************
+ * Data graph binary storage
+ *******************************************************************************/
+
+/** @brief Storage used after pipeline creation; bytes are caller-supplied in both modes. */
+enum class DataGraphBinaryStorageMode {
+    ImplementationManaged,
+    ApplicationBacked,
 };
 
 /*******************************************************************************
@@ -68,6 +80,11 @@ class Session final {
 
     /** @brief Supplies or replaces code for a placeholder module before configure(). */
     void bindModule(PlaceholderModuleView placeholderModule, ModuleImplementation implementation);
+
+    /** @brief Supplies or replaces borrowed binary bytes for a standalone data graph before configure(). */
+    void bindDataGraphBinary(ArrayView<const std::byte> binary,
+                             DataGraphBinaryStorageMode storageMode = DataGraphBinaryStorageMode::ImplementationManaged,
+                             ArrayView<const uint8_t> pipelineIdentifier = {});
 
     /** @brief Chooses this Session's public tensor tiling before configure(). */
     void setTensorTiling(ResourceView resource, vk::TensorTilingARM tiling);
