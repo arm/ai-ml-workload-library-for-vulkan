@@ -5,18 +5,19 @@
 
 #pragma once
 
+#include "mlworkloadlib/context.hpp"
+
 #include <vulkan/vulkan_raii.hpp>
 
 #include <cstdint>
 #include <limits>
-#include <string_view>
 
 namespace mlsdk::workloadlib::utils {
 
 // Caller-owned Vulkan objects suitable for Context::wrap().
 class ApplicationContext {
   public:
-    explicit ApplicationContext(std::string_view applicationName = "mlworkloadlib-sample");
+    explicit ApplicationContext(const RuntimeContextDeviceRequirements &requirements);
     ~ApplicationContext() = default;
 
     ApplicationContext(const ApplicationContext &) = delete;
@@ -31,10 +32,8 @@ class ApplicationContext {
     uint32_t vulkanQueueFamilyIndex() const noexcept;
 
   protected:
-    struct DeferredInitialization {};
-
-    explicit ApplicationContext(DeferredInitialization) {}
-    bool initialize(std::string_view applicationName);
+    ApplicationContext() = default;
+    bool initialize(const RuntimeContextDeviceRequirements &requirements = {});
 
     vk::raii::Context raiiContext;
     vk::raii::Instance instance{nullptr};

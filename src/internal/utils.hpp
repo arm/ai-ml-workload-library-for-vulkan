@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "mlworkloadlib/context.hpp"
 #include "mlworkloadlib/workload_types.hpp"
 
 #include <vulkan/vulkan_raii.hpp>
@@ -40,15 +41,17 @@ void validateSpecializationInfo(const SpecializationInfo &specializationInfo, st
 vk::raii::Instance createVulkanInstance(vk::raii::Context &context, std::string_view applicationName);
 
 /*******************************************************************************
- * Extension support
+ * Extension and capability support
  *******************************************************************************/
 
+bool hasCapabilities(RuntimeDeviceCapability selected, RuntimeDeviceCapability required) noexcept;
 bool hasExtension(const std::vector<vk::ExtensionProperties> &extensions, std::string_view name);
 bool hasExtension(const std::vector<const char *> &extensions, std::string_view name);
 bool hasExtensions(const std::vector<vk::ExtensionProperties> &availableExtensions,
                    const std::vector<const char *> &requiredExtensions);
 void appendExtension(std::vector<const char *> &extensions, const char *name);
-std::vector<const char *> requiredWorkloadDeviceExtensions(const std::vector<const char *> &additionalExtensions = {});
+std::vector<const char *> requiredWorkloadDeviceExtensions(const RuntimeContextDeviceRequirements &requirements);
+vk::QueueFlags requiredWorkloadQueueFlags(const RuntimeContextDeviceRequirements &requirements);
 
 /*******************************************************************************
  * Vulkan structure chains
@@ -59,6 +62,11 @@ template <typename Current, typename Next> void insertPNextAfter(Current &curren
     current.pNext = &next;
 }
 
+template <typename Next> void prependPNext(void *&head, Next &next) noexcept {
+    next.pNext = head;
+    head = &next;
+}
+
 /*******************************************************************************
  * Device configuration
  *******************************************************************************/
@@ -66,7 +74,8 @@ template <typename Current, typename Next> void insertPNextAfter(Current &curren
 class RuntimeDeviceConfiguration {
   public:
     RuntimeDeviceConfiguration(const std::vector<vk::ExtensionProperties> &availableExtensions,
-                               std::vector<const char *> deviceExtensions, void *deviceFeaturePNext = nullptr);
+                               std::vector<const char *> deviceExtensions,
+                               const RuntimeContextDeviceRequirements &requirements);
     RuntimeDeviceConfiguration(const RuntimeDeviceConfiguration &) = delete;
     RuntimeDeviceConfiguration &operator=(const RuntimeDeviceConfiguration &) = delete;
     RuntimeDeviceConfiguration(RuntimeDeviceConfiguration &&) = delete;
@@ -93,7 +102,7 @@ class RuntimeDeviceConfiguration {
  * Device resources
  *******************************************************************************/
 
-std::optional<uint32_t> findQueueFamilyIndex(const vk::raii::PhysicalDevice &physicalDevice,
+std::optional<uint32_t> findQueueFamilyIndex(const std::vector<vk::QueueFamilyProperties> &queueFamilies,
                                              vk::QueueFlags requiredFlags);
 uint32_t findMemoryType(const vk::raii::PhysicalDevice &physicalDevice, uint32_t memoryTypeBits,
                         vk::MemoryPropertyFlags requiredFlags);

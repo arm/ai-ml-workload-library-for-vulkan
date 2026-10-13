@@ -85,4 +85,91 @@ TEST(InternalUtils, RejectsDescriptorSetBeyondDeviceLimit) {
     EXPECT_THROW((void)splitBindingsBySet(bindings, 2), std::runtime_error);
 }
 
+TEST(InternalUtils, PreservesDefaultRuntimeDeviceRequirements) {
+    const RuntimeContextDeviceRequirements requirements;
+    const auto extensions = requiredWorkloadDeviceExtensions(requirements);
+    EXPECT_TRUE(hasExtension(extensions, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME));
+    EXPECT_TRUE(hasExtension(extensions, VK_KHR_MAINTENANCE_5_EXTENSION_NAME));
+    EXPECT_TRUE(hasExtension(extensions, VK_ARM_DATA_GRAPH_EXTENSION_NAME));
+    EXPECT_TRUE(hasExtension(extensions, VK_ARM_TENSORS_EXTENSION_NAME));
+    EXPECT_EQ(requiredWorkloadQueueFlags(requirements), vk::QueueFlagBits::eCompute | vk::QueueFlagBits::eDataGraphARM);
+
+    const RuntimeDeviceConfiguration configuration({}, extensions, requirements);
+    EXPECT_TRUE(configuration.features().shaderInt16);
+    EXPECT_TRUE(configuration.features().shaderInt64);
+    const auto *graphFeatures =
+        static_cast<const vk::PhysicalDeviceDataGraphFeaturesARM *>(configuration.featureChain());
+    EXPECT_TRUE(graphFeatures->dataGraph);
+    EXPECT_TRUE(graphFeatures->dataGraphShaderModule);
+    EXPECT_TRUE(graphFeatures->dataGraphSpecializationConstants);
+    const auto *tensorFeatures = static_cast<const vk::PhysicalDeviceTensorFeaturesARM *>(graphFeatures->pNext);
+    EXPECT_TRUE(tensorFeatures->tensors);
+}
+
+TEST(InternalUtils, SelectsComputeOnlyRuntimeDeviceCapability) {
+    RuntimeContextDeviceRequirements requirements;
+    requirements.capabilities = RuntimeDeviceCapability::Compute;
+
+    const auto extensions = requiredWorkloadDeviceExtensions(requirements);
+    EXPECT_FALSE(hasExtension(extensions, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME));
+    EXPECT_FALSE(hasExtension(extensions, VK_KHR_MAINTENANCE_5_EXTENSION_NAME));
+    EXPECT_FALSE(hasExtension(extensions, VK_ARM_DATA_GRAPH_EXTENSION_NAME));
+    EXPECT_FALSE(hasExtension(extensions, VK_ARM_TENSORS_EXTENSION_NAME));
+    EXPECT_EQ(requiredWorkloadQueueFlags(requirements), vk::QueueFlagBits::eCompute);
+
+    const RuntimeDeviceConfiguration configuration({}, extensions, requirements);
+    EXPECT_TRUE(configuration.features().shaderInt16);
+    const auto *vulkan13Features =
+        static_cast<const vk::PhysicalDeviceVulkan13Features *>(configuration.featureChain());
+    EXPECT_EQ(vulkan13Features->sType, vk::StructureType::ePhysicalDeviceVulkan13Features);
+    EXPECT_TRUE(vulkan13Features->synchronization2);
+}
+
+TEST(InternalUtils, SelectsDataGraphOnlyRuntimeDeviceCapability) {
+    RuntimeContextDeviceRequirements requirements;
+    requirements.capabilities = RuntimeDeviceCapability::DataGraph;
+
+    const auto extensions = requiredWorkloadDeviceExtensions(requirements);
+    EXPECT_TRUE(hasExtension(extensions, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME));
+    EXPECT_TRUE(hasExtension(extensions, VK_KHR_MAINTENANCE_5_EXTENSION_NAME));
+    EXPECT_TRUE(hasExtension(extensions, VK_ARM_DATA_GRAPH_EXTENSION_NAME));
+    EXPECT_FALSE(hasExtension(extensions, VK_ARM_TENSORS_EXTENSION_NAME));
+    EXPECT_EQ(requiredWorkloadQueueFlags(requirements), vk::QueueFlagBits::eDataGraphARM);
+
+    const RuntimeDeviceConfiguration configuration({}, extensions, requirements);
+    const auto *graphFeatures =
+        static_cast<const vk::PhysicalDeviceDataGraphFeaturesARM *>(configuration.featureChain());
+    EXPECT_TRUE(graphFeatures->dataGraph);
+    EXPECT_FALSE(graphFeatures->dataGraphShaderModule);
+    EXPECT_FALSE(graphFeatures->dataGraphSpecializationConstants);
+    EXPECT_FALSE(configuration.features().shaderInt16);
+}
+
+TEST(InternalUtils, ShaderModulesIncludeDataGraphCapability) {
+    RuntimeContextDeviceRequirements requirements;
+    requirements.capabilities = RuntimeDeviceCapability::DataGraphShaderModules;
+    const auto extensions = requiredWorkloadDeviceExtensions(requirements);
+    EXPECT_TRUE(hasExtension(extensions, VK_ARM_DATA_GRAPH_EXTENSION_NAME));
+    EXPECT_EQ(requiredWorkloadQueueFlags(requirements), vk::QueueFlagBits::eDataGraphARM);
+
+    const RuntimeDeviceConfiguration configuration({}, extensions, requirements);
+    const auto *graphFeatures =
+        static_cast<const vk::PhysicalDeviceDataGraphFeaturesARM *>(configuration.featureChain());
+    EXPECT_TRUE(graphFeatures->dataGraph);
+    EXPECT_TRUE(graphFeatures->dataGraphShaderModule);
+    EXPECT_TRUE(configuration.features().shaderInt16);
+}
+
+TEST(InternalUtils, RejectsInvalidRuntimeDeviceCapabilities) {
+    RuntimeContextDeviceRequirements requirements;
+    requirements.capabilities = RuntimeDeviceCapability{};
+    EXPECT_THROW((void)requiredWorkloadQueueFlags(requirements), std::runtime_error);
+
+    requirements.capabilities = static_cast<RuntimeDeviceCapability>(0x09);
+    EXPECT_THROW((void)requiredWorkloadQueueFlags(requirements), std::runtime_error);
+
+    requirements.capabilities = static_cast<RuntimeDeviceCapability>(0x10);
+    EXPECT_THROW((void)requiredWorkloadQueueFlags(requirements), std::runtime_error);
+}
+
 } // namespace

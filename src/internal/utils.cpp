@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -184,8 +185,20 @@ vk::raii::Instance createVulkanInstance(vk::raii::Context &context, std::string_
 }
 
 /*******************************************************************************
- * Extension support
+ * Extension and capability support
  *******************************************************************************/
+
+namespace {
+
+constexpr uint32_t toUnderlying(RuntimeDeviceCapability capability) noexcept {
+    return static_cast<uint32_t>(capability);
+}
+
+} // namespace
+
+bool hasCapabilities(RuntimeDeviceCapability selected, RuntimeDeviceCapability required) noexcept {
+    return (toUnderlying(selected) & toUnderlying(required)) == toUnderlying(required);
+}
 
 bool hasExtension(const std::vector<vk::ExtensionProperties> &extensions, std::string_view name) {
     return std::any_of(extensions.begin(), extensions.end(), [name](const auto &extension) {
@@ -215,14 +228,47 @@ void appendExtension(std::vector<const char *> &extensions, const char *name) {
     }
 }
 
-std::vector<const char *> requiredWorkloadDeviceExtensions(const std::vector<const char *> &additionalExtensions) {
-    std::vector<const char *> extensions = {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-                                            VK_KHR_MAINTENANCE_5_EXTENSION_NAME, VK_ARM_DATA_GRAPH_EXTENSION_NAME,
-                                            VK_ARM_TENSORS_EXTENSION_NAME};
-    for (const auto *extension : additionalExtensions) {
+std::vector<const char *> requiredWorkloadDeviceExtensions(const RuntimeContextDeviceRequirements &requirements) {
+    std::vector<const char *> extensions;
+    if (hasCapabilities(requirements.capabilities, RuntimeDeviceCapability::DataGraph)) {
+        extensions = {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
+                      VK_ARM_DATA_GRAPH_EXTENSION_NAME};
+    }
+    if (hasCapabilities(requirements.capabilities, RuntimeDeviceCapability::Tensors)) {
+        extensions.push_back(VK_ARM_TENSORS_EXTENSION_NAME);
+    }
+    for (const auto *extension : requirements.requiredDeviceExtensions) {
         appendExtension(extensions, extension);
     }
     return extensions;
+}
+
+vk::QueueFlags requiredWorkloadQueueFlags(const RuntimeContextDeviceRequirements &requirements) {
+    const auto selected = requirements.capabilities;
+    constexpr auto known = RuntimeDeviceCapability::Compute | RuntimeDeviceCapability::DataGraphShaderModules |
+                           RuntimeDeviceCapability::Tensors;
+    const uint32_t shaderModuleBit = toUnderlying(RuntimeDeviceCapability::DataGraphShaderModules) &
+                                     ~toUnderlying(RuntimeDeviceCapability::DataGraph);
+    if ((toUnderlying(selected) & ~toUnderlying(known)) != 0) {
+        throw std::runtime_error("Unknown runtime device capability");
+    }
+    if ((toUnderlying(selected) & shaderModuleBit) != 0 &&
+        !hasCapabilities(selected, RuntimeDeviceCapability::DataGraph)) {
+        throw std::runtime_error("Data graph shader modules require data graph support");
+    }
+    if (!hasCapabilities(selected, RuntimeDeviceCapability::Compute) &&
+        !hasCapabilities(selected, RuntimeDeviceCapability::DataGraph)) {
+        throw std::runtime_error("A runtime-owned context requires compute or data graph support");
+    }
+
+    vk::QueueFlags flags;
+    if (hasCapabilities(selected, RuntimeDeviceCapability::Compute)) {
+        flags |= vk::QueueFlagBits::eCompute;
+    }
+    if (hasCapabilities(selected, RuntimeDeviceCapability::DataGraph)) {
+        flags |= vk::QueueFlagBits::eDataGraphARM;
+    }
+    return flags;
 }
 
 /*******************************************************************************
@@ -231,38 +277,51 @@ std::vector<const char *> requiredWorkloadDeviceExtensions(const std::vector<con
 
 RuntimeDeviceConfiguration::RuntimeDeviceConfiguration(const std::vector<vk::ExtensionProperties> &availableExtensions,
                                                        std::vector<const char *> deviceExtensions,
-                                                       void *deviceFeaturePNext)
-    : deviceExtensions_(std::move(deviceExtensions)), featureChain_(&dataGraphFeatures_) {
-    deviceFeatures_.shaderInt16 = true;
-    deviceFeatures_.shaderInt64 = true;
-
-    vulkan12Features_.storageBuffer8BitAccess = true;
-    vulkan12Features_.shaderInt8 = true;
-    vulkan12Features_.shaderFloat16 = true;
-    vulkan12Features_.vulkanMemoryModel = true;
-    vulkan12Features_.pNext = deviceFeaturePNext;
+                                                       const RuntimeContextDeviceRequirements &requirements)
+    : deviceExtensions_(std::move(deviceExtensions)), featureChain_(&vulkan13Features_) {
+    const auto capabilities = requirements.capabilities;
+    vulkan12Features_.pNext = requirements.deviceFeaturePNext;
 
     vulkan13Features_.synchronization2 = true;
-    vulkan13Features_.pipelineCreationCacheControl = true;
     vulkan13Features_.pNext = &vulkan12Features_;
 
-    maintenance5Features_.maintenance5 = true;
-    maintenance5Features_.pNext = &vulkan13Features_;
+    if (hasCapabilities(capabilities, RuntimeDeviceCapability::Compute) ||
+        hasCapabilities(capabilities, RuntimeDeviceCapability::DataGraphShaderModules)) {
+        deviceFeatures_.shaderInt16 = true;
+        deviceFeatures_.shaderInt64 = true;
+        vulkan12Features_.storageBuffer8BitAccess = true;
+        vulkan12Features_.shaderInt8 = true;
+        vulkan12Features_.shaderFloat16 = true;
+        vulkan12Features_.vulkanMemoryModel = true;
+        vulkan13Features_.pipelineCreationCacheControl = true;
+    }
 
-    tensorFeatures_.tensors = true;
-    tensorFeatures_.shaderTensorAccess = true;
-    tensorFeatures_.tensorNonPacked = true;
-    tensorFeatures_.pNext = &maintenance5Features_;
+    if (hasCapabilities(capabilities, RuntimeDeviceCapability::DataGraph)) {
+        maintenance5Features_.maintenance5 = true;
+        prependPNext(featureChain_, maintenance5Features_);
+    }
 
-    dataGraphFeatures_.dataGraph = true;
-    dataGraphFeatures_.dataGraphShaderModule = true;
-    dataGraphFeatures_.dataGraphSpecializationConstants = true;
-    dataGraphFeatures_.pNext = &tensorFeatures_;
+    if (hasCapabilities(capabilities, RuntimeDeviceCapability::Tensors)) {
+        tensorFeatures_.tensors = true;
+        tensorFeatures_.shaderTensorAccess = true;
+        tensorFeatures_.tensorNonPacked = true;
+        prependPNext(featureChain_, tensorFeatures_);
+    }
 
-    if (hasExtension(availableExtensions, VK_EXT_SHADER_REPLICATED_COMPOSITES_EXTENSION_NAME)) {
+    if (hasCapabilities(capabilities, RuntimeDeviceCapability::DataGraph)) {
+        dataGraphFeatures_.dataGraph = true;
+        if (hasCapabilities(capabilities, RuntimeDeviceCapability::DataGraphShaderModules)) {
+            dataGraphFeatures_.dataGraphShaderModule = true;
+            dataGraphFeatures_.dataGraphSpecializationConstants = true;
+        }
+        prependPNext(featureChain_, dataGraphFeatures_);
+    }
+
+    if ((hasCapabilities(capabilities, RuntimeDeviceCapability::Compute) ||
+         hasCapabilities(capabilities, RuntimeDeviceCapability::DataGraphShaderModules)) &&
+        hasExtension(availableExtensions, VK_EXT_SHADER_REPLICATED_COMPOSITES_EXTENSION_NAME)) {
         replicatedCompositesFeatures_.shaderReplicatedComposites = true;
-        replicatedCompositesFeatures_.pNext = featureChain_;
-        featureChain_ = &replicatedCompositesFeatures_;
+        prependPNext(featureChain_, replicatedCompositesFeatures_);
         appendExtension(deviceExtensions_, VK_EXT_SHADER_REPLICATED_COMPOSITES_EXTENSION_NAME);
     }
     // Enable extension if available, as it is required for some platforms (e.g. MoltenVK on Darwin).
@@ -281,11 +340,10 @@ const void *RuntimeDeviceConfiguration::featureChain() const noexcept { return f
  * Device resources
  *******************************************************************************/
 
-std::optional<uint32_t> findQueueFamilyIndex(const vk::raii::PhysicalDevice &physicalDevice,
+std::optional<uint32_t> findQueueFamilyIndex(const std::vector<vk::QueueFamilyProperties> &queueFamilies,
                                              vk::QueueFlags requiredFlags) {
-    const auto queueFamilies = physicalDevice.getQueueFamilyProperties();
     for (uint32_t i = 0; i < static_cast<uint32_t>(queueFamilies.size()); ++i) {
-        if ((queueFamilies[i].queueFlags & requiredFlags) == requiredFlags) {
+        if (queueFamilies[i].queueCount > 0 && (queueFamilies[i].queueFlags & requiredFlags) == requiredFlags) {
             return i;
         }
     }

@@ -45,10 +45,10 @@ void recordAndSubmitCommands(const vk::raii::Device &device, const vk::raii::Que
 
 class RuntimeSessionExecutionTest : public ::testing::Test, protected utils::ApplicationContext {
   protected:
-    RuntimeSessionExecutionTest() : utils::ApplicationContext(utils::ApplicationContext::DeferredInitialization{}) {}
+    RuntimeSessionExecutionTest() = default;
 
     void SetUp() override {
-        if (!initialize("mlworkloadlib-test")) {
+        if (!initialize()) {
             GTEST_SKIP() << "No Vulkan device with required data graph extensions and compute queue support";
         }
     }

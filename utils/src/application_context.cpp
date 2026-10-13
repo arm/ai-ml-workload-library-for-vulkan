@@ -9,51 +9,58 @@
 
 #include <vulkan/vulkan_beta.h>
 
-#include <limits>
 #include <stdexcept>
-#include <string_view>
+#include <utility>
 
 namespace mlsdk::workloadlib::utils {
 
-ApplicationContext::ApplicationContext(std::string_view applicationName) {
-    if (!initialize(applicationName)) {
+ApplicationContext::ApplicationContext(const RuntimeContextDeviceRequirements &requirements) {
+    if (!initialize(requirements)) {
         throw std::runtime_error("No Vulkan device supports the application context requirements");
     }
 }
 
-bool ApplicationContext::initialize(std::string_view applicationName) {
-    instance = detail::createVulkanInstance(raiiContext, applicationName);
+bool ApplicationContext::initialize(const RuntimeContextDeviceRequirements &requirements) {
+    instance = detail::createVulkanInstance(raiiContext, "mlworkloadlib");
 
-    const auto requiredDeviceExtensions = detail::requiredWorkloadDeviceExtensions();
+    const auto requiredDeviceExtensions = detail::requiredWorkloadDeviceExtensions(requirements);
+    const auto requiredQueueFlags = detail::requiredWorkloadQueueFlags(requirements);
     for (auto &candidate : vk::raii::PhysicalDevices(instance)) {
         const auto extensions = candidate.enumerateDeviceExtensionProperties();
         if (!detail::hasExtensions(extensions, requiredDeviceExtensions)) {
             continue;
         }
-        const auto requiredQueueFlags = vk::QueueFlagBits::eCompute | vk::QueueFlagBits::eDataGraphARM;
-        const auto candidateQueueFamilyIndex = detail::findQueueFamilyIndex(candidate, requiredQueueFlags);
-        if (candidateQueueFamilyIndex.has_value()) {
+        const auto candidateQueueFamilyIndex =
+            detail::findQueueFamilyIndex(candidate.getQueueFamilyProperties(), requiredQueueFlags);
+        if (!candidateQueueFamilyIndex.has_value()) {
+            continue;
+        }
+
+        const float queuePriority = 1.0F;
+        const vk::DeviceQueueCreateInfo queueCreateInfo({}, *candidateQueueFamilyIndex, 1, &queuePriority);
+        try {
+            const detail::RuntimeDeviceConfiguration deviceConfiguration(extensions, requiredDeviceExtensions,
+                                                                         requirements);
+            auto candidateDevice = vk::raii::Device(candidate, {vk::DeviceCreateFlags(),
+                                                                queueCreateInfo,
+                                                                {},
+                                                                deviceConfiguration.extensions(),
+                                                                &deviceConfiguration.features(),
+                                                                deviceConfiguration.featureChain()});
+            auto candidateQueue = candidateDevice.getQueue(*candidateQueueFamilyIndex, 0);
             physicalDevice = candidate;
+            device = std::move(candidateDevice);
+            queue = std::move(candidateQueue);
             queueFamilyIndex = *candidateQueueFamilyIndex;
-            break;
+            return true;
+        } catch (const vk::SystemError &error) {
+            if (error.code() != vk::make_error_code(vk::Result::eErrorFeatureNotPresent) &&
+                error.code() != vk::make_error_code(vk::Result::eErrorExtensionNotPresent)) {
+                throw;
+            }
         }
     }
-    if (queueFamilyIndex == std::numeric_limits<uint32_t>::max()) {
-        return false;
-    }
-
-    const float queuePriority = 1.0F;
-    const vk::DeviceQueueCreateInfo queueCreateInfo({}, queueFamilyIndex, 1, &queuePriority);
-    const auto extensions = physicalDevice.enumerateDeviceExtensionProperties();
-    const detail::RuntimeDeviceConfiguration deviceConfiguration(extensions, requiredDeviceExtensions);
-    device = vk::raii::Device(physicalDevice, {vk::DeviceCreateFlags(),
-                                               queueCreateInfo,
-                                               {},
-                                               deviceConfiguration.extensions(),
-                                               &deviceConfiguration.features(),
-                                               deviceConfiguration.featureChain()});
-    queue = device.getQueue(queueFamilyIndex, 0);
-    return true;
+    return false;
 }
 
 const vk::raii::Instance &ApplicationContext::vulkanInstance() const noexcept { return instance; }

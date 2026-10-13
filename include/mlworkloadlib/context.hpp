@@ -43,18 +43,34 @@ struct ContextView {
     uint32_t queueFamilyIndex = 0;
 };
 
+/** @brief Capabilities required of a runtime-owned Vulkan device. */
+enum class RuntimeDeviceCapability : uint32_t {
+    Compute = 0x01,
+    DataGraph = 0x02,
+    Tensors = 0x04,
+    DataGraphShaderModules = 0x0A, // Includes DataGraph.
+};
+
+constexpr RuntimeDeviceCapability operator|(RuntimeDeviceCapability lhs, RuntimeDeviceCapability rhs) noexcept {
+    return static_cast<RuntimeDeviceCapability>(static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs));
+}
+
 /**
- * @brief Additional requirements for a runtime-owned Context.
+ * @brief Requirements for a runtime-owned Context.
  *
- * Context::create() combines these requirements with the extensions and
- * features required by the library itself. Extension names and the feature
- * chain are borrowed for the duration of the call. These requirements do not
- * apply to Context::wrap().
+ * By default, Context::create() requires compute, tensor, and data-graph
+ * shader-module support. Extension names and the feature chain are borrowed
+ * for the duration of the call. These requirements do not apply to
+ * Context::wrap(). Compute or data-graph support must be selected.
  */
 struct RuntimeContextDeviceRequirements {
     std::vector<const char *> requiredDeviceExtensions;
 
     void *deviceFeaturePNext = nullptr;
+
+    RuntimeDeviceCapability capabilities = RuntimeDeviceCapability::Compute |
+                                           RuntimeDeviceCapability::DataGraphShaderModules |
+                                           RuntimeDeviceCapability::Tensors;
 };
 
 /*******************************************************************************

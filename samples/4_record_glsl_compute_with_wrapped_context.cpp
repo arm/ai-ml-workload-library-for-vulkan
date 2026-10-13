@@ -29,7 +29,9 @@ int main() {
         const auto workload = Workload::fromComputeShader(addBuffersDescription(lhs.size()));
 
         // [wrapped-context-begin]
-        const utils::ApplicationContext applicationContext;
+        RuntimeContextDeviceRequirements deviceRequirements;
+        deviceRequirements.capabilities = RuntimeDeviceCapability::Compute;
+        const utils::ApplicationContext applicationContext(deviceRequirements);
         auto context = Context::wrap({applicationContext.vulkanInstance(), applicationContext.vulkanPhysicalDevice(),
                                       applicationContext.vulkanDevice(), applicationContext.vulkanQueueFamilyIndex(),
                                       applicationContext.vulkanQueue()});

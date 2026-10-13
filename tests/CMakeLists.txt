@@ -17,6 +17,7 @@ set(ML_WORKLOAD_LIB_TEST_SOURCES
     standalone_data_graph/test_standalone_data_graph_workload.cpp
     test_alias_execution.hpp
     test_array_view.cpp
+    test_context.cpp
     test_expected_results.hpp
     test_internal_utils.cpp
     test_resource_requirements.hpp

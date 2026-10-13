@@ -10,6 +10,7 @@
 
 #include <vulkan/vulkan_beta.h>
 
+#include <algorithm>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -160,21 +161,26 @@ ImageBindingInfo ImageAllocation::binding() const {
 
 Context Context::create(const RuntimeContextDeviceRequirements &deviceRequirements) {
     auto owned = std::make_unique<Impl::Owned>();
-    const auto requiredDeviceExtensions =
-        detail::requiredWorkloadDeviceExtensions(deviceRequirements.requiredDeviceExtensions);
+    const auto requiredDeviceExtensions = detail::requiredWorkloadDeviceExtensions(deviceRequirements);
+    const auto requiredQueueFlags = detail::requiredWorkloadQueueFlags(deviceRequirements);
 
     owned->instance = detail::createVulkanInstance(owned->raiiContext, "mlworkloadlib");
 
     std::string lastFailure;
     for (auto &candidate : vk::raii::PhysicalDevices(owned->instance)) {
         const auto extensions = candidate.enumerateDeviceExtensionProperties();
-        if (!detail::hasExtensions(extensions, requiredDeviceExtensions)) {
+        const auto missingExtension =
+            std::find_if(requiredDeviceExtensions.begin(), requiredDeviceExtensions.end(),
+                         [&extensions](const char *name) { return !detail::hasExtension(extensions, name); });
+        if (missingExtension != requiredDeviceExtensions.end()) {
+            lastFailure = std::string("Required Vulkan device extension is unavailable: ") + *missingExtension;
             continue;
         }
 
-        const auto requiredQueueFlags = vk::QueueFlagBits::eCompute | vk::QueueFlagBits::eDataGraphARM;
-        const auto queueFamilyIndex = detail::findQueueFamilyIndex(candidate, requiredQueueFlags);
+        const auto queueFamilyIndex =
+            detail::findQueueFamilyIndex(candidate.getQueueFamilyProperties(), requiredQueueFlags);
         if (!queueFamilyIndex.has_value()) {
+            lastFailure = "No nonempty Vulkan queue family supports " + vk::to_string(requiredQueueFlags);
             continue;
         }
 
@@ -183,7 +189,7 @@ Context Context::create(const RuntimeContextDeviceRequirements &deviceRequiremen
 
         try {
             const detail::RuntimeDeviceConfiguration deviceConfiguration(extensions, requiredDeviceExtensions,
-                                                                         deviceRequirements.deviceFeaturePNext);
+                                                                         deviceRequirements);
             owned->physicalDevice = candidate;
             owned->queueFamilyIndex = *queueFamilyIndex;
             owned->device = vk::raii::Device(candidate, {vk::DeviceCreateFlags(),
