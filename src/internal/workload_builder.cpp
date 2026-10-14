@@ -166,10 +166,12 @@ uint32_t WorkloadBuilder::addResource(std::string name, const ResourceRequiremen
         if (requirements.image.runtimeSampler.has_value()) {
             samplerConfig = samplerConfigForRequirements(*requirements.image.runtimeSampler);
         }
+        const auto imageType = requirements.image.imageType.value_or(
+            requirements.image.extent.depth > 1 ? vk::ImageType::e3D : vk::ImageType::e2D);
         return addImageResource(std::move(name), role, descriptorType, requirements.format, {}, {},
                                 requirements.elementCount, aliasGroupId, requiresBoundMemoryInfo,
                                 requirements.image.extent, usage, requirements.image.requiredLayout,
-                                requirements.image.range, samplerConfig);
+                                requirements.image.range, samplerConfig, imageType);
     }
     case ResourceKind::Unknown:
         throw std::runtime_error("Workload resource kind is not specified");
@@ -211,10 +213,15 @@ uint32_t WorkloadBuilder::addImageResource(std::string name, Resource::Role role
                                            vk::DeviceSize elementCount, std::optional<uint32_t> aliasGroupId,
                                            bool requiresBoundMemoryInfo, vk::Extent3D extent, vk::ImageUsageFlags usage,
                                            vk::ImageLayout layout, vk::ImageSubresourceRange subresourceRange,
-                                           std::optional<Resource::ImageMetadata::SamplerConfig> samplerConfig) {
+                                           std::optional<Resource::ImageMetadata::SamplerConfig> samplerConfig,
+                                           vk::ImageType imageType) {
     auto workloadResource = resourceBase(std::move(name), role, descriptorType, format, std::move(shape),
                                          std::move(stride), elementCount, aliasGroupId, requiresBoundMemoryInfo);
-    workloadResource.metadata = Resource::ImageMetadata{extent, usage, layout, subresourceRange, samplerConfig};
+    workloadResource.metadata =
+        Resource::ImageMetadata{extent, usage, layout, subresourceRange, samplerConfig, imageType};
+    if (const auto resolvedExtent = workloadResource.imageExtentIfKnown()) {
+        std::get<Resource::ImageMetadata>(workloadResource.metadata).extent = *resolvedExtent;
+    }
     (void)workloadResource.requiredImageSubresourceRange();
     return appendResource(std::move(workloadResource));
 }
@@ -318,7 +325,8 @@ uint32_t WorkloadBuilder::addExecutable(std::string name, ExecutableKind type, u
 void WorkloadBuilder::addDescriptorBinding(uint32_t executableIndex, uint32_t resourceIndex, uint32_t set,
                                            uint32_t binding, ResourceAccess access) {
     (void)workloadState_->resources.at(resourceIndex);
-    workloadState_->executables.at(executableIndex).bindings.push_back({resourceIndex, set, binding, access});
+    auto &executableState = workloadState_->executables.at(executableIndex);
+    executableState.bindings.push_back({resourceIndex, set, binding, access});
 }
 
 Executable &WorkloadBuilder::executable(uint32_t executableIndex) {

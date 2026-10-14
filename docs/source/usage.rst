@@ -163,6 +163,16 @@ Choose public tensor or image tiling with ``Session::setTensorTiling()`` or
 ``Session::setImageTiling()`` before ``configure()``. Tensors normally default to
 Linear and images to Optimal; alias groups select a compatible common tiling.
 
+``ImageRequirements::imageType`` explicitly selects a 1D, 2D, or 3D image. When
+omitted, the type is inferred as ``vk::ImageType::e3D`` if ``extent.depth > 1``,
+or ``vk::ImageType::e2D`` otherwise. ``ImageRequirementsView::imageType()``
+reports the resolved type; allocation helpers use it for both image and
+image-view creation. Every extent component must be positive.
+
+``Context::createImage()`` and library-created intermediate images require
+uncompressed, single-plane formats with one texel per block and a concrete
+extent. Their allocation sizes come from Vulkan® memory requirements.
+
 To create and bind resources:
 
 #. Create each public resource from its requirements, directly through Vulkan®

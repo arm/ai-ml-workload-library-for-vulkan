@@ -18,6 +18,46 @@ namespace {
 using namespace mlsdk::workloadlib;
 using namespace mlsdk::workloadlib::test;
 
+TEST(ImageRequirements, InfersImageTypeFromExtentWhenUnspecified) {
+    for (const uint32_t depth : {1u, 2u}) {
+        SCOPED_TRACE(depth);
+        auto requirements = makeStorageImageRequirements();
+        requirements.image.extent.depth = depth;
+        detail::WorkloadBuilder builder;
+        const auto imageIndex = builder.addResource("image", requirements, detail::Resource::Role::Input);
+        const auto workload = builder.finish();
+
+        const auto view = workload.resource(imageIndex).requirements();
+        const auto image = view.asImage();
+        EXPECT_EQ(image.imageType(), depth > 1 ? vk::ImageType::e3D : vk::ImageType::e2D);
+        EXPECT_EQ(image.extent(), requirements.image.extent);
+        EXPECT_EQ(view.byteSize(), vk::DeviceSize{16} * depth);
+    }
+}
+
+TEST(ImageRequirements, SizesOnlySimpleFormatsAsTightlyPackedTexels) {
+    struct ImageSizeCase {
+        vk::Format format;
+        vk::DeviceSize expectedByteSize;
+    };
+    const std::array cases{
+        ImageSizeCase{vk::Format::eR8G8B8Unorm, 48},      ImageSizeCase{vk::Format::eR5G6B5UnormPack16, 32},
+        ImageSizeCase{vk::Format::eBc1RgbaUnormBlock, 0}, ImageSizeCase{vk::Format::eG8B8R82Plane420Unorm, 0},
+        ImageSizeCase{vk::Format::eG8B8G8R8422Unorm, 0},
+    };
+
+    for (const auto &testCase : cases) {
+        SCOPED_TRACE(static_cast<int32_t>(testCase.format));
+        auto requirements = makeStorageImageRequirements();
+        requirements.format = testCase.format;
+        requirements.image.extent = vk::Extent3D(4, 4, 1);
+        detail::WorkloadBuilder builder;
+        const auto imageIndex = builder.addResource("image", requirements, detail::Resource::Role::Input);
+        const auto workload = builder.finish();
+        EXPECT_EQ(workload.resource(imageIndex).requirements().byteSize(), testCase.expectedByteSize);
+    }
+}
+
 TEST(ImageRequirements, DerivesDefaultImageSubresourceRangeFromFormat) {
     struct ImageAspectCase {
         vk::Format format;

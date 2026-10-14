@@ -18,6 +18,7 @@
 namespace mlsdk::workloadlib::detail {
 
 struct DescriptorBinding;
+struct Resource;
 
 /*******************************************************************************
  * Workload metadata
@@ -28,10 +29,14 @@ std::string_view resourceKindName(ResourceKind kind) noexcept;
 
 vk::DeviceSize elementCount(const std::vector<int64_t> &shape);
 bool isKnownFormat(vk::Format format);
+bool hasKnownFormatByteSize(vk::Format format);
 vk::DeviceSize byteSizeFromShapeAndStride(const std::vector<int64_t> &shape, const std::vector<int64_t> &stride,
                                           vk::DeviceSize elementSize, std::string_view description);
 vk::DeviceSize storageBufferByteSize(vk::DeviceSize explicitByteSize, vk::Format format,
-                                     const std::vector<int64_t> &shape, const std::vector<int64_t> &stride);
+                                     const std::vector<int64_t> &shape, const std::vector<int64_t> &stride,
+                                     vk::DeviceSize fallbackElementCount = 0);
+vk::DeviceSize formatByteSize(vk::Format format);
+vk::DeviceSize resourceByteSize(const Resource &resource);
 
 void validateSpecializationInfo(const SpecializationInfo &specializationInfo, std::string_view description);
 
@@ -114,7 +119,9 @@ uint32_t findMemoryType(const vk::raii::PhysicalDevice &physicalDevice, uint32_t
 
 void validateTensorTiling(vk::TensorTilingARM tiling, vk::TensorUsageFlagsARM usage, const std::vector<int64_t> &shape,
                           bool hasExplicitStrides);
+void validateTensorMetadata(vk::Format format, const std::vector<int64_t> &shape, const std::vector<int64_t> &stride);
 vk::ImageAspectFlags imageAspectMask(vk::Format format);
+vk::ImageViewType imageViewType(vk::ImageType imageType);
 void validateImageTiling(vk::ImageTiling tiling, vk::ImageUsageFlags usage);
 
 /*******************************************************************************

@@ -60,7 +60,8 @@ class WorkloadBuilder {
                               vk::DeviceSize elementCount, std::optional<uint32_t> aliasGroupId,
                               bool requiresBoundMemoryInfo, vk::Extent3D extent, vk::ImageUsageFlags usage,
                               vk::ImageLayout layout, vk::ImageSubresourceRange subresourceRange,
-                              std::optional<Resource::ImageMetadata::SamplerConfig> samplerConfig);
+                              std::optional<Resource::ImageMetadata::SamplerConfig> samplerConfig,
+                              vk::ImageType imageType = vk::ImageType::e2D);
     Resource &resource(uint32_t resourceIndex);
     const Resource &resource(uint32_t resourceIndex) const;
     void setPublicResourceName(uint32_t resourceIndex, std::string name);

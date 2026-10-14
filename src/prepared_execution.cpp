@@ -286,6 +286,10 @@ const typename BoundResources::value_type *findBoundResource(const BoundResource
     return boundResource.has_value() ? &boundResource->get() : nullptr;
 }
 
+/*******************************************************************************
+ * Intermediate object creation
+ *******************************************************************************/
+
 void planRuntimeResourceAllocations(const Workload &workload,
                                     std::vector<DescriptorBinding> &unaliasedIntermediateDescBindings,
                                     std::map<uint32_t, std::vector<DescriptorBinding>> &aliasGroups) {
@@ -399,7 +403,7 @@ void PreparedExecution::Impl::addBoundImage(ImageBindingInfo imageBindingInfo, D
     vk::raii::ImageView ownedImageView(nullptr);
     vk::ImageView imageView = imageBindingInfo.imageView;
     if (imageView == nullptr) {
-        const auto viewType = resource.imageExtent().depth > 1 ? vk::ImageViewType::e3D : vk::ImageViewType::e2D;
+        const auto viewType = detail::imageViewType(detail::imageMetadata(resource).imageType);
         const vk::ImageViewCreateInfo viewCreateInfo({}, imageBindingInfo.image, viewType, resource.format, {},
                                                      subresourceRange);
         ownedImageView = vk::raii::ImageView(sessionImpl.contextView.device.get(), viewCreateInfo);

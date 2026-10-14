@@ -77,6 +77,9 @@ class BufferRequirementsView {
 /** @brief Non-owning view of image-specific workload requirements. */
 class ImageRequirementsView {
   public:
+    /** @brief Returns the required Vulkan image dimensionality. */
+    vk::ImageType imageType() const;
+
     /** @brief Returns the required image extent. */
     vk::Extent3D extent() const;
 
@@ -137,10 +140,19 @@ class ResourceRequirementsView {
     /** @brief Returns true if a binding must include valid BoundMemoryInfo. */
     bool requiresBoundMemoryInfo() const;
 
-    /** @brief Returns the logical element count, or zero when it cannot be determined. */
+    /** @brief Returns the explicit element count, or derives it when unspecified. */
     vk::DeviceSize elementCount() const;
 
-    /** @brief Returns logical storage bytes, not Vulkan allocation requirements or Session stride overrides. */
+    /**
+     * @brief Returns the requested buffer size or calculated logical tensor/image span in bytes.
+     *
+     * This is not the Vulkan memory allocation size or necessarily a packed transfer size.
+     * For images, this is texel byte size times width, height, and depth for one mip level
+     * and array layer in a tightly packed logical layout. Only uncompressed, single-plane
+     * formats with one texel per block are supported. Image/VGF strides, row/depth pitch,
+     * tiling, driver padding, and subresource layouts are excluded.
+     * Returns zero when the logical size cannot be determined.
+     */
     vk::DeviceSize byteSize() const;
 
     /** @brief Narrows this view to tensor requirements. */

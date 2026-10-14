@@ -48,6 +48,7 @@
 - Support session-selected tensor strides and per-binding offsets for alias peers
   sharing external memory, with range, alignment, and memory-requirement checks
   before binding.
+- Expanded supported formats with corresponding resource metadata size calculations
 
 ## Version 0.11.0 – *Initial Public Release*
 

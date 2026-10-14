@@ -110,6 +110,13 @@ struct TensorRequirements {
 /** @brief Storage-buffer-specific resource creation requirements. */
 struct BufferRequirements {
     vk::BufferUsageFlags usage;
+    /**
+     * @brief Requested storage-buffer size in bytes, taking precedence over derived sizes.
+     *
+     * Zero derives a logical span from elementCount or VGF shape/stride metadata.
+     * Specify a nonzero size for other formats or opaque/custom layouts
+     * not described by this metadata.
+     */
     vk::DeviceSize byteSize = 0;
 };
 
@@ -130,6 +137,7 @@ struct ImageRequirements {
     vk::ImageLayout requiredLayout{};
     vk::ImageSubresourceRange range;
     std::optional<SamplerRequirements> runtimeSampler;
+    std::optional<vk::ImageType> imageType;
 };
 
 /**

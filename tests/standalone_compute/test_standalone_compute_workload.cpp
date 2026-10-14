@@ -92,6 +92,23 @@ TEST(StandaloneComputeWorkload, ReportsSourceModuleSupport) {
 #endif
 }
 
+TEST(StandaloneComputeWorkload, PreservesExplicitBufferSize) {
+    for (const auto format : {vk::Format::eUndefined, vk::Format::eR32Sint}) {
+        SCOPED_TRACE(static_cast<int32_t>(format));
+        auto description = makeAddInt32BuffersDescription();
+        auto &resource = description.resources.front().resource;
+        resource.format = format;
+        resource.elementCount = 1024;
+        resource.buffer.byteSize = 17;
+
+        const auto workload = Workload::fromComputeShader(std::move(description));
+        const auto requirements = workload.resource(0).requirements();
+        EXPECT_EQ(requirements.format(), format);
+        EXPECT_EQ(requirements.elementCount(), 1024);
+        EXPECT_EQ(requirements.byteSize(), 17);
+    }
+}
+
 TEST(StandaloneComputeWorkload, AcceptsSpecializationConstants) {
     auto description = makeAddInt32BuffersDescription();
     description.specializationInfo.mapEntries = {vk::SpecializationMapEntry(0, 0, 4)};
