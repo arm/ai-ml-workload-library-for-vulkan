@@ -3,9 +3,9 @@
   "spdxVersion": "SPDX-2.3",
   "name": "ai-ml-workload-library",
   "dataLicense": "CC0-1.0",
-  "documentNamespace": "https://spdx.org/spdxdocs/ai-ml-workload-library-563c7ac9bbba06f7121f",
+  "documentNamespace": "https://spdx.org/spdxdocs/ai-ml-workload-library-710df32aedf2112a1bbb",
   "creationInfo": {
-    "created": "2026-10-05T09:15:00Z",
+    "created": "2026-10-14T08:26:02Z",
     "creators": [
       "Organization: Arm Limited",
       "Tool: mlsdk-source-sbom-generator"
@@ -39,8 +39,7 @@
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "Apache-2.0",
-      "copyrightText": "NOASSERTION",
-      "versionInfo": "2ac59a7135f8a4b1ae3ec8a95557ba73ff1ba9c2"
+      "copyrightText": "NOASSERTION"
     },
     {
       "SPDXID": "SPDXRef-directxshadercompiler",
