@@ -124,28 +124,45 @@ void BindingSet::bindImage(ResourceView resource, ImageBindingInfo bindingInfo) 
  * Push constants
  *******************************************************************************/
 
-void BindingSet::bindPushConstants(const void *data, std::size_t size) {
-    auto *bindingSetState = bindingSetImpl();
+void BindingSet::validateExecutable(ExecutableView executable) const {
+    const auto *bindingSetState = bindingSetImpl();
     if (bindingSetState == nullptr) {
         throw std::runtime_error(bindingError("PushConstants", "invalid BindingSet"));
     }
+    if (executable.workload_ != &bindingSetState->workload) {
+        throw std::runtime_error(bindingError("PushConstants", "executable belongs to a different Workload"));
+    }
+    if (executable.index_ >= bindingSetState->session.sessionImpl().executableStates.size()) {
+        throw std::runtime_error(bindingError("PushConstants", "invalid executable index"));
+    }
+}
 
-    if (size != 0 && data == nullptr) {
+void BindingSet::bindPushConstants(ExecutableView executable, ArrayView<const std::byte> data) {
+    validateExecutable(executable);
+    auto &bindingSetState = *bindingSetImpl();
+    if (!data.empty() && data.data() == nullptr) {
         throw std::runtime_error("Push constant payload is null");
     }
 
-    const auto requiredSize = workloadImpl(bindingSetState->workload).requiredPushConstantSize();
-    if (size != requiredSize) {
-        throw std::runtime_error("Push constant payload size does not match workload requirements");
+    const auto &compiledExecutable =
+        bindingSetState.session.sessionImpl().executableStates[executable.index_].compiledExecutable.get();
+    if (data.size() != compiledExecutable.requiredPushConstantSize()) {
+        throw std::runtime_error("Push constant payload size does not match executable requirements");
     }
 
-    if (size == 0) {
-        bindingSetState->pushConstants.clear();
+    if (data.empty()) {
+        bindingSetState.pushConstantsByExecutableIndex.erase(executable.index_);
         return;
     }
 
-    const auto *begin = static_cast<const uint8_t *>(data);
-    bindingSetState->pushConstants.assign(begin, begin + size);
+    bindingSetState.pushConstantsByExecutableIndex[executable.index_].assign(data.begin(), data.end());
+}
+
+std::vector<std::byte> BindingSet::pushConstants(ExecutableView executable) const {
+    validateExecutable(executable);
+    const auto &payloads = bindingSetImpl()->pushConstantsByExecutableIndex;
+    const auto payload = payloads.find(executable.index_);
+    return payload == payloads.end() ? std::vector<std::byte>{} : payload->second;
 }
 
 } // namespace mlsdk::workloadlib

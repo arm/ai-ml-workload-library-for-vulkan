@@ -453,6 +453,7 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
 
     // Pipeline layout
     validateExecutableBindings(workload, executable);
+    compiledExecutable.pushConstantRanges = executable.pushConstantRanges;
     compiledExecutable.descriptorSetLayouts = createDescriptorSetLayouts(executable.bindings, workload, contextView);
     compiledExecutable.pipelineLayout =
         createPipelineLayout(compiledExecutable.descriptorSetLayouts, executable, contextView);

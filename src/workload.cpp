@@ -132,25 +132,6 @@ vk::DescriptorType Workload::Impl::descriptorTypeForBinding(const DescriptorBind
     return *resource.descriptorType;
 }
 
-uint32_t Workload::Impl::requiredPushConstantSize() const {
-    const auto firstPushConstantExecutable =
-        std::find_if(executables.begin(), executables.end(),
-                     [](const auto &executable) { return executable.pushConstantSize != 0; });
-    if (firstPushConstantExecutable == executables.end()) {
-        return 0;
-    }
-
-    const auto size = firstPushConstantExecutable->pushConstantSize;
-    const auto hasDifferentPushConstantSize =
-        std::any_of(std::next(firstPushConstantExecutable), executables.end(), [size](const auto &executable) {
-            return executable.pushConstantSize != 0 && executable.pushConstantSize != size;
-        });
-    if (hasDifferentPushConstantSize) {
-        throw std::runtime_error("Workloads with multiple push constant sizes are not supported");
-    }
-    return size;
-}
-
 namespace {
 
 /*******************************************************************************

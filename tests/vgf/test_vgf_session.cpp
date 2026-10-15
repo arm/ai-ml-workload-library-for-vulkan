@@ -915,12 +915,132 @@ TEST_F(VgfSessionExecutionTest, RunGlslComputeShaderSegmentWithPushConstants) {
     bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstInputBuffer.buffer});
     bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondInputBuffer.buffer});
     bindings.bindBuffer(workload.resource(2), BufferBindingInfo{*outputBuffer.buffer});
-    bindings.bindPushConstants(&pushAdd, sizeof(pushAdd));
+    bindings.bindPushConstants(workload.executable(0),
+                               {reinterpret_cast<const std::byte *>(&pushAdd), sizeof(pushAdd)});
 
     auto execution = session.prepare(bindings);
     execution.run();
 
     EXPECT_EQ(outputBuffer.read(elements), expected);
+}
+
+TEST_F(VgfSessionExecutionTest, IndependentPushConstantsRetainOffsets) {
+    auto context = wrappedContext();
+    const auto bytes = makeTwoSegmentPushConstantVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    const Buffer firstOutput(physicalDevice, device, sizeof(int32_t));
+    const Buffer secondOutput(physicalDevice, device, sizeof(int32_t));
+    std::array<int32_t, 2> firstPayload = {-100, 23};
+    const std::array<int32_t, 3> secondPayload = {-200, 57, -300};
+    const auto *firstData = reinterpret_cast<const std::byte *>(firstPayload.data());
+    const auto *secondData = reinterpret_cast<const std::byte *>(secondPayload.data());
+
+    ASSERT_EQ(workload.executable(0).module().index(), workload.executable(1).module().index());
+
+    Session session(context, workload);
+    session.configure();
+    auto bindings = session.createBindingSet();
+    bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstOutput.buffer});
+    bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondOutput.buffer});
+
+    const auto firstStep = workload.executable(0);
+    const auto secondStep = workload.executable(1);
+
+    // First step requires 8 bytes: offset 4 + size 4.
+    EXPECT_THROW(bindings.bindPushConstants(firstStep, {firstData, sizeof(int32_t)}), std::runtime_error);
+    // Second step requires 12 bytes: offset 4 + size 8.
+    EXPECT_THROW(bindings.bindPushConstants(secondStep, {firstData, sizeof(firstPayload)}), std::runtime_error);
+
+    bindings.bindPushConstants(firstStep, {firstData, sizeof(firstPayload)});
+    EXPECT_THROW(session.prepare(bindings), std::runtime_error);
+    bindings.bindPushConstants(secondStep, {secondData, sizeof(secondPayload)});
+
+    auto execution = session.prepare(bindings);
+
+    execution.run();
+    EXPECT_EQ(firstOutput.read(1), std::vector<int32_t>{23});
+    EXPECT_EQ(secondOutput.read(1), std::vector<int32_t>{57});
+}
+
+TEST_F(VgfSessionExecutionTest, PreparedExecutionsRetainPushConstantSnapshots) {
+    auto context = wrappedContext();
+    const auto bytes = makeTwoSegmentPushConstantVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    const Buffer firstOutput(physicalDevice, device, sizeof(int32_t));
+    const Buffer secondOutput(physicalDevice, device, sizeof(int32_t));
+    std::array<int32_t, 2> firstPayload = {-100, 23};
+    const std::array<int32_t, 3> secondPayload = {-200, 57, -300};
+    const auto *firstData = reinterpret_cast<const std::byte *>(firstPayload.data());
+    const auto *secondData = reinterpret_cast<const std::byte *>(secondPayload.data());
+
+    Session session(context, workload);
+    session.configure();
+    auto bindings = session.createBindingSet();
+    bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstOutput.buffer});
+    bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondOutput.buffer});
+
+    bindings.bindPushConstants(workload.executable(0), {firstData, sizeof(firstPayload)});
+    bindings.bindPushConstants(workload.executable(1), {secondData, sizeof(secondPayload)});
+    auto firstExecution = session.prepare(bindings);
+
+    firstPayload[1] = 42;
+    bindings.bindPushConstants(workload.executable(0), {firstData, sizeof(firstPayload)});
+    auto secondExecution = session.prepare(bindings);
+
+    secondExecution.run();
+    EXPECT_EQ(firstOutput.read(1), std::vector<int32_t>{42});
+    EXPECT_EQ(secondOutput.read(1), std::vector<int32_t>{57});
+
+    firstExecution.run();
+    EXPECT_EQ(firstOutput.read(1), std::vector<int32_t>{23});
+    EXPECT_EQ(secondOutput.read(1), std::vector<int32_t>{57});
+}
+
+TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionKeepsPushConstantsIndependent) {
+    auto context = wrappedContext();
+    const auto bytes = makeTwoSegmentPushConstantVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    const Buffer firstOutput(physicalDevice, device, sizeof(int32_t));
+    const Buffer secondOutput(physicalDevice, device, sizeof(int32_t));
+    std::array<int32_t, 2> firstPayload = {-100, 23};
+    const std::array<int32_t, 3> secondPayload = {-200, 57, -300};
+    const auto *firstData = reinterpret_cast<const std::byte *>(firstPayload.data());
+    const auto *secondData = reinterpret_cast<const std::byte *>(secondPayload.data());
+
+    CompiledExecution compiled(context, workload);
+    Session session(context, workload, compiled);
+    session.configure();
+    auto bindings = session.createBindingSet();
+    bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstOutput.buffer});
+    bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondOutput.buffer});
+
+    const auto firstStep = workload.executable(0);
+    const auto secondStep = workload.executable(1);
+    bindings.bindPushConstants(firstStep, {firstData, sizeof(firstPayload)});
+    bindings.bindPushConstants(secondStep, {secondData, sizeof(secondPayload)});
+    auto firstExecution = session.prepare(bindings);
+
+    Session otherSession(context, workload, compiled);
+    otherSession.configure();
+    auto otherBindings = otherSession.createBindingSet();
+    otherBindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstOutput.buffer});
+    otherBindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondOutput.buffer});
+
+    EXPECT_TRUE(otherBindings.pushConstants(firstStep).empty());
+    otherBindings.bindPushConstants(secondStep, {secondData, sizeof(secondPayload)});
+    EXPECT_THROW(otherSession.prepare(otherBindings), std::runtime_error);
+
+    firstPayload[1] = 99;
+    otherBindings.bindPushConstants(firstStep, {firstData, sizeof(firstPayload)});
+    auto otherExecution = otherSession.prepare(otherBindings);
+
+    otherExecution.run();
+    EXPECT_EQ(firstOutput.read(1), std::vector<int32_t>{99});
+    EXPECT_EQ(secondOutput.read(1), std::vector<int32_t>{57});
+
+    firstExecution.run();
+    EXPECT_EQ(firstOutput.read(1), std::vector<int32_t>{23});
+    EXPECT_EQ(secondOutput.read(1), std::vector<int32_t>{57});
 }
 
 TEST_F(VgfSessionExecutionTest, RecordComputeShaderSegment) {

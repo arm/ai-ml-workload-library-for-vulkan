@@ -6,6 +6,8 @@
 
 ### Breaking API Changes
 
+- Replaced workload-wide `BindingSet::bindPushConstants(data, size)` with
+  `bindPushConstants(executable, ArrayView<const std::byte>)`.
 - Changed `SpecializationInfo::data` and
   `DataGraphPipelineMetadataView::specializationData()` to use `std::byte`.
 
@@ -21,6 +23,9 @@
 
 ### Resource Binding and Execution
 
+- Push-constant payloads are copied per executable, allowing different sizes and
+  values within a workload. `BindingSet::pushConstants(executable)` returns a
+  copy, and `prepare()` captures all payloads for that execution.
 - Added optional `CompiledExecution` for sharing compiled pipelines and layouts
   across sessions for the same context and workload, while retaining separate
   per-session state.

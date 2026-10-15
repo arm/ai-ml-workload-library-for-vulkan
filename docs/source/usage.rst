@@ -206,6 +206,38 @@ An image layout is optional. When supplied, it describes the current layout, and
 prepared execution transitions the image to the workload-required layout. When
 omitted, the application manages the image layout.
 
+Push constants
+--------------
+
+Call ``BindingSet::bindPushConstants(executable, data)`` before preparing an
+execution to supply push constants for an executable from the same workload.
+Each call copies the bytes and replaces that executable's previous payload,
+without changing other executables' payloads.
+
+The payload size must equal the largest ``offset + size`` of the executable's
+compiled push-constant ranges, including any leading gap. For example, a
+four-byte range at offset 16 requires a 20-byte payload. Empty data is accepted
+only when the executable requires zero bytes; it cannot clear a nonempty
+payload.
+
+For a configured session whose first executable expects a single ``uint32_t``
+at offset zero, using a binding set with its required resources already bound:
+
+.. code-block:: cpp
+
+   std::uint32_t value = 42;
+   const auto executable = workload.executable(0);
+
+   bindings.bindPushConstants(
+       executable,
+       {reinterpret_cast<const std::byte *>(&value), sizeof(value)});
+   auto execution = session.prepare(bindings);
+
+The source bytes need not remain valid after ``bindPushConstants()`` returns.
+``prepare()`` captures the bound payloads, so later binding changes do not
+affect an already prepared execution. ``bindings.pushConstants(executable)``
+returns a copy of the currently bound payload.
+
 Running and recording
 ---------------------
 

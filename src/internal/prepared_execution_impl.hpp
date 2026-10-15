@@ -129,7 +129,7 @@ struct PreparedExecution::Impl {
      **************************************************************************/
 
     Session::Impl &sessionImpl;
-    std::vector<uint8_t> pushConstants;
+    std::map<uint32_t, std::vector<std::byte>> pushConstantsByExecutableIndex;
     RuntimeResourceStorage runtimeResources;
 
     std::vector<BoundTensor> boundTensors;

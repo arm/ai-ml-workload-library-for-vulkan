@@ -386,17 +386,18 @@ void PreparedExecution::Impl::addBindingSetResources(const BindingSet::Impl &bin
 }
 
 void PreparedExecution::Impl::addBoundPushConstants(const BindingSet::Impl &bindingState) {
-    const auto requiredSize = workloadImpl(sessionImpl.workload).requiredPushConstantSize();
-    const auto providedSize = bindingState.pushConstants.size();
-    if (providedSize == requiredSize) {
-        pushConstants = bindingState.pushConstants;
-        return;
+    for (uint32_t index = 0; index < sessionImpl.executableStates.size(); ++index) {
+        const auto requiredSize =
+            sessionImpl.executableStates[index].compiledExecutable.get().requiredPushConstantSize();
+        const auto payload = bindingState.pushConstantsByExecutableIndex.find(index);
+        const auto providedSize =
+            payload == bindingState.pushConstantsByExecutableIndex.end() ? 0 : payload->second.size();
+        if (providedSize != requiredSize) {
+            throw std::runtime_error("BindingSet push constant size does not match executable " +
+                                     std::to_string(index) + " requirements");
+        }
     }
-
-    if (requiredSize == 0) {
-        throw std::runtime_error("BindingSet provides push constants for a workload that does not use them");
-    }
-    throw std::runtime_error("BindingSet push constant size does not match workload requirements");
+    pushConstantsByExecutableIndex = bindingState.pushConstantsByExecutableIndex;
 }
 
 void PreparedExecution::Impl::addBoundTensor(TensorBindingInfo tensorBindingInfo, DescriptorBinding descBinding) {
@@ -1027,11 +1028,12 @@ void PreparedExecution::Impl::record(vk::CommandBuffer commandBuffer, const Reco
         dispatcher->vkCmdBindPipeline(static_cast<VkCommandBuffer>(commandBuffer),
                                       static_cast<VkPipelineBindPoint>(pipelineBindPoint),
                                       static_cast<VkPipeline>(*compiledExecutable.pipeline));
-        for (const auto &range : executable.pushConstantRanges) {
+        for (const auto &range : compiledExecutable.pushConstantRanges) {
+            const auto &payload = pushConstantsByExecutableIndex.at(static_cast<uint32_t>(executableIndex));
             dispatcher->vkCmdPushConstants(static_cast<VkCommandBuffer>(commandBuffer),
                                            static_cast<VkPipelineLayout>(*compiledExecutable.pipelineLayout),
                                            static_cast<VkShaderStageFlags>(range.stageFlags), range.offset, range.size,
-                                           pushConstants.data() + range.offset);
+                                           payload.data() + range.offset);
         }
         const auto executableView = sessionState.workload.executable(static_cast<uint32_t>(executableIndex));
         const auto invokeExecutableHook = [&](ExecutableRecordPhase phase) {

@@ -12,6 +12,8 @@
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
 
+#include <algorithm>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -22,6 +24,15 @@ namespace mlsdk::workloadlib::detail {
  *******************************************************************************/
 
 struct CompiledExecutable {
+    uint32_t requiredPushConstantSize() const {
+        uint32_t size = 0;
+        for (const auto &range : pushConstantRanges) {
+            size = std::max(size, range.offset + range.size);
+        }
+        return size;
+    }
+
+    std::vector<vk::PushConstantRange> pushConstantRanges;
     vk::raii::ShaderModule shaderModule{nullptr};
     std::vector<vk::raii::DescriptorSetLayout> descriptorSetLayouts;
     vk::raii::PipelineLayout pipelineLayout{nullptr};
