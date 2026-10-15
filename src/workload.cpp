@@ -532,7 +532,7 @@ ArrayView<const vk::SpecializationMapEntry> DataGraphPipelineMetadataView::speci
     return {mapEntries.data(), mapEntries.size()};
 }
 
-ArrayView<const uint8_t> DataGraphPipelineMetadataView::specializationData() const {
+ArrayView<const std::byte> DataGraphPipelineMetadataView::specializationData() const {
     const auto &data = workloadExecutable(*workload_, executableIndex_).specializationInfo.data;
     return {data.data(), data.size()};
 }

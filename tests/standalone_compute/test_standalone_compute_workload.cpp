@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <vulkan/vulkan_core.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <utility>
@@ -95,7 +96,7 @@ TEST(StandaloneComputeWorkload, ReportsSourceModuleSupport) {
 TEST(StandaloneComputeWorkload, AcceptsSpecializationConstants) {
     auto description = makeAddInt32BuffersDescription();
     description.specializationInfo.mapEntries = {vk::SpecializationMapEntry(0, 0, 4)};
-    description.specializationInfo.data = {1, 2, 3, 4};
+    description.specializationInfo.data = {std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
 
     EXPECT_NO_THROW((void)Workload::fromComputeShader(std::move(description)));
 }

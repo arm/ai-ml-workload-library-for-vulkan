@@ -8,6 +8,7 @@
 #include <vulkan/vulkan_core.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <utility>
@@ -80,11 +81,13 @@ TEST(StandaloneDataGraphWorkload, ExposesTensorResourcesAndExecutableMetadata) {
 }
 
 TEST(StandaloneDataGraphWorkload, ExposesPipelineMetadata) {
+    const std::vector<std::byte> specializationData = {std::byte{0x01}, std::byte{0x80}, std::byte{0xFE},
+                                                       std::byte{0xFF}};
     auto description = makeMaxpoolDescription();
     description.pipeline.identifier = "maxpool-pipeline";
     description.pipeline.flags = vk::PipelineCreateFlagBits2::eDisableOptimization;
     description.pipeline.specializationInfo.mapEntries = {vk::SpecializationMapEntry(7, 0, 4)};
-    description.pipeline.specializationInfo.data = {1, 0, 0, 0};
+    description.pipeline.specializationInfo.data = specializationData;
 
     auto workload = Workload::fromDataGraph(std::move(description));
 
@@ -95,8 +98,9 @@ TEST(StandaloneDataGraphWorkload, ExposesPipelineMetadata) {
     EXPECT_EQ(metadata.specializationMapEntries()[0].constantID, 7);
     EXPECT_EQ(metadata.specializationMapEntries()[0].offset, 0);
     EXPECT_EQ(metadata.specializationMapEntries()[0].size, 4);
-    EXPECT_EQ(std::vector<uint8_t>(metadata.specializationData().begin(), metadata.specializationData().end()),
-              (std::vector<uint8_t>{1, 0, 0, 0}));
+    const ArrayView<const std::byte> data = metadata.specializationData();
+    EXPECT_EQ(std::vector<std::byte>(data.begin(), data.end()), specializationData);
+    EXPECT_EQ(data.data(), workload.executable(0).dataGraphPipelineMetadata().specializationData().data());
 }
 
 TEST(StandaloneDataGraphWorkload, AcceptsSparseConstantsWithDimension) {
@@ -148,7 +152,8 @@ TEST(StandaloneDataGraphWorkload, RejectsDuplicatePipelineSpecializationConstant
     auto description = makeMaxpoolDescription();
     description.pipeline.specializationInfo.mapEntries = {vk::SpecializationMapEntry(0, 0, 4),
                                                           vk::SpecializationMapEntry(0, 4, 4)};
-    description.pipeline.specializationInfo.data = {1, 0, 0, 0, 0, 0, 0, 0};
+    description.pipeline.specializationInfo.data = {std::byte{1}, std::byte{0}, std::byte{0}, std::byte{0},
+                                                    std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0}};
 
     EXPECT_THROW((void)Workload::fromDataGraph(std::move(description)), std::runtime_error);
 }

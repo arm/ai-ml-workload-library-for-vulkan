@@ -6,6 +6,7 @@
 
 #include <vulkan/vulkan.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -94,7 +95,7 @@ struct DispatchShape {
  */
 struct SpecializationInfo {
     std::vector<vk::SpecializationMapEntry> mapEntries;
-    std::vector<uint8_t> data;
+    std::vector<std::byte> data;
 
     bool empty() const noexcept { return mapEntries.empty(); }
 };

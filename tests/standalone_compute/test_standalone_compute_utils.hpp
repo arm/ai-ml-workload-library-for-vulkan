@@ -11,14 +11,15 @@
 #include "mlworkloadlib/workload.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
 namespace mlsdk::workloadlib::test {
 
-template <typename T> inline std::vector<uint8_t> bytesOf(const T &value) {
-    std::vector<uint8_t> bytes(sizeof(T));
-    const auto *firstByte = reinterpret_cast<const uint8_t *>(&value);
+template <typename T> inline std::vector<std::byte> bytesOf(const T &value) {
+    std::vector<std::byte> bytes(sizeof(T));
+    const auto *firstByte = reinterpret_cast<const std::byte *>(&value);
     std::copy(firstByte, firstByte + sizeof(T), bytes.begin());
     return bytes;
 }

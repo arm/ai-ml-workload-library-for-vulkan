@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+### Breaking API Changes
+
+- Changed `SpecializationInfo::data` and
+  `DataGraphPipelineMetadataView::specializationData()` to use `std::byte`.
+
 ### Build, Packaging & Dependencies
 
 - Locked development tooling with `uv.lock` in place of the tooling

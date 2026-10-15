@@ -9,6 +9,7 @@
 
 #include <vulkan/vulkan.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -265,8 +266,8 @@ class DataGraphPipelineMetadataView {
     /** @brief Returns borrowed Vulkan specialization map entries. */
     ArrayView<const vk::SpecializationMapEntry> specializationMapEntries() const;
 
-    /** @brief Returns the borrowed packed specialization-constant data. */
-    ArrayView<const uint8_t> specializationData() const;
+    /** @brief Returns packed specialization bytes borrowed from the original Workload. */
+    ArrayView<const std::byte> specializationData() const;
 
   private:
     DataGraphPipelineMetadataView(const Workload *workload, uint32_t executableIndex)

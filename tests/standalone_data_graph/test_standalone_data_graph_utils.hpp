@@ -10,6 +10,7 @@
 
 #include "mlworkloadlib/workload.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -27,10 +28,11 @@ inline DataGraphDescription makeMaxpoolDescription() {
     return description;
 }
 
-inline std::vector<uint8_t> makeBoolSpecializationConstantData(bool value) {
+inline std::vector<std::byte> makeBoolSpecializationConstantData(bool value) {
     const uint32_t encodedValue = value ? 1U : 0U;
-    return {static_cast<uint8_t>(encodedValue & 0xFFU), static_cast<uint8_t>((encodedValue >> 8U) & 0xFFU),
-            static_cast<uint8_t>((encodedValue >> 16U) & 0xFFU), static_cast<uint8_t>((encodedValue >> 24U) & 0xFFU)};
+    return {static_cast<std::byte>(encodedValue & 0xFFU), static_cast<std::byte>((encodedValue >> 8U) & 0xFFU),
+            static_cast<std::byte>((encodedValue >> 16U) & 0xFFU),
+            static_cast<std::byte>((encodedValue >> 24U) & 0xFFU)};
 }
 
 inline DataGraphDescription makeArshiftSpecBoolDescription(bool round) {
