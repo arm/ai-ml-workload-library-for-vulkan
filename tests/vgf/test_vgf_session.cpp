@@ -5,6 +5,7 @@
 #include "mlworkloadlib/context.hpp"
 #include "mlworkloadlib/session.hpp"
 #include "mlworkloadlib/workload.hpp"
+#include "mlworkloadlib_utils/application_context.hpp"
 #include "test_alias_execution.hpp"
 #include "test_expected_results.hpp"
 #include "test_resource_requirements.hpp"
@@ -21,6 +22,7 @@
 #include <vulkan/vulkan_raii.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
@@ -1755,3 +1757,100 @@ TEST_P(VgfAliasExecutionTest, PrepareRequiresBoundMemoryInfo) {
 }
 
 INSTANTIATE_TEST_SUITE_P(AliasCases, VgfAliasExecutionTest, testing::ValuesIn(aliasCases), aliasCaseName);
+
+#ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
+namespace {
+
+std::string makePlaceholderGraphAndComputeVgf() {
+    return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
+        const auto graph = encoder.AddModule(mlsdk::vgflib::ModuleType::GRAPH, "maxpool", "main");
+        const auto input =
+            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 16, 16, 16}, {});
+        const auto output =
+            encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_FORMAT_R8_SINT, {1, 8, 8, 16}, {});
+        const auto inputBinding = encoder.AddBindingSlot(0, input);
+        const auto outputBinding = encoder.AddBindingSlot(1, output);
+        const auto descriptorSet = encoder.AddDescriptorSetInfo({inputBinding, outputBinding});
+        encoder.AddSegmentInfo(graph, "graph_segment", {descriptorSet}, {inputBinding}, {outputBinding},
+                               noGraphConstants);
+
+        const auto compute = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "add_buffers", "main");
+        addInt32BuffersSegment(encoder, compute, "compute_segment");
+    });
+}
+
+struct NullVulkanContext : utils::ApplicationContext {
+    Context wrap() const { return Context::wrap({instance, physicalDevice, device, 0, queue}); }
+};
+
+constexpr std::array<std::byte, 17> binaryWithValidHeader = {
+    std::byte{0xff}, std::byte{0xdd}, std::byte{0x22}, std::byte{0x11}, std::byte{0},   std::byte{0},
+    std::byte{0},    std::byte{0},    std::byte{1},    std::byte{0},    std::byte{0},   std::byte{0},
+    std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0xaa}};
+constexpr ArrayView<const std::byte> validBinary(binaryWithValidHeader.data(), binaryWithValidHeader.size());
+
+} // namespace
+
+TEST(VgfDataGraphBinary, SelectsPipelinesFromSharedBinary) {
+    const auto bytes = makeTwoSegmentMaxpoolVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    const NullVulkanContext vulkan;
+    auto context = vulkan.wrap();
+    Session session(context, workload);
+    const std::array<uint8_t, 2> firstSelector = {17, 34};
+    const std::array<uint8_t, 2> secondSelector = {51, 68};
+
+    EXPECT_NO_THROW(session.bindDataGraphBinary(validBinary, DataGraphBinaryStorageMode::ApplicationBacked,
+                                                {secondSelector.data(), secondSelector.size()}, 1));
+    EXPECT_NO_THROW(session.bindDataGraphBinary(validBinary, DataGraphBinaryStorageMode::ImplementationManaged,
+                                                {firstSelector.data(), firstSelector.size()}));
+}
+
+TEST(VgfDataGraphBinary, RejectsComputeAndInvalidIndices) {
+    const auto bytes = makeOutputBufferAliasedToIntermediateTensorVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    const NullVulkanContext vulkan;
+    auto context = vulkan.wrap();
+    Session session(context, workload);
+
+    EXPECT_NO_THROW(session.bindDataGraphBinary(validBinary));
+    EXPECT_THROW(session.bindDataGraphBinary(validBinary, DataGraphBinaryStorageMode::ImplementationManaged, {}, 1),
+                 std::runtime_error);
+    EXPECT_THROW(session.bindDataGraphBinary(validBinary, DataGraphBinaryStorageMode::ImplementationManaged, {}, 2),
+                 std::runtime_error);
+}
+
+TEST(VgfDataGraphBinary, PreservesPlaceholderComputeBinding) {
+    const auto bytes = makePlaceholderGraphAndComputeVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    const NullVulkanContext vulkan;
+    auto context = vulkan.wrap();
+    ASSERT_EQ(workload.placeholderModuleCount(), 2);
+
+    const auto bindComputeModule = [&workload](Session &session) {
+        ModuleImplementation implementation;
+        implementation.codeKind = ModuleCodeKind::Spirv;
+        implementation.spirv = assembleAddInt32BuffersSpirv();
+        session.bindModule(workload.placeholderModule(1), std::move(implementation));
+    };
+
+    Session moduleFirst(context, workload);
+    bindComputeModule(moduleFirst);
+    EXPECT_NO_THROW(moduleFirst.bindDataGraphBinary(validBinary));
+
+    Session binaryFirst(context, workload);
+    binaryFirst.bindDataGraphBinary(validBinary);
+    EXPECT_NO_THROW(bindComputeModule(binaryFirst));
+}
+
+TEST(VgfDataGraphBinary, RejectsGraphConstantsForSelectedSegment) {
+    const std::vector<int8_t> weights(16 * 2 * 2 * 16, 0);
+    const auto bytes = makeConv2dRescaleConstantVgf(weights);
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    const NullVulkanContext vulkan;
+    auto context = vulkan.wrap();
+    Session session(context, workload);
+
+    EXPECT_THROW(session.bindDataGraphBinary(validBinary), std::runtime_error);
+}
+#endif

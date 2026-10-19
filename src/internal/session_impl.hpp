@@ -95,7 +95,7 @@ struct Session::Impl {
     std::vector<detail::ResourceTiling> resourceTilings;
 
     std::map<uint32_t, Module> moduleImplementations;
-    std::optional<DataGraphBinaryInput> dataGraphBinaryInput;
+    std::map<uint32_t, DataGraphBinaryInput> dataGraphBinaryInputs;
 
     std::vector<ExecutableState> executableStates;
 

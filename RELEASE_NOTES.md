@@ -36,6 +36,8 @@
 - Added experimental standalone data-graph binary pipeline creation from
   caller-provided bytes, with both storage modes and an optional opaque
   pipeline selector.
+- Added experimental per-segment use of external data-graph binaries in VGF
+  workloads; other graph and compute executables keep their modules.
 
 ## Version 0.11.0 – *Initial Public Release*
 

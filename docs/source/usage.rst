@@ -16,15 +16,21 @@ A workload is executed through the following sequence:
 2. Create a runtime-owned ``Context``, or wrap the application's Vulkan® instance,
    physical device, device, queue family, and queue.
 
-3. Create a ``Session``, bind any needed placeholder module or data-graph
-   binary, then call ``Session::configure()``.
+3. Create a ``Session``, bind any needed placeholder modules or data-graph
+   binaries, then call ``Session::configure()``.
 
    - For a placeholder module, call
      ``Session::bindModule(workload.placeholderModule(index), implementation)``.
-   - For a standalone data graph backed by a binary, call
-     ``Session::bindDataGraphBinary(binary)``.
+   - For an external data-graph binary, call
+     ``Session::bindDataGraphBinary(binary)``. Both standalone and VGF graphs
+     can specify a storage mode and pipeline selector. The final executable
+     index defaults to 0; use it to select another graph in a VGF workload.
+     Multiple executables can share one binary with different selectors or use
+     separate binaries.
 
-   These compilation inputs are alternatives; a Session cannot bind both.
+   A placeholder module and binary cannot target the same module. Unselected
+   graph and compute executables continue to use their workload modules. A
+   VGF graph selected for binary execution may omit its shader module.
 
 4. Create a ``BindingSet`` and bind each public resource using caller-owned or
    runtime-owned allocations.
@@ -256,11 +262,11 @@ Ownership and lifetimes
   a standalone data-graph description.
 - The library borrows data-graph binary bytes when they are bound to a
   ``Session``. The pointer must meet the device's
-  ``dataGraphPipelineBinaryDataAlignment`` requirement. With the default
-  ``DataGraphBinaryStorageMode::ImplementationManaged`` mode, keep the bytes
-  valid until ``Session::configure()`` returns. If pipeline creation fails and
-  is retried, keep them alive or bind a replacement binary before retrying. The optional
-  identifier is copied when bound.
+  ``dataGraphPipelineBinaryDataAlignment`` requirement. With the
+  default ``DataGraphBinaryStorageMode::ImplementationManaged`` mode, keep the
+  bytes valid until ``Session::configure()`` returns. If pipeline creation fails
+  and is retried, keep them alive or bind a replacement binary before retrying.
+  The optional identifier is copied when bound.
 - With ``DataGraphBinaryStorageMode::ApplicationBacked``, Vulkan® may use the
   supplied bytes directly. Keep them accessible and unchanged until every
   pipeline created from them is destroyed, including compiled state shared by Sessions.

@@ -467,10 +467,11 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
                                                             options.pipelineCache, options.pipelineRobustness);
     } else {
 #ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
-        if (dataGraphBinaryInput.has_value()) {
+        if (const auto binaryInput = dataGraphBinaryInputs.find(executableIndex);
+            binaryInput != dataGraphBinaryInputs.end()) {
             compiledExecutable.pipeline =
                 createDataGraphBinaryPipeline(executable, compiledExecutable.pipelineLayout, contextView,
-                                              *dataGraphBinaryInput, options.neuralStatistics.has_value());
+                                              binaryInput->second, options.neuralStatistics.has_value());
             return;
         }
 #endif
@@ -582,7 +583,7 @@ DataGraphSessionMemoryInfo Session::Impl::dataGraphSessionMemory(uint32_t execut
 
 void Session::Impl::compileOrReuseExecutables() {
     if (compiledExecutionState->compiledState.has_value()) {
-        if (!moduleImplementations.empty() || dataGraphBinaryInput.has_value()) {
+        if (!moduleImplementations.empty() || !dataGraphBinaryInputs.empty()) {
             throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
         }
         detail::validateCompiledTilings(resourceTilings, compiledExecutionState->compiledState->pipelineTilings);
@@ -598,7 +599,7 @@ void Session::Impl::compileOrReuseExecutables() {
     compiledExecutionState->compiledState.emplace(
         detail::CompiledState{detail::fixedPipelineTilings(workload, resourceTilings), std::move(compiledExecutables)});
     moduleImplementations.clear();
-    dataGraphBinaryInput.reset();
+    dataGraphBinaryInputs.clear();
 }
 
 void Session::Impl::configure() {
@@ -670,8 +671,12 @@ void Session::bindModule(PlaceholderModuleView placeholderModule, ModuleImplemen
     if (implementation.codeKind == ModuleCodeKind::Missing) {
         throw std::runtime_error("ModuleImplementation must provide executable module code");
     }
-    if (sessionState.dataGraphBinaryInput.has_value()) {
-        throw std::runtime_error("Placeholder modules and data graph binaries cannot both be bound to a Session");
+    const auto &executables = workloadImpl(sessionState.workload).executables;
+    const auto usesBinary = [&](const auto &binaryInput) {
+        return executables.at(binaryInput.first).moduleIndex == moduleIndex;
+    };
+    if (std::any_of(sessionState.dataGraphBinaryInputs.begin(), sessionState.dataGraphBinaryInputs.end(), usesBinary)) {
+        throw std::runtime_error("A placeholder module and data graph binary cannot target the same module");
     }
 
     sessionState.moduleImplementations[moduleIndex] =
@@ -679,7 +684,7 @@ void Session::bindModule(PlaceholderModuleView placeholderModule, ModuleImplemen
 }
 
 void Session::bindDataGraphBinary(ArrayView<const std::byte> binary, DataGraphBinaryStorageMode storageMode,
-                                  ArrayView<const uint8_t> pipelineIdentifier) {
+                                  ArrayView<const uint8_t> pipelineIdentifier, uint32_t executableIndex) {
 #ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
     auto &sessionState = sessionImpl();
     if (sessionState.configured) {
@@ -689,13 +694,16 @@ void Session::bindDataGraphBinary(ArrayView<const std::byte> binary, DataGraphBi
         throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
     }
     const auto &workloadState = workloadImpl(sessionState.workload);
-    if (workloadState.executables.size() != 1 || workloadState.executables.front().type != ExecutableKind::Graph) {
-        throw std::runtime_error("Data graph binary requires one data graph executable");
+    if (executableIndex >= workloadState.executables.size()) {
+        throw std::runtime_error("Data graph executable index is out of range");
     }
-    if (!sessionState.moduleImplementations.empty()) {
-        throw std::runtime_error("Placeholder modules and data graph binaries cannot both be bound to a Session");
+    const auto &workloadExecutable = workloadState.executables.at(executableIndex);
+    if (workloadExecutable.type != ExecutableKind::Graph) {
+        throw std::runtime_error("Data graph binary requires a data graph executable");
     }
-    const auto &workloadExecutable = workloadState.executables.at(0);
+    if (sessionState.moduleImplementations.count(workloadExecutable.moduleIndex) != 0) {
+        throw std::runtime_error("A placeholder module and data graph binary cannot target the same module");
+    }
     if (binary.data() == nullptr || binary.empty()) {
         throw std::runtime_error("Data graph binary payload must not be empty");
     }
@@ -738,8 +746,9 @@ void Session::bindDataGraphBinary(ArrayView<const std::byte> binary, DataGraphBi
     if (!pipelineIdentifier.empty()) {
         input.identifier.assign(pipelineIdentifier.begin(), pipelineIdentifier.end());
     }
-    sessionState.dataGraphBinaryInput = std::move(input);
+    sessionState.dataGraphBinaryInputs[executableIndex] = std::move(input);
 #else
+    static_cast<void>(executableIndex);
     static_cast<void>(binary);
     static_cast<void>(storageMode);
     static_cast<void>(pipelineIdentifier);

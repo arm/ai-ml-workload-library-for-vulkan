@@ -81,10 +81,10 @@ class Session final {
     /** @brief Supplies or replaces code for a placeholder module before configure(). */
     void bindModule(PlaceholderModuleView placeholderModule, ModuleImplementation implementation);
 
-    /** @brief Supplies or replaces borrowed binary bytes for a standalone data graph before configure(). */
+    /** @brief Supplies or replaces borrowed binary bytes for one graph executable before configure(). */
     void bindDataGraphBinary(ArrayView<const std::byte> binary,
                              DataGraphBinaryStorageMode storageMode = DataGraphBinaryStorageMode::ImplementationManaged,
-                             ArrayView<const uint8_t> pipelineIdentifier = {});
+                             ArrayView<const uint8_t> pipelineIdentifier = {}, uint32_t executableIndex = 0);
 
     /** @brief Chooses this Session's public tensor tiling before configure(). */
     void setTensorTiling(ResourceView resource, vk::TensorTilingARM tiling);
