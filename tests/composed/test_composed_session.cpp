@@ -22,7 +22,10 @@
 #include <vulkan/vulkan_core.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <future>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -298,7 +301,56 @@ TEST_P(ComposedAliasExecutionTest, PrepareRequiresBoundMemoryInfo) {
     runAliasCase(workload, GetParam(), false);
 }
 
+TEST_P(ComposedAliasExecutionTest, PrepareRejectsUndersizedAliasMemory) {
+    auto workload = makeAliasWorkload(GetParam().scenario);
+    expectInvalidAliasMemory(workload, GetParam(), AliasMemoryFailure::Undersized);
+}
+
+TEST_P(ComposedAliasExecutionTest, PrepareRejectsMisalignedAliasMemory) {
+    auto workload = makeAliasWorkload(GetParam().scenario);
+    expectInvalidAliasMemory(workload, GetParam(), AliasMemoryFailure::Misaligned);
+}
+
+TEST_P(ComposedAliasExecutionTest, PrepareRejectsOverflowingAliasMemory) {
+    auto workload = makeAliasWorkload(GetParam().scenario);
+    expectInvalidAliasMemory(workload, GetParam(), AliasMemoryFailure::Overflowing);
+}
+
 INSTANTIATE_TEST_SUITE_P(AliasCases, ComposedAliasExecutionTest, testing::ValuesIn(aliasCases), aliasCaseName);
+
+TEST_F(ComposedSessionExecutionTest, AliasMemoryHooksExcludeDispatchUntilTeardownCompletes) {
+    const auto original = device.getDispatcher()->vkGetBufferMemoryRequirements;
+    const vk::raii::Buffer buffer(device, {{}, 64, vk::BufferUsageFlagBits::eStorageBuffer});
+    const auto requirements = buffer.getMemoryRequirements();
+    std::promise<bool> accessAttempt;
+    auto attempted = accessAttempt.get_future();
+    std::future<vk::MemoryRequirements> callback;
+    std::weak_ptr<AliasMemoryValidationMock> mockLifetime;
+
+    {
+        const AliasMemoryValidationHooks hooks{AliasMemoryValidationHooks::DeviceAccess(device)};
+        mockLifetime = hooks.mock();
+        EXPECT_CALL(*hooks.mock(), GetBufferMemoryRequirements).Times(0);
+        callback = std::async(std::launch::async, [&] {
+            AliasMemoryValidationHooks::DeviceAccess access(device, std::defer_lock);
+            const bool acquired = access.tryLock();
+            accessAttempt.set_value(acquired);
+            if (!acquired) {
+                access.lock();
+            }
+            return buffer.getMemoryRequirements();
+        });
+        if (attempted.wait_for(std::chrono::seconds(5)) == std::future_status::ready) {
+            EXPECT_FALSE(attempted.get());
+        } else {
+            ADD_FAILURE() << "The worker did not attempt guarded device access";
+        }
+    }
+
+    EXPECT_EQ(callback.get(), requirements);
+    EXPECT_TRUE(mockLifetime.expired());
+    EXPECT_EQ(device.getDispatcher()->vkGetBufferMemoryRequirements, original);
+}
 
 TEST_F(ComposedSessionExecutionTest, RejectsIncompatibleBufferAndImageAliasingRequirements) {
     auto context = wrappedContext();

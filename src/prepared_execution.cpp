@@ -125,9 +125,10 @@ ImageBindingInfo PreparedExecution::Impl::RuntimeResourceStorage::adoptImage(vk:
  *******************************************************************************/
 
 struct PreparedExecution::Impl::ExistingAliasGroupBindings {
-    std::optional<std::reference_wrapper<const BoundTensor>> boundTensor;
-    std::optional<std::reference_wrapper<const BoundBuffer>> boundBuffer;
-    std::optional<std::reference_wrapper<const BoundImage>> boundImage;
+    // Copy non-owning binding metadata so vector growth cannot invalidate the saved bindings.
+    std::optional<TensorBindingInfo> boundTensor;
+    std::optional<BufferBindingInfo> boundBuffer;
+    std::optional<ImageBindingInfo> boundImage;
     std::optional<BoundMemoryInfo> boundMemory;
 
     bool hasBoundAlias() const noexcept {
@@ -216,12 +217,23 @@ vk::MemoryRequirements resourceMemoryRequirements(const ContextView &contextView
 }
 
 template <typename RuntimeResource>
-void bindResourceMemory(const ContextView &contextView, RuntimeResource &resource, vk::DeviceMemory memory,
-                        vk::DeviceSize offset) {
+void bindResourceMemory(const ContextView &contextView, RuntimeResource &resource, BoundMemoryInfo memory) {
+    const auto requirements = resourceMemoryRequirements(contextView, resource);
+    if (memory.size < requirements.size) {
+        throw std::runtime_error("Bound memory is too small for a resource");
+    }
+    if (requirements.alignment != 0 && memory.offset % requirements.alignment != 0) {
+        throw std::runtime_error("Bound memory offset does not satisfy resource alignment");
+    }
+    if (memory.offset > std::numeric_limits<vk::DeviceSize>::max() - memory.size) {
+        throw std::runtime_error("Bound memory range overflows");
+    }
+
     if constexpr (std::is_same_v<std::decay_t<RuntimeResource>, vk::raii::TensorARM>) {
-        contextView.device.get().bindTensorMemoryARM(vk::BindTensorMemoryInfoARM(*resource, memory, offset));
+        contextView.device.get().bindTensorMemoryARM(
+            vk::BindTensorMemoryInfoARM(*resource, memory.memory, memory.offset));
     } else {
-        resource.bindMemory(memory, offset);
+        resource.bindMemory(memory.memory, memory.offset);
     }
 }
 
@@ -254,16 +266,17 @@ void validateBoundMemoryInfo(const Workload &workload, uint32_t resourceIndex, B
 }
 
 template <typename BoundResources>
-const typename BoundResources::value_type &findBoundResource(const BoundResources &boundResources,
-                                                             uint32_t resourceIndex, ResourceKind resourceKind) {
+const typename BoundResources::value_type *findBoundResource(const BoundResources &boundResources,
+                                                             uint32_t resourceIndex,
+                                                             std::optional<ResourceKind> requiredKind = std::nullopt) {
     const auto boundResource = findRefIf(boundResources, [resourceIndex](const auto &resource) {
         return resource.descBinding.resourceIndex == resourceIndex;
     });
-    if (!boundResource.has_value()) {
-        throw std::runtime_error("No " + std::string(detail::resourceKindName(resourceKind)) +
+    if (!boundResource.has_value() && requiredKind.has_value()) {
+        throw std::runtime_error("No " + std::string(detail::resourceKindName(*requiredKind)) +
                                  " bound for workload resource " + std::to_string(resourceIndex));
     }
-    return boundResource->get();
+    return boundResource.has_value() ? &boundResource->get() : nullptr;
 }
 
 /*******************************************************************************
@@ -274,6 +287,7 @@ vk::raii::TensorARM createIntermediateTensor(const Workload &workload, const Con
                                              const DescriptorBinding &descBinding, vk::TensorTilingARM tiling) {
     const auto &resource = workloadImpl(workload).resources.at(descBinding.resourceIndex);
     const auto usage = detail::tensorUsageForTiling(workload, descBinding.resourceIndex, tiling);
+    detail::validateTensorTiling(tiling, usage, resource.shape, !resource.stride.empty());
     const vk::TensorDescriptionARM description(tiling, resource.format, static_cast<uint32_t>(resource.shape.size()),
                                                resource.shape.data(),
                                                resource.stride.empty() ? nullptr : resource.stride.data(), usage);
@@ -386,6 +400,9 @@ void PreparedExecution::Impl::addBoundPushConstants(const BindingSet::Impl &bind
 }
 
 void PreparedExecution::Impl::addBoundTensor(TensorBindingInfo tensorBindingInfo, DescriptorBinding descBinding) {
+    if (findBoundResource(boundTensors, descBinding.resourceIndex)) {
+        return;
+    }
     const auto &resource = workloadImpl(sessionImpl.workload).resources.at(descBinding.resourceIndex);
     const vk::TensorViewCreateInfoARM viewCreateInfo({}, tensorBindingInfo.tensor, resource.format);
     boundTensors.push_back({descBinding, tensorBindingInfo.tensor,
@@ -394,10 +411,16 @@ void PreparedExecution::Impl::addBoundTensor(TensorBindingInfo tensorBindingInfo
 }
 
 void PreparedExecution::Impl::addBoundBuffer(BufferBindingInfo bufferBindingInfo, DescriptorBinding descBinding) {
+    if (findBoundResource(boundBuffers, descBinding.resourceIndex)) {
+        return;
+    }
     boundBuffers.push_back({descBinding, bufferBindingInfo.buffer, bufferBindingInfo.memory});
 }
 
 void PreparedExecution::Impl::addBoundImage(ImageBindingInfo imageBindingInfo, DescriptorBinding descBinding) {
+    if (findBoundResource(boundImages, descBinding.resourceIndex)) {
+        return;
+    }
     const auto &workloadState = workloadImpl(sessionImpl.workload);
     const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
     const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
@@ -481,7 +504,7 @@ void PreparedExecution::Impl::resolveUnaliasedIntermediateTensor(const Descripto
     auto tensor = createIntermediateTensor(sessionImpl.workload, sessionImpl.contextView, descBinding, tiling);
     const auto memoryRequirements = resourceMemoryRequirements(sessionImpl.contextView, tensor);
     auto memory = allocateDeviceLocalMemory(sessionImpl.contextView, memoryRequirements);
-    bindResourceMemory(sessionImpl.contextView, tensor, *memory, 0);
+    bindResourceMemory(sessionImpl.contextView, tensor, {*memory, 0, memoryRequirements.size});
     const auto tensorBindingInfo =
         runtimeResources.adoptTensor(std::move(tensor), std::move(memory), memoryRequirements.size);
     addBoundTensor(tensorBindingInfo, descBinding);
@@ -491,7 +514,7 @@ void PreparedExecution::Impl::resolveUnaliasedIntermediateBuffer(const Descripto
     auto buffer = createIntermediateBuffer(sessionImpl.workload, sessionImpl.contextView, descBinding);
     const auto memoryRequirements = resourceMemoryRequirements(sessionImpl.contextView, buffer);
     auto memory = allocateDeviceLocalMemory(sessionImpl.contextView, memoryRequirements);
-    bindResourceMemory(sessionImpl.contextView, buffer, *memory, 0);
+    bindResourceMemory(sessionImpl.contextView, buffer, {*memory, 0, memoryRequirements.size});
     const auto bufferBindingInfo =
         runtimeResources.adoptBuffer(std::move(buffer), std::move(memory), memoryRequirements.size);
     addBoundBuffer(bufferBindingInfo, descBinding);
@@ -503,7 +526,7 @@ void PreparedExecution::Impl::resolveUnaliasedIntermediateImage(const Descriptor
     const auto memoryRequirements = resourceMemoryRequirements(sessionImpl.contextView, image);
     auto memory = allocateDeviceLocalMemory(sessionImpl.contextView, memoryRequirements);
     const BoundMemoryInfo bindingMemory{*memory, 0, memoryRequirements.size};
-    bindResourceMemory(sessionImpl.contextView, image, bindingMemory.memory, bindingMemory.offset);
+    bindResourceMemory(sessionImpl.contextView, image, bindingMemory);
     const auto imageBindingInfo =
         runtimeResources.adoptImage(std::move(image), std::move(memory), memoryRequirements.size, bindingMemory);
     addBoundImage(imageBindingInfo, descBinding);
@@ -514,21 +537,30 @@ PreparedExecution::Impl::ExistingAliasGroupBindings
 PreparedExecution::Impl::findExistingAliasGroupBindings(uint32_t aliasGroupId) const {
     ExistingAliasGroupBindings existingBindings;
     const auto &workload = sessionImpl.workload;
-    const auto findBoundResourceInAliasGroup = [&workload, aliasGroupId](auto &existingBinding,
-                                                                         const auto &boundResources) {
-        existingBinding = findRefIf(boundResources, [&workload, aliasGroupId](const auto &boundResource) {
+    const auto findBoundResourceInAliasGroup = [&workload, aliasGroupId](const auto &boundResources) {
+        return findRefIf(boundResources, [&workload, aliasGroupId](const auto &boundResource) {
             const auto &resource = workloadImpl(workload).resources.at(boundResource.descBinding.resourceIndex);
             return resource.aliasGroupId.has_value() && *resource.aliasGroupId == aliasGroupId;
         });
     };
 
-    findBoundResourceInAliasGroup(existingBindings.boundTensor, boundTensors);
-    findBoundResourceInAliasGroup(existingBindings.boundBuffer, boundBuffers);
-    findBoundResourceInAliasGroup(existingBindings.boundImage, boundImages);
+    if (const auto boundTensor = findBoundResourceInAliasGroup(boundTensors)) {
+        const auto &tensor = boundTensor->get();
+        existingBindings.boundTensor = TensorBindingInfo{tensor.tensor, tensor.memory};
+    }
+    if (const auto boundBuffer = findBoundResourceInAliasGroup(boundBuffers)) {
+        const auto &buffer = boundBuffer->get();
+        existingBindings.boundBuffer = BufferBindingInfo{buffer.buffer, buffer.memory};
+    }
+    if (const auto boundImage = findBoundResourceInAliasGroup(boundImages)) {
+        const auto &image = boundImage->get();
+        existingBindings.boundImage = ImageBindingInfo{image.image,   image.memory, image.imageView,
+                                                       image.sampler, image.layout, image.subresourceRange};
+    }
 
     const auto rememberBoundMemory = [&existingBindings](const auto &existingBinding) {
-        if (existingBinding.has_value() && existingBinding->get().memory.memory != nullptr) {
-            existingBindings.boundMemory = existingBinding->get().memory;
+        if (existingBinding.has_value() && existingBinding->memory.memory != nullptr) {
+            existingBindings.boundMemory = existingBinding->memory;
         }
     };
     rememberBoundMemory(existingBindings.boundTensor);
@@ -560,7 +592,7 @@ void PreparedExecution::Impl::resolveAliasGroupBinding(const DescriptorBinding &
         auto tensor = createIntermediateTensor(sessionImpl.workload, sessionImpl.contextView, descBinding, tiling);
         if (existingBindings.boundMemory.has_value()) {
             const auto aliasMemory = *existingBindings.boundMemory;
-            bindResourceMemory(sessionImpl.contextView, tensor, aliasMemory.memory, aliasMemory.offset);
+            bindResourceMemory(sessionImpl.contextView, tensor, aliasMemory);
             const auto tensorBindingInfo = runtimeResources.adoptTensor(std::move(tensor), aliasMemory);
             addBoundTensor(tensorBindingInfo, descBinding);
             return;
@@ -576,7 +608,7 @@ void PreparedExecution::Impl::resolveAliasGroupBinding(const DescriptorBinding &
         auto buffer = createIntermediateBuffer(sessionImpl.workload, sessionImpl.contextView, descBinding);
         if (existingBindings.boundMemory.has_value()) {
             const auto aliasMemory = *existingBindings.boundMemory;
-            bindResourceMemory(sessionImpl.contextView, buffer, aliasMemory.memory, aliasMemory.offset);
+            bindResourceMemory(sessionImpl.contextView, buffer, aliasMemory);
             const auto bufferBindingInfo = runtimeResources.adoptBuffer(std::move(buffer), aliasMemory);
             addBoundBuffer(bufferBindingInfo, descBinding);
             return;
@@ -594,7 +626,7 @@ void PreparedExecution::Impl::resolveAliasGroupBinding(const DescriptorBinding &
         auto image = createIntermediateImage(sessionImpl.workload, sessionImpl.contextView, descBinding, true, tiling);
         if (existingBindings.boundMemory.has_value()) {
             const auto aliasMemory = *existingBindings.boundMemory;
-            bindResourceMemory(sessionImpl.contextView, image, aliasMemory.memory, aliasMemory.offset);
+            bindResourceMemory(sessionImpl.contextView, image, aliasMemory);
             const auto imageBindingInfo = runtimeResources.adoptImage(std::move(image), aliasMemory);
             addBoundImage(imageBindingInfo, descBinding);
             return;
@@ -625,18 +657,14 @@ void PreparedExecution::Impl::addExistingAliasBinding(const DescriptorBinding &d
         if (!existingBindings.boundTensor.has_value()) {
             throwNoAlias("tensor");
         }
-        const auto &boundTensor = existingBindings.boundTensor->get();
-        const TensorBindingInfo tensorBindingInfo{boundTensor.tensor, boundTensor.memory};
-        addBoundTensor(tensorBindingInfo, descBinding);
+        addBoundTensor(*existingBindings.boundTensor, descBinding);
         return;
     }
     case vk::DescriptorType::eStorageBuffer: {
         if (!existingBindings.boundBuffer.has_value()) {
             throwNoAlias("buffer");
         }
-        const auto &boundBuffer = existingBindings.boundBuffer->get();
-        const BufferBindingInfo bufferBindingInfo{boundBuffer.buffer, boundBuffer.memory};
-        addBoundBuffer(bufferBindingInfo, descBinding);
+        addBoundBuffer(*existingBindings.boundBuffer, descBinding);
         return;
     }
     case vk::DescriptorType::eCombinedImageSampler:
@@ -644,15 +672,7 @@ void PreparedExecution::Impl::addExistingAliasBinding(const DescriptorBinding &d
         if (!existingBindings.boundImage.has_value()) {
             throwNoAlias("image");
         }
-        const auto &boundImage = existingBindings.boundImage->get();
-        ImageBindingInfo imageBindingInfo;
-        imageBindingInfo.image = boundImage.image;
-        imageBindingInfo.memory = boundImage.memory;
-        imageBindingInfo.imageView = boundImage.imageView;
-        imageBindingInfo.sampler = boundImage.sampler;
-        imageBindingInfo.layout = boundImage.layout;
-        imageBindingInfo.subresourceRange = boundImage.subresourceRange;
-        addBoundImage(imageBindingInfo, descBinding);
+        addBoundImage(*existingBindings.boundImage, descBinding);
         return;
     }
     default:
@@ -672,16 +692,17 @@ PreparedExecution::Impl::allocateAliasGroupMemory(const PendingAliasGroupAllocat
 
 void PreparedExecution::Impl::bindAliasGroupMemory(PendingAliasGroupAllocation &pendingAllocation,
                                                    vk::DeviceMemory aliasMemory) const {
+    const BoundMemoryInfo bindingMemory{aliasMemory, 0, pendingAllocation.memorySize};
     for (auto &pendingTensor : pendingAllocation.tensors) {
-        bindResourceMemory(sessionImpl.contextView, pendingTensor.second, aliasMemory, 0);
+        bindResourceMemory(sessionImpl.contextView, pendingTensor.second, bindingMemory);
     }
 
     for (auto &pendingBuffer : pendingAllocation.buffers) {
-        bindResourceMemory(sessionImpl.contextView, pendingBuffer.second, aliasMemory, 0);
+        bindResourceMemory(sessionImpl.contextView, pendingBuffer.second, bindingMemory);
     }
 
     for (auto &pendingImage : pendingAllocation.images) {
-        bindResourceMemory(sessionImpl.contextView, pendingImage.second, aliasMemory, 0);
+        bindResourceMemory(sessionImpl.contextView, pendingImage.second, bindingMemory);
     }
 }
 
@@ -743,8 +764,8 @@ void PreparedExecution::Impl::writeDescriptors() const {
             const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
             switch (descriptorType) {
             case vk::DescriptorType::eTensorARM: {
-                const auto &tensor = findBoundResource(boundTensors, descBinding.resourceIndex, ResourceKind::Tensor);
-                const auto tensorView = *tensor.tensorView;
+                const auto *tensor = findBoundResource(boundTensors, descBinding.resourceIndex, ResourceKind::Tensor);
+                const auto tensorView = *tensor->tensorView;
                 const vk::WriteDescriptorSetTensorARM tensorInfo(1, &tensorView);
                 const vk::WriteDescriptorSet write(*descriptorSets[descBinding.set], descBinding.binding, 0, 1,
                                                    descriptorType, nullptr, nullptr, nullptr, &tensorInfo);
@@ -752,9 +773,9 @@ void PreparedExecution::Impl::writeDescriptors() const {
                 break;
             }
             case vk::DescriptorType::eStorageBuffer: {
-                const auto &buffer =
+                const auto *buffer =
                     findBoundResource(boundBuffers, descBinding.resourceIndex, ResourceKind::StorageBuffer);
-                const vk::DescriptorBufferInfo bufferInfo(buffer.buffer, 0, vk::WholeSize);
+                const vk::DescriptorBufferInfo bufferInfo(buffer->buffer, 0, vk::WholeSize);
                 const vk::WriteDescriptorSet write(*descriptorSets[descBinding.set], descBinding.binding, 0, 1,
                                                    descriptorType, nullptr, &bufferInfo);
                 sessionImpl.contextView.device.get().updateDescriptorSets(write, nullptr);
@@ -762,10 +783,10 @@ void PreparedExecution::Impl::writeDescriptors() const {
             }
             case vk::DescriptorType::eCombinedImageSampler:
             case vk::DescriptorType::eStorageImage: {
-                const auto &image = findBoundResource(boundImages, descBinding.resourceIndex, ResourceKind::Image);
+                const auto *image = findBoundResource(boundImages, descBinding.resourceIndex, ResourceKind::Image);
                 const vk::DescriptorImageInfo imageInfo(
-                    descriptorType == vk::DescriptorType::eCombinedImageSampler ? image.sampler : vk::Sampler(),
-                    image.imageView, requiredImageLayout(sessionImpl.workload, descBinding));
+                    descriptorType == vk::DescriptorType::eCombinedImageSampler ? image->sampler : vk::Sampler(),
+                    image->imageView, requiredImageLayout(sessionImpl.workload, descBinding));
                 const vk::WriteDescriptorSet write(*descriptorSets[descBinding.set], descBinding.binding, 0, 1,
                                                    descriptorType, &imageInfo);
                 sessionImpl.contextView.device.get().updateDescriptorSets(write, nullptr);
@@ -891,7 +912,7 @@ void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandB
         const auto descriptorType = workloadState.descriptorTypeForBinding(producerBinding);
         switch (descriptorType) {
         case vk::DescriptorType::eTensorARM: {
-            const auto &tensor = findBoundResource(boundTensors, producerBinding.resourceIndex, ResourceKind::Tensor);
+            const auto *tensor = findBoundResource(boundTensors, producerBinding.resourceIndex, ResourceKind::Tensor);
             vk::TensorMemoryBarrierARM tensorBarrier;
             tensorBarrier.srcStageMask = detail::pipelineStage(producerType);
             tensorBarrier.srcAccessMask = detail::writeAccess(producerType);
@@ -899,14 +920,14 @@ void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandB
             tensorBarrier.dstAccessMask = detail::readAccess(consumerType) | detail::writeAccess(consumerType);
             tensorBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             tensorBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            tensorBarrier.tensor = tensor.tensor;
+            tensorBarrier.tensor = tensor->tensor;
 
             tensorBarriers.push_back(tensorBarrier);
             barrierResourceIndices.push_back(producerBinding.resourceIndex);
             break;
         }
         case vk::DescriptorType::eStorageBuffer: {
-            const auto &buffer =
+            const auto *buffer =
                 findBoundResource(boundBuffers, producerBinding.resourceIndex, ResourceKind::StorageBuffer);
             vk::BufferMemoryBarrier2 bufferBarrier;
             bufferBarrier.srcStageMask = detail::pipelineStage(producerType);
@@ -915,7 +936,7 @@ void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandB
             bufferBarrier.dstAccessMask = detail::readAccess(consumerType) | detail::writeAccess(consumerType);
             bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            bufferBarrier.buffer = buffer.buffer;
+            bufferBarrier.buffer = buffer->buffer;
             bufferBarrier.offset = 0;
             bufferBarrier.size = vk::WholeSize;
 
@@ -925,7 +946,7 @@ void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandB
         }
         case vk::DescriptorType::eCombinedImageSampler:
         case vk::DescriptorType::eStorageImage: {
-            const auto &image = findBoundResource(boundImages, producerBinding.resourceIndex, ResourceKind::Image);
+            const auto *image = findBoundResource(boundImages, producerBinding.resourceIndex, ResourceKind::Image);
             const auto descriptorLayout = requiredImageLayout(sessionImpl.workload, producerBinding);
             vk::ImageMemoryBarrier2 imageBarrier;
             imageBarrier.srcStageMask = detail::pipelineStage(producerType);
@@ -936,8 +957,8 @@ void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandB
             imageBarrier.newLayout = descriptorLayout;
             imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            imageBarrier.image = image.image;
-            imageBarrier.subresourceRange = image.subresourceRange;
+            imageBarrier.image = image->image;
+            imageBarrier.subresourceRange = image->subresourceRange;
 
             imageBarriers.push_back(imageBarrier);
             barrierResourceIndices.push_back(producerBinding.resourceIndex);

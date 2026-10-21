@@ -1746,6 +1746,24 @@ TEST_P(VgfAliasExecutionTest, PrepareRequiresBoundMemoryInfo) {
     runAliasCase(workload, GetParam(), false);
 }
 
+TEST_P(VgfAliasExecutionTest, PrepareRejectsUndersizedAliasMemory) {
+    const auto bytes = makeAliasVgf(GetParam().scenario);
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    expectInvalidAliasMemory(workload, GetParam(), AliasMemoryFailure::Undersized);
+}
+
+TEST_P(VgfAliasExecutionTest, PrepareRejectsMisalignedAliasMemory) {
+    const auto bytes = makeAliasVgf(GetParam().scenario);
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    expectInvalidAliasMemory(workload, GetParam(), AliasMemoryFailure::Misaligned);
+}
+
+TEST_P(VgfAliasExecutionTest, PrepareRejectsOverflowingAliasMemory) {
+    const auto bytes = makeAliasVgf(GetParam().scenario);
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    expectInvalidAliasMemory(workload, GetParam(), AliasMemoryFailure::Overflowing);
+}
+
 INSTANTIATE_TEST_SUITE_P(AliasCases, VgfAliasExecutionTest, testing::ValuesIn(aliasCases), aliasCaseName);
 
 #ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
