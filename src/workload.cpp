@@ -7,6 +7,8 @@
 #include "internal/utils.hpp"
 #include "internal/workload_impl.hpp"
 
+#include <vulkan/vulkan_format_traits.hpp>
+
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
@@ -78,20 +80,19 @@ vk::Extent3D detail::Resource::imageExtent() const {
         return static_cast<uint32_t>(value);
     };
 
-    if (shape.size() == 3) {
-        return {dimension("width", shape[0]), dimension("height", shape[1]), dimension("depth", shape[2])};
+    if (shape.size() != 3 && shape.size() != 4) {
+        throw std::runtime_error("Workload image shape must be HWC or NHWC; got rank " + std::to_string(shape.size()));
     }
-    if (shape.size() != 4) {
-        throw std::runtime_error("Workload image shape must be a 3D extent or 4D NHWC; got rank " +
-                                 std::to_string(shape.size()));
-    }
-    if (shape[0] != 1) {
+    if (shape.size() == 4 && shape[0] != 1) {
         throw std::runtime_error("Workload NHWC image batch must be 1; got " + std::to_string(shape[0]));
     }
-    if (shape[3] != 4) {
-        throw std::runtime_error("Workload NHWC image channel count must be 4; got " + std::to_string(shape[3]));
+    const auto channelCount = vk::componentCount(format);
+    if (shape.back() != channelCount) {
+        throw std::runtime_error("Workload image channel count must match format component count " +
+                                 std::to_string(channelCount) + "; got " + std::to_string(shape.back()));
     }
-    return {dimension("width", shape[2]), dimension("height", shape[1]), 1};
+    const auto heightIndex = shape.size() - 3;
+    return {dimension("width", shape[heightIndex + 1]), dimension("height", shape[heightIndex]), 1};
 }
 
 vk::ImageLayout detail::Resource::requiredImageLayout() const {

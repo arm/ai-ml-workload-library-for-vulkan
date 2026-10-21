@@ -156,6 +156,22 @@ TEST(VgfWorkload, DecodesFileBackedImageSamplerAndHidesConstants) {
     EXPECT_FALSE(image.requirements().asImage().requiresSamplerBinding());
 }
 
+TEST(VgfWorkload, DecodesHwcImageExtent) {
+    const auto &code = assembleMaxpool16x16To8x8Spirv("maxpool_set0", {0, 0, 0, 1});
+    const auto data = writeVgf([&](Encoder &encoder) {
+        const auto module = encoder.AddModule(ModuleType::COMPUTE, "shader", "main", code);
+        const auto image =
+            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_FORMAT_R8G8B8A8_UNORM, {3, 5, 4}, {});
+        const auto imageBinding = encoder.AddBindingSlot(0, image);
+        const auto descriptorSet = encoder.AddDescriptorSetInfo({imageBinding}, 0);
+        encoder.AddSegmentInfo(module, "executable", {descriptorSet}, {imageBinding}, {}, noGraphConstants, {1, 1, 1});
+    });
+
+    const auto workload = Workload::fromVGF(data.data(), data.size());
+
+    EXPECT_EQ(workload.resource(0).requirements().asImage().extent(), vk::Extent3D(5, 3, 1));
+}
+
 TEST(VgfWorkload, ReportsAliasedImageUsageForSelectedTiling) {
     const auto &code = assembleMaxpool16x16To8x8Spirv("maxpool_set0", {0, 0, 0, 1});
     const auto data = writeVgf([&](Encoder &encoder) {
@@ -228,7 +244,10 @@ TEST(VgfWorkload, DecodesPublicResourceAliasRequirements) {
 TEST(VgfWorkload, RejectsInvalidImageMetadata) {
     const std::vector<std::vector<int64_t>> invalidShapes = {
         {3, 5},                                                                    // Invalid rank.
-        {3, 0, 1},                                                                 // Invalid 3D extent.
+        {3, 0, 4},                                                                 // Zero HWC width.
+        {3, 5, 3},                                                                 // Invalid HWC channel count.
+        {3, -2, 4},                                                                // Negative HWC width.
+        {3, static_cast<int64_t>(std::numeric_limits<uint32_t>::max()) + 1, 4},    // HWC width overflow.
         {2, 3, 5, 4},                                                              // Non-unit NHWC batch.
         {1, 3, 5, 3},                                                              // Invalid channel count.
         {1, 0, 5, 4},                                                              // Zero dimension.
