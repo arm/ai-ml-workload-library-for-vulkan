@@ -8,12 +8,36 @@
 #include "mlworkloadlib_utils/application_context.hpp"
 
 #include <gtest/gtest.h>
+#include <vulkan/vulkan_raii.hpp>
 
 #include <cstdint>
 #include <limits>
 #include <utility>
 
 namespace mlsdk::workloadlib::test {
+
+template <typename Function> class ScopedDeviceDispatcherHook {
+  public:
+    ScopedDeviceDispatcherHook(vk::raii::Device &device, Function vk::raii::detail::DeviceDispatcher::*entry,
+                               Function replacement)
+        // Vulkan-Hpp exposes only a const dispatcher, even for a mutable device.
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+        : entry_(const_cast<vk::raii::detail::DeviceDispatcher &>(*device.getDispatcher()).*entry),
+          original_(std::exchange(entry_, replacement)) {}
+
+    ~ScopedDeviceDispatcherHook() { entry_ = original_; }
+
+    ScopedDeviceDispatcherHook(const ScopedDeviceDispatcherHook &) = delete;
+    ScopedDeviceDispatcherHook &operator=(const ScopedDeviceDispatcherHook &) = delete;
+    ScopedDeviceDispatcherHook(ScopedDeviceDispatcherHook &&) = delete;
+    ScopedDeviceDispatcherHook &operator=(ScopedDeviceDispatcherHook &&) = delete;
+
+    Function original() const { return original_; }
+
+  private:
+    Function &entry_;
+    Function original_;
+};
 
 template <typename RecordCommands>
 void recordAndSubmitCommands(const vk::raii::Device &device, const vk::raii::Queue &queue, vk::CommandPool commandPool,
