@@ -100,9 +100,29 @@ vk::ImageLayout detail::Resource::requiredImageLayout() const {
 }
 
 vk::ImageSubresourceRange detail::Resource::requiredImageSubresourceRange() const {
-    const auto subresourceRange = imageMetadata(*this).subresourceRange;
-    return subresourceRange.aspectMask ? subresourceRange
-                                       : vk::ImageSubresourceRange{vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+    const auto &image = imageMetadata(*this);
+    const auto formatAspects = detail::imageAspectMask(format);
+    auto subresourceRange = image.subresourceRange;
+    if (!subresourceRange.aspectMask) {
+        const auto defaultAspects = descriptorType == vk::DescriptorType::eCombinedImageSampler &&
+                                            (formatAspects & vk::ImageAspectFlagBits::eDepth)
+                                        ? vk::ImageAspectFlags{vk::ImageAspectFlagBits::eDepth}
+                                        : formatAspects;
+        subresourceRange = {defaultAspects, 0, 1, 0, 1};
+    }
+    const auto planeCount = vk::planeCount(format);
+    const auto isValidPlaneAspect =
+        (planeCount > 1 && (subresourceRange.aspectMask == vk::ImageAspectFlagBits::ePlane0 ||
+                            subresourceRange.aspectMask == vk::ImageAspectFlagBits::ePlane1)) ||
+        (planeCount > 2 && subresourceRange.aspectMask == vk::ImageAspectFlagBits::ePlane2);
+    if ((subresourceRange.aspectMask & ~formatAspects) && !isValidPlaneAspect) {
+        throw std::runtime_error("Image subresource aspects do not match its format");
+    }
+    if (descriptorType == vk::DescriptorType::eCombinedImageSampler &&
+        subresourceRange.aspectMask == (vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil)) {
+        throw std::runtime_error("Sampled depth/stencil images must select one aspect");
+    }
+    return subresourceRange;
 }
 
 ResourceAccess Workload::Impl::resourceAccess(uint32_t resourceIndex) const {

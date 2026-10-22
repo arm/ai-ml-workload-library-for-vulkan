@@ -7,6 +7,7 @@
 #include "workload_impl.hpp"
 
 #include <vulkan/vulkan_beta.h>
+#include <vulkan/vulkan_format_traits.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -82,6 +83,8 @@ vk::DeviceSize elementCount(const std::vector<int64_t> &shape) {
     return count;
 }
 
+bool isKnownFormat(vk::Format format) { return vk::componentCount(format) != 0; }
+
 vk::DeviceSize byteSizeFromShapeAndStride(const std::vector<int64_t> &shape, const std::vector<int64_t> &stride,
                                           vk::DeviceSize elementSize, std::string_view description) {
     if (stride.empty()) {
@@ -134,6 +137,26 @@ vk::DeviceSize storageBufferByteSize(vk::DeviceSize explicitByteSize, vk::Format
         throw std::runtime_error("Storage buffer byte size must not be zero");
     }
     return size;
+}
+
+vk::ImageAspectFlags imageAspectMask(vk::Format format) {
+    if (!isKnownFormat(format)) {
+        throw std::runtime_error("Unknown image format");
+    }
+    switch (format) {
+    case vk::Format::eD16Unorm:
+    case vk::Format::eX8D24UnormPack32:
+    case vk::Format::eD32Sfloat:
+        return vk::ImageAspectFlagBits::eDepth;
+    case vk::Format::eS8Uint:
+        return vk::ImageAspectFlagBits::eStencil;
+    case vk::Format::eD16UnormS8Uint:
+    case vk::Format::eD24UnormS8Uint:
+    case vk::Format::eD32SfloatS8Uint:
+        return vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil;
+    default:
+        return vk::ImageAspectFlagBits::eColor;
+    }
 }
 
 void validateSpecializationInfo(const SpecializationInfo &specializationInfo, std::string_view description) {

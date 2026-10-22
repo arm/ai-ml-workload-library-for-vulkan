@@ -27,6 +27,7 @@ ResourceKind resourceKind(vk::DescriptorType descriptorType) noexcept;
 std::string_view resourceKindName(ResourceKind kind) noexcept;
 
 vk::DeviceSize elementCount(const std::vector<int64_t> &shape);
+bool isKnownFormat(vk::Format format);
 vk::DeviceSize byteSizeFromShapeAndStride(const std::vector<int64_t> &shape, const std::vector<int64_t> &stride,
                                           vk::DeviceSize elementSize, std::string_view description);
 vk::DeviceSize storageBufferByteSize(vk::DeviceSize explicitByteSize, vk::Format format,
@@ -113,6 +114,7 @@ uint32_t findMemoryType(const vk::raii::PhysicalDevice &physicalDevice, uint32_t
 
 void validateTensorTiling(vk::TensorTilingARM tiling, vk::TensorUsageFlagsARM usage, const std::vector<int64_t> &shape,
                           bool hasExplicitStrides);
+vk::ImageAspectFlags imageAspectMask(vk::Format format);
 void validateImageTiling(vk::ImageTiling tiling, vk::ImageUsageFlags usage);
 
 /*******************************************************************************
