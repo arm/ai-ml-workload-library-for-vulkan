@@ -18,6 +18,7 @@
   native install trees without rebuilding them or modifying package sources.
 - Fixed HLSL backend linking on Darwin by omitting unsupported GNU archive group
   linker options.
+- Raised the minimum supported Python version from 3.10 to 3.11.
 
 ### Resource Binding and Execution
 
