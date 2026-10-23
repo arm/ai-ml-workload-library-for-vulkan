@@ -44,24 +44,15 @@ class VgfSessionExecutionTest : public RuntimeSessionExecutionTest {};
 // can accept mismatched tensor tilings, so execution alone is insufficient.
 class ResourceCreationRecorder {
   public:
-    // Vulkan-Hpp exposes only a const dispatcher, even for a mutable device.
     explicit ResourceCreationRecorder(vk::raii::Device &device)
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-        : dispatcher_(const_cast<vk::raii::detail::DeviceDispatcher &>(*device.getDispatcher())),
-          createTensor_(dispatcher_.vkCreateTensorARM), createImage_(dispatcher_.vkCreateImage),
-          createPipelines_(dispatcher_.vkCreateDataGraphPipelinesARM), previous_(active_) {
+        : createTensor_(device, &vk::raii::detail::DeviceDispatcher::vkCreateTensorARM, createTensor),
+          createImage_(device, &vk::raii::detail::DeviceDispatcher::vkCreateImage, createImage),
+          createPipelines_(device, &vk::raii::detail::DeviceDispatcher::vkCreateDataGraphPipelinesARM, createPipelines),
+          previous_(active_) {
         active_ = this;
-        dispatcher_.vkCreateTensorARM = createTensor;
-        dispatcher_.vkCreateImage = createImage;
-        dispatcher_.vkCreateDataGraphPipelinesARM = createPipelines;
     }
 
-    ~ResourceCreationRecorder() {
-        dispatcher_.vkCreateTensorARM = createTensor_;
-        dispatcher_.vkCreateImage = createImage_;
-        dispatcher_.vkCreateDataGraphPipelinesARM = createPipelines_;
-        active_ = previous_;
-    }
+    ~ResourceCreationRecorder() { active_ = previous_; }
 
     ResourceCreationRecorder(const ResourceCreationRecorder &) = delete;
     ResourceCreationRecorder &operator=(const ResourceCreationRecorder &) = delete;
@@ -85,7 +76,7 @@ class ResourceCreationRecorder {
     static VKAPI_ATTR VkResult VKAPI_CALL createTensor(VkDevice device, const VkTensorCreateInfoARM *createInfo,
                                                        const VkAllocationCallbacks *allocator, VkTensorARM *tensor) {
         active_->tensorTilings.push_back(vk::TensorTilingARM(createInfo->pDescription->tiling));
-        return active_->createTensor_(device, createInfo, allocator, tensor);
+        return active_->createTensor_.original()(device, createInfo, allocator, tensor);
     }
 
     static VKAPI_ATTR VkResult VKAPI_CALL createImage(VkDevice device, const VkImageCreateInfo *createInfo,
@@ -93,7 +84,7 @@ class ResourceCreationRecorder {
         active_->imageTilings.push_back(vk::ImageTiling(createInfo->tiling));
         active_->imageFormats.push_back(vk::Format(createInfo->format));
         active_->imageUsages.emplace_back(createInfo->usage);
-        return active_->createImage_(device, createInfo, allocator, image);
+        return active_->createImage_.original()(device, createInfo, allocator, image);
     }
 
     static VKAPI_ATTR VkResult VKAPI_CALL createPipelines(VkDevice device, VkDeferredOperationKHR deferredOperation,
@@ -128,14 +119,13 @@ class ResourceCreationRecorder {
         if (!active_->forwardPipelineCreation) {
             return VK_ERROR_INITIALIZATION_FAILED;
         }
-        return active_->createPipelines_(device, deferredOperation, pipelineCache, createInfoCount, createInfos,
-                                         allocator, pipelines);
+        return active_->createPipelines_.original()(device, deferredOperation, pipelineCache, createInfoCount,
+                                                    createInfos, allocator, pipelines);
     }
 
-    vk::raii::detail::DeviceDispatcher &dispatcher_;
-    PFN_vkCreateTensorARM createTensor_;
-    PFN_vkCreateImage createImage_;
-    PFN_vkCreateDataGraphPipelinesARM createPipelines_;
+    ScopedDeviceDispatcherHook<PFN_vkCreateTensorARM> createTensor_;
+    ScopedDeviceDispatcherHook<PFN_vkCreateImage> createImage_;
+    ScopedDeviceDispatcherHook<PFN_vkCreateDataGraphPipelinesARM> createPipelines_;
     const ResourceCreationRecorder *previous_;
     inline static thread_local const ResourceCreationRecorder *active_ = nullptr;
 };
