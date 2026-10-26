@@ -425,8 +425,8 @@ vk::ImageUsageFlags ImageRequirementsView::usage(vk::ImageTiling selectedTiling)
     }
     const auto &resource = workloadResource(*workload_, resourceIndex_);
     auto flags = detail::imageMetadata(resource).usage;
-    if (!flags && resource.descriptorType.has_value()) {
-        flags = detail::imageUsage(*resource.descriptorType, resource.aliasGroupId.has_value());
+    if (resource.descriptorType.has_value()) {
+        flags |= detail::imageUsage(*resource.descriptorType, resource.aliasGroupId.has_value());
     }
     return detail::imageUsageForTiling(flags, resource.aliasGroupId.has_value(), selectedTiling);
 }

@@ -42,6 +42,7 @@ target_include_directories(mlworkloadlib_tests PRIVATE
 )
 
 target_link_libraries(mlworkloadlib_tests PRIVATE
+    GTest::gmock
     GTest::gtest_main
     SPIRV-Tools-static
     mlworkloadlib
