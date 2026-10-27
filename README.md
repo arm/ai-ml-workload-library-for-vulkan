@@ -121,14 +121,31 @@ Applications can query the source backends available in the linked library with
 
 ## Documentation
 
-Install Doxygen and the Python documentation tool dependencies and build the HTML documentation:
+Build the HTML documentation independently of the native library. This requires
+CMake 3.25 or later, Ninja, Doxygen 1.9.1 or later, and the locked Python tooling
+dependencies (including Sphinx, Breathe, MyST, and the Read the Docs theme).
+No C/C++ compiler or native dependencies are required.
+
+Run these commands from the component root:
 
 ```sh
 uv sync --locked --no-install-project --no-default-groups --group tooling
-uv run --no-sync python scripts/build.py --doc
+uv run --no-sync cmake -S docs -B build-docs -G Ninja
+cmake --build build-docs
 ```
 
-The generated documentation is available at `build/docs/out/index.html`.
+The generated documentation is available at `build-docs/docs/out/index.html`.
+Choose another documentation build directory with `-B` and use the same directory
+in the build command. Documentation inputs are staged under that directory's
+`docs/in`, `docs/generated`, and `docs/sources`; Doxygen XML is written to
+`docs/doxygen/xml`.
+
+During migration, `scripts/build.py --doc` continues to build both the native
+library and documentation using the existing path, with HTML at
+`build/docs/out/index.html`. The native CMake option
+`ML_WORKLOAD_LIB_BUILD_DOCS=ON` and the `mlworkloadlib_doc` target remain available.
+Use separate build directories for native and standalone documentation projects;
+their CMake caches cannot be shared.
 
 ## Code coverage
 
