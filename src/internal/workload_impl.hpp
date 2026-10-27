@@ -168,7 +168,6 @@ struct Workload::Impl {
 
     ResourceAccess resourceAccess(uint32_t resourceIndex) const;
     vk::DescriptorType descriptorTypeForBinding(const DescriptorBinding &descBinding) const;
-    uint32_t requiredPushConstantSize() const;
 
     /***************************************************************************
      * Stored metadata

@@ -53,6 +53,22 @@ inline std::string makeAddInt32BuffersVgf() {
     });
 }
 
+inline std::string makeTwoSegmentPushConstantVgf() {
+    const auto code = assembleWritePushConstantSpirv(4);
+    return writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
+        const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "write_push_constant", "main", code);
+        for (uint32_t index = 0; index < 2; ++index) {
+            const auto output =
+                encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {1}, {4});
+            const auto binding = encoder.AddBindingSlot(0, output);
+            const auto descriptorSet = encoder.AddDescriptorSetInfo({binding}, 0);
+            const auto range = encoder.AddPushConstRange(VK_SHADER_STAGE_COMPUTE_BIT, 4, (index + 1) * 4);
+            encoder.AddSegmentInfo(module, "write_push_constant_" + std::to_string(index), {descriptorSet}, {},
+                                   {binding}, noGraphConstants, {1, 1, 1}, {range});
+        }
+    });
+}
+
 inline std::string makeSingleSegmentMaxpoolVgf(const std::vector<uint32_t> &code, const std::string &moduleName,
                                                const std::vector<int64_t> &inputShape,
                                                const std::vector<int64_t> &outputShape) {

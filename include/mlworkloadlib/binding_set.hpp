@@ -5,11 +5,13 @@
 
 #pragma once
 
+#include "mlworkloadlib/array_view.hpp"
 #include "mlworkloadlib/binding_types.hpp"
 #include "mlworkloadlib/workload.hpp"
 
 #include <cstddef>
 #include <memory>
+#include <vector>
 
 namespace mlsdk::workloadlib {
 
@@ -54,12 +56,26 @@ class BindingSet {
     void bindImage(ResourceView resource, ImageBindingInfo bindingInfo);
 
     /**
-     * @brief Copies the workload push-constant payload into this binding set.
+     * @brief Copies a payload for one executable, replacing its previous payload.
      *
-     * @p size must match the Workload requirement. @p data may be null only
-     * when @p size is zero and does not need to remain valid after this call.
+     * @p executable must be a valid view from this binding set's Workload.
+     * The size of @p data in bytes must equal the largest offset + size of its
+     * compiled push-constant ranges, or zero if there are no ranges. Its pointer
+     * may be null only when its size is zero. The supplied bytes need not remain
+     * valid after this call.
+     * Empty data removes any stored payload for the executable and is accepted
+     * only when its compiled push-constant requirement is zero.
+     * Other executables' payloads and previously prepared executions are unchanged.
      */
-    void bindPushConstants(const void *data, std::size_t size);
+    void bindPushConstants(ExecutableView executable, ArrayView<const std::byte> data);
+
+    /**
+     * @brief Returns a copy of an executable's bound payload, or an empty vector.
+     *
+     * @p executable must be a valid view from this binding set's Workload.
+     * Editing the returned bytes does not change the binding.
+     */
+    std::vector<std::byte> pushConstants(ExecutableView executable) const;
 
   private:
     // Lifetime
@@ -78,6 +94,7 @@ class BindingSet {
 
     // Private helpers
     const Session &session() const noexcept;
+    void validateExecutable(ExecutableView executable) const;
 
     // Stored state
     std::unique_ptr<Impl> impl_;

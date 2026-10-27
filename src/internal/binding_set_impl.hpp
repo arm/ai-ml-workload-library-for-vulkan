@@ -35,7 +35,7 @@ struct BindingSet::Impl {
     std::map<uint32_t, BufferBindingInfo> bufferBindingsByResourceIndex;
     std::map<uint32_t, ImageBindingInfo> imageBindingsByResourceIndex;
 
-    std::vector<uint8_t> pushConstants;
+    std::map<uint32_t, std::vector<std::byte>> pushConstantsByExecutableIndex;
 };
 
 } // namespace mlsdk::workloadlib

@@ -273,12 +273,94 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunGlslComputeShaderWithPushAndSpe
     bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstInputBuffer.buffer});
     bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondInputBuffer.buffer});
     bindings.bindBuffer(workload.resource(2), BufferBindingInfo{*outputBuffer.buffer});
-    bindings.bindPushConstants(&pushAdd, sizeof(pushAdd));
+    bindings.bindPushConstants(workload.executable(0),
+                               {reinterpret_cast<const std::byte *>(&pushAdd), sizeof(pushAdd)});
 
     auto execution = session.prepare(bindings);
     execution.run();
 
     EXPECT_EQ(outputBuffer.read(elements), expected);
+}
+
+TEST_F(StandaloneComputeSessionExecutionTest, CopiesPushConstantsOnBindAndInspection) {
+    auto workload = Workload::fromComputeShader(makePushConstantOutputDescription());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.configure();
+    auto bindings = session.createBindingSet();
+    const auto executable = workload.executable(0);
+    EXPECT_TRUE(bindings.pushConstants(executable).empty());
+
+    const auto original = bytesOf(int32_t{23});
+    auto payload = original;
+    bindings.bindPushConstants(executable, {payload.data(), payload.size()});
+    payload[0] ^= std::byte{0xff};
+    EXPECT_EQ(bindings.pushConstants(executable), original);
+
+    auto inspected = bindings.pushConstants(executable);
+    inspected[0] ^= std::byte{0xff};
+    EXPECT_EQ(bindings.pushConstants(executable), original);
+    bindings.bindPushConstants(executable, {inspected.data(), inspected.size()});
+    EXPECT_EQ(bindings.pushConstants(executable), inspected);
+}
+
+TEST_F(StandaloneComputeSessionExecutionTest, RejectsInvalidPushConstants) {
+    auto workload = Workload::fromComputeShader(makePushConstantOutputDescription());
+    auto foreignWorkload = Workload::fromComputeShader(makePushConstantOutputDescription());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.configure();
+    auto bindings = session.createBindingSet();
+    const auto executable = workload.executable(0);
+    const auto payload = bytesOf(int32_t{23});
+    bindings.bindPushConstants(executable, {payload.data(), payload.size()});
+
+    EXPECT_THROW(bindings.bindPushConstants(executable, {nullptr, payload.size()}), std::runtime_error);
+    EXPECT_THROW(bindings.bindPushConstants(executable, {nullptr, 0}), std::runtime_error);
+    EXPECT_THROW(bindings.bindPushConstants(executable, {payload.data(), payload.size() - 1}), std::runtime_error);
+    EXPECT_THROW(bindings.bindPushConstants(executable, {payload.data(), payload.size() + 1}), std::runtime_error);
+    EXPECT_THROW(bindings.bindPushConstants(foreignWorkload.executable(0), {payload.data(), payload.size()}),
+                 std::runtime_error);
+    EXPECT_THROW(bindings.pushConstants(foreignWorkload.executable(0)), std::runtime_error);
+    // Iterators carry an unchecked index; binding APIs must reject a past-the-end view.
+    const auto invalid = *workload.executables().end();
+    EXPECT_THROW(bindings.bindPushConstants(invalid, {payload.data(), payload.size()}), std::runtime_error);
+    EXPECT_THROW(bindings.pushConstants(invalid), std::runtime_error);
+    EXPECT_EQ(bindings.pushConstants(executable), payload);
+
+    auto movedBindings = std::move(bindings);
+    EXPECT_EQ(movedBindings.pushConstants(executable), payload);
+}
+
+TEST_F(StandaloneComputeSessionExecutionTest, RequiresPushConstantsAtPrepare) {
+    auto workload = Workload::fromComputeShader(makePushConstantOutputDescription());
+    auto context = wrappedContext();
+    const Buffer output(physicalDevice, device, sizeof(int32_t));
+    Session session(context, workload);
+    session.configure();
+    auto bindings = session.createBindingSet();
+    bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*output.buffer});
+    EXPECT_THROW(session.prepare(bindings), std::runtime_error);
+
+    const auto payload = bytesOf(int32_t{23});
+    bindings.bindPushConstants(workload.executable(0), {payload.data(), payload.size()});
+    auto execution = session.prepare(bindings);
+    execution.run();
+    EXPECT_EQ(output.read(1), std::vector<int32_t>{23});
+}
+
+TEST_F(StandaloneComputeSessionExecutionTest, AcceptsEmptyPushConstantsWithoutRanges) {
+    auto workload = Workload::fromComputeShader(makeAddInt32BuffersDescription());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.configure();
+    auto bindings = session.createBindingSet();
+    const auto executable = workload.executable(0);
+    const auto payload = bytesOf(int32_t{23});
+    EXPECT_NO_THROW(bindings.bindPushConstants(executable, {nullptr, 0}));
+    EXPECT_NO_THROW(bindings.bindPushConstants(executable, {payload.data(), 0}));
+    EXPECT_THROW(bindings.bindPushConstants(executable, {payload.data(), payload.size()}), std::runtime_error);
+    EXPECT_TRUE(bindings.pushConstants(executable).empty());
 }
 
 TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderRepeatedDifferentInput) {

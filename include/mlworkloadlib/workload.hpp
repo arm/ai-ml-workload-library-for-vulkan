@@ -332,6 +332,7 @@ class ExecutableView {
     ExecutableView(const Workload *workload, uint32_t index) : workload_(workload), index_(index) {}
 
     friend class Workload;
+    friend class BindingSet;
 
     const Workload *workload_ = nullptr;
     uint32_t index_ = 0;

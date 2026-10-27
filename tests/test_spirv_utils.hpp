@@ -60,20 +60,21 @@ inline std::string readSpvasmFile(const char *path) {
     return {std::istreambuf_iterator<char>(file), {}};
 }
 
+inline void replace(std::string &text, std::string_view from, std::string_view to) {
+    std::size_t pos = 0;
+    while ((pos = text.find(from, pos)) != std::string::npos) {
+        text.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+}
+
 inline std::vector<uint32_t> assembleGraphSpirvFromTemplate(std::string_view name, const char *templatePath,
                                                             GraphSpvasmBindings bindings) {
     auto spvasm = readSpvasmFile(templatePath);
-    const auto replace = [&spvasm](std::string_view from, std::string_view to) {
-        std::size_t pos = 0;
-        while ((pos = spvasm.find(from, pos)) != std::string::npos) {
-            spvasm.replace(pos, from.size(), to);
-            pos += to.size();
-        }
-    };
-    replace("INPUT_SET", std::to_string(bindings.inputSet));
-    replace("INPUT_BINDING", std::to_string(bindings.inputBinding));
-    replace("OUTPUT_SET", std::to_string(bindings.outputSet));
-    replace("OUTPUT_BINDING", std::to_string(bindings.outputBinding));
+    replace(spvasm, "INPUT_SET", std::to_string(bindings.inputSet));
+    replace(spvasm, "INPUT_BINDING", std::to_string(bindings.inputBinding));
+    replace(spvasm, "OUTPUT_SET", std::to_string(bindings.outputSet));
+    replace(spvasm, "OUTPUT_BINDING", std::to_string(bindings.outputBinding));
 
     try {
         return assembleSpirv(spvasm);
@@ -92,6 +93,12 @@ inline std::vector<uint32_t> assembleMaxpool8x8To4x4Spirv(std::string_view name,
 
 inline std::vector<uint32_t> assembleAddInt32BuffersSpirv() {
     return assembleSpirv(readSpvasmFile(ML_WORKLOAD_LIB_ADD_INT32_BUFFERS_SPVASM));
+}
+
+inline std::vector<uint32_t> assembleWritePushConstantSpirv(uint32_t offset = 0) {
+    auto spvasm = readSpvasmFile(ML_WORKLOAD_LIB_WRITE_PUSH_CONSTANT_SPVASM);
+    replace(spvasm, "PUSH_CONSTANT_OFFSET", std::to_string(offset));
+    return assembleSpirv(spvasm);
 }
 
 inline std::vector<uint32_t> assembleAddF32ConstantSpirv(std::string_view name, GraphSpvasmBindings bindings) {

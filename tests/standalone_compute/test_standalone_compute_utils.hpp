@@ -41,6 +41,17 @@ inline ComputeShaderDescription makeAddInt32BuffersDescription() {
     return description;
 }
 
+inline ComputeShaderDescription makePushConstantOutputDescription() {
+    ComputeShaderDescription description;
+    description.module.codeKind = ModuleCodeKind::Spirv;
+    description.module.spirv = assembleWritePushConstantSpirv();
+    description.entryPoint = "main";
+    description.dispatch = {1, 1, 1};
+    description.pushConstantSize = sizeof(int32_t);
+    description.resources = {{"output", 0, 0, ResourceAccess::Write, makeBufferRequirements(sizeof(int32_t))}};
+    return description;
+}
+
 inline ComputeShaderDescription makeGlslAddInt32BuffersDescription() {
     auto description = makeAddInt32BuffersDescription();
     description.module.codeKind = ModuleCodeKind::Glsl;
