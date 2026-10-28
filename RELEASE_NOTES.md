@@ -25,6 +25,9 @@
 
 ### Resource Binding and Execution
 
+- Added original workload access through `Session::workload()` and
+  `BindingSet::workload()`, and original specialization and push-constant size
+  inspection through `ExecutableView`.
 - Push-constant payloads are copied per executable, allowing different sizes and
   values within a workload. `BindingSet::pushConstants(executable)` returns a
   copy, and `prepare()` captures all payloads for that execution.

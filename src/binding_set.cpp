@@ -63,6 +63,13 @@ const BindingSet::Impl *BindingSet::bindingSetImpl() const noexcept { return imp
 
 const Session &BindingSet::session() const noexcept { return impl_->session; }
 
+const Workload &BindingSet::workload() const {
+    if (!impl_) {
+        throw std::runtime_error("Cannot access the Workload of an invalid BindingSet");
+    }
+    return impl_->workload;
+}
+
 /*******************************************************************************
  * Resource binding
  *******************************************************************************/

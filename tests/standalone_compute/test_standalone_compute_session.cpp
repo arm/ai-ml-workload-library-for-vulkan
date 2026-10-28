@@ -74,8 +74,11 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderWorkload) {
     SessionOptions options;
     options.pipelineCache = &pipelineCache;
     Session session(context, workload, options);
+    EXPECT_EQ(&session.workload(), &workload);
     session.configure();
+    EXPECT_EQ(&session.workload(), &workload);
     auto bindings = session.createBindingSet();
+    EXPECT_EQ(&bindings.workload(), &workload);
     ASSERT_EQ(workload.resourceCount(), 3);
     bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstInputBuffer.buffer});
     bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondInputBuffer.buffer});
@@ -330,6 +333,10 @@ TEST_F(StandaloneComputeSessionExecutionTest, RejectsInvalidPushConstants) {
 
     auto movedBindings = std::move(bindings);
     EXPECT_EQ(movedBindings.pushConstants(executable), payload);
+    EXPECT_EQ(&movedBindings.workload(), &workload);
+    // This accessor explicitly supports detecting a moved-from binding set.
+    // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+    EXPECT_THROW((void)bindings.workload(), std::runtime_error);
 }
 
 TEST_F(StandaloneComputeSessionExecutionTest, RequiresPushConstantsAtPrepare) {

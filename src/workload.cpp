@@ -554,6 +554,12 @@ ModuleView ExecutableView::module() const {
     return {workload_, moduleIndex};
 }
 
+SpecializationInfo ExecutableView::specializationInfo() const {
+    return workloadExecutable(*workload_, index_).specializationInfo;
+}
+
+uint32_t ExecutableView::pushConstantSize() const { return workloadExecutable(*workload_, index_).pushConstantSize; }
+
 DataGraphPipelineMetadataView ExecutableView::dataGraphPipelineMetadata() const { return {workload_, index_}; }
 
 /*******************************************************************************

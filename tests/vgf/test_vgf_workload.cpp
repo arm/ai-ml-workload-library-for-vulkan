@@ -104,6 +104,16 @@ TEST(VgfWorkload, DecodesPublicExecutablesBindingsResourcesAndDispatch) {
     EXPECT_EQ(output.requirements().elementCount(), 8);
 }
 
+TEST(VgfWorkload, ExposesOriginalPushConstantRangeEndsPerExecutable) {
+    const auto data = makeTwoSegmentPushConstantVgf();
+    auto workload = Workload::fromVGF(data.data(), data.size());
+
+    ASSERT_EQ(workload.executableCount(), 2);
+    // Ranges start at offset 4 and have sizes 4 and 8, respectively.
+    EXPECT_EQ(workload.executable(0).pushConstantSize(), 8);
+    EXPECT_EQ(workload.executable(1).pushConstantSize(), 12);
+}
+
 TEST(VgfWorkload, DecodesFileBackedImageSamplerAndHidesConstants) {
     const auto &code = assembleMaxpool16x16To8x8Spirv("maxpool_set0", {0, 0, 1, 1});
     const std::array<int32_t, 4> constantData = {1, 2, 3, 4};

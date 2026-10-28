@@ -356,6 +356,12 @@ class ExecutableView {
     /** @brief Returns the executable module. */
     ModuleView module() const;
 
+    /** @brief Returns a copy of the original specialization entries and bytes, excluding shader defaults. */
+    SpecializationInfo specializationInfo() const;
+
+    /** @brief Returns the largest original push-constant range end, or zero for no ranges. */
+    uint32_t pushConstantSize() const;
+
     /** @brief Returns data graph pipeline metadata for this executable. */
     DataGraphPipelineMetadataView dataGraphPipelineMetadata() const;
 
