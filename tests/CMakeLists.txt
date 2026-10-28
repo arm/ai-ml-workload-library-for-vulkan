@@ -19,6 +19,7 @@ set(ML_WORKLOAD_LIB_TEST_SOURCES
     test_array_view.cpp
     test_context.cpp
     test_expected_results.hpp
+    test_image_requirements.cpp
     test_internal_utils.cpp
     test_resource_requirements.hpp
     test_spirv_utils.hpp

@@ -215,6 +215,7 @@ uint32_t WorkloadBuilder::addImageResource(std::string name, Resource::Role role
     auto workloadResource = resourceBase(std::move(name), role, descriptorType, format, std::move(shape),
                                          std::move(stride), elementCount, aliasGroupId, requiresBoundMemoryInfo);
     workloadResource.metadata = Resource::ImageMetadata{extent, usage, layout, subresourceRange, samplerConfig};
+    (void)workloadResource.requiredImageSubresourceRange();
     return appendResource(std::move(workloadResource));
 }
 

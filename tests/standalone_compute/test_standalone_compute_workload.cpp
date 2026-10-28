@@ -5,7 +5,6 @@
 #include "test_standalone_compute_utils.hpp"
 
 #include <gtest/gtest.h>
-#include <vulkan/vulkan_core.h>
 
 #include <cstddef>
 #include <cstdint>

@@ -202,6 +202,12 @@ Supply ``BoundMemoryInfo`` when
 must provide an image view and the required subresource range, and must provide a
 sampler only when the image requirements request one.
 
+``ImageRequirementsView::requiredSubresourceRange()`` derives an unspecified
+aspect mask from the image format. Sampled depth/stencil images default to the
+depth aspect; an explicit range can select depth or stencil individually.
+Workload construction rejects aspect masks that do not match the format and
+sampled depth/stencil ranges that select both aspects.
+
 An image layout is optional. When supplied, it describes the current layout, and
 prepared execution transitions the image to the workload-required layout. When
 omitted, the application manages the image layout.
