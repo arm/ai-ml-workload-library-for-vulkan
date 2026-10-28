@@ -8,6 +8,7 @@
 
 - Replaced workload-wide `BindingSet::bindPushConstants(data, size)` with
   `bindPushConstants(executable, ArrayView<const std::byte>)`.
+- Changed rank-3 VGF image shapes from width/height/depth to HWC.
 - Changed `SpecializationInfo::data` and
   `DataGraphPipelineMetadataView::specializationData()` to use `std::byte`.
 
