@@ -82,6 +82,7 @@ struct Session::Impl {
                                                             vk::DataGraphPipelinePropertyARM property) const;
     uint32_t dataGraphSessionMemoryCount(uint32_t executableIndex) const;
     DataGraphSessionMemoryInfo dataGraphSessionMemory(uint32_t executableIndex, uint32_t memoryIndex) const;
+    const std::vector<int64_t> &tensorStrides(uint32_t resourceIndex) const;
 
     /***************************************************************************
      * Stored state
@@ -96,6 +97,7 @@ struct Session::Impl {
 
     std::map<uint32_t, Module> moduleImplementations;
     std::map<uint32_t, DataGraphBinaryInput> dataGraphBinaryInputs;
+    std::map<uint32_t, std::vector<int64_t>> tensorStrideOverrides;
 
     std::vector<ExecutableState> executableStates;
 

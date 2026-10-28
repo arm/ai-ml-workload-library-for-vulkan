@@ -78,13 +78,14 @@ struct Tensor {
 };
 
 struct Buffer {
-    Buffer(const vk::raii::PhysicalDevice &physicalDevice, const vk::raii::Device &device, vk::DeviceSize size)
+    Buffer(const vk::raii::PhysicalDevice &physicalDevice, const vk::raii::Device &device, vk::DeviceSize size,
+           uint32_t compatibleMemoryTypes = UINT32_MAX)
         : buffer(device, vk::BufferCreateInfo({}, size, vk::BufferUsageFlagBits::eStorageBuffer)) {
         const auto memoryRequirements = buffer.getMemoryRequirements();
         memorySize = memoryRequirements.size;
-        const auto memoryType = detail::findMemoryType(physicalDevice, memoryRequirements.memoryTypeBits,
-                                                       vk::MemoryPropertyFlagBits::eHostVisible |
-                                                           vk::MemoryPropertyFlagBits::eHostCoherent);
+        const auto memoryType = detail::findMemoryType(
+            physicalDevice, memoryRequirements.memoryTypeBits & compatibleMemoryTypes,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
         memory = vk::raii::DeviceMemory(device, {memorySize, memoryType});
         buffer.bindMemory(*memory, 0);
     }

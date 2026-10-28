@@ -120,6 +120,21 @@ void BindingSet::bindImage(ResourceView resource, ImageBindingInfo bindingInfo) 
     bindingSetState->imageBindingsByResourceIndex[resource.resourceIndex_] = bindingInfo;
 }
 
+void BindingSet::setAliasPeerOffset(AliasPeerView peer, vk::DeviceSize byteOffset) {
+    auto *bindingSetState = bindingSetImpl();
+    if (bindingSetState == nullptr) {
+        throw std::runtime_error(bindingError("AliasPeerOffset", "invalid BindingSet"));
+    }
+    if (peer.workload_ != &bindingSetState->workload) {
+        throw std::runtime_error("AliasPeerView belongs to a different Workload");
+    }
+    const auto &resource = workloadImpl(bindingSetState->workload).resources.at(peer.resourceIndex_);
+    if (resource.role != detail::Resource::Role::Intermediate || !resource.aliasGroupId.has_value()) {
+        throw std::runtime_error("Alias peer offset requires an aliased intermediate resource");
+    }
+    bindingSetState->aliasPeerOffsetsByResourceIndex.insert_or_assign(peer.resourceIndex_, byteOffset);
+}
+
 /*******************************************************************************
  * Push constants
  *******************************************************************************/

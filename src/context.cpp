@@ -347,6 +347,9 @@ ImageAllocation Context::createImage(ResourceView resource, vk::ImageTiling tili
     const auto contextView = this->contextView();
 
     vk::ImageCreateInfo createInfo;
+    if (requirements.participatesInAliasing()) {
+        createInfo.flags |= vk::ImageCreateFlagBits::eAlias;
+    }
     createInfo.imageType = imageType;
     createInfo.format = requirements.format();
     createInfo.extent = extent;

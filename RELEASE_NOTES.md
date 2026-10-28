@@ -44,6 +44,9 @@
   pipeline selector.
 - Added experimental per-segment use of external data-graph binaries in VGF
   workloads; other graph and compute executables keep their modules.
+- Support session-selected tensor strides and per-binding offsets for alias peers
+  sharing external memory, with range, alignment, and memory-requirement checks
+  before binding.
 
 ## Version 0.11.0 – *Initial Public Release*
 

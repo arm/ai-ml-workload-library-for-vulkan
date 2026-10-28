@@ -388,7 +388,7 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderRepeatedDifferentI
         std::vector<int32_t> secondInput(elements);
         for (size_t element = 0; element < elements; ++element) {
             firstInput[element] = (run + 1) * static_cast<int32_t>(element + 1);
-            secondInput[element] = run * 3 - static_cast<int32_t>(element);
+            secondInput[element] = (run * 3) - static_cast<int32_t>(element);
         }
 
         firstInputBuffer.write(firstInput);

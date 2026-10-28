@@ -18,6 +18,13 @@
 
 namespace mlsdk::workloadlib {
 
+/** @brief Device requirements for one intermediate alias peer, excluding its placement offset. */
+struct AliasPeerMemoryRequirements {
+    vk::MemoryRequirements memory;
+    bool prefersDedicatedAllocation = false;
+    bool requiresDedicatedAllocation = false;
+};
+
 /** @brief Non-owning information about one graph-session memory allocation. */
 struct DataGraphSessionMemoryInfo {
     vk::DeviceMemory memory = nullptr;
@@ -98,8 +105,22 @@ class Session final {
     /** @brief Returns the tiling selected for a public image resource. */
     vk::ImageTiling imageTiling(ResourceView resource) const;
 
+    /**
+     * @brief Copies byte strides for a linear alias tensor peer before configure().
+     *
+     * Without an override, workload strides apply.
+     */
+    void setTensorStrides(AliasPeerView peer, std::vector<int64_t> strides);
+
     /** @brief Builds or reuses pipelines and layouts, then creates per-Session data graph and command objects. */
     void configure();
+
+    /**
+     * @brief Queries a peer's memory and dedicated-allocation requirements after configure().
+     *
+     * Query every peer before allocating shared backing memory.
+     */
+    AliasPeerMemoryRequirements aliasPeerMemoryRequirements(AliasPeerView peer) const;
 
     /***************************************************************************
      * Graph diagnostics

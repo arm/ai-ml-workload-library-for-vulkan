@@ -78,7 +78,7 @@ class Session;
  * Creating or configuring Sessions and changing their tiling selections while
  * sharing this state must be serialized. Graph tensor tiling and the tiling of
  * its alias peers are fixed after compilation; other tiling choices remain
- * local to each Session.
+ * local to each Session. Graph tensor strides must also match the compiled values.
  */
 class CompiledExecution final {
   public:

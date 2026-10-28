@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "internal/alias_memory.hpp"
 #include "internal/prepared_execution_impl.hpp"
+#include "internal/runtime_resource.hpp"
 #include "internal/session_tiling.hpp"
 #include "internal/utils.hpp"
 
@@ -29,6 +31,10 @@ namespace mlsdk::workloadlib {
 
 using DescriptorBinding = detail::DescriptorBinding;
 using Resource = detail::Resource;
+using detail::aliasMemoryRequirements;
+using detail::createIntermediateBuffer;
+using detail::createIntermediateImage;
+using detail::createIntermediateTensor;
 
 struct PreparedExecution::Impl::BoundTensor {
     DescriptorBinding descBinding;
@@ -125,22 +131,23 @@ ImageBindingInfo PreparedExecution::Impl::RuntimeResourceStorage::adoptImage(vk:
  *******************************************************************************/
 
 struct PreparedExecution::Impl::ExistingAliasGroupBindings {
-    // Copy non-owning binding metadata so vector growth cannot invalidate the saved bindings.
+    // Snapshot handles because adding peers can reallocate the bound-resource vectors.
     std::optional<TensorBindingInfo> boundTensor;
     std::optional<BufferBindingInfo> boundBuffer;
     std::optional<ImageBindingInfo> boundImage;
     std::optional<BoundMemoryInfo> boundMemory;
-
-    bool hasBoundAlias() const noexcept {
-        return boundTensor.has_value() || boundBuffer.has_value() || boundImage.has_value();
-    }
+    uint32_t memoryTypeBits = std::numeric_limits<uint32_t>::max();
 };
 
 struct PreparedExecution::Impl::PendingAliasGroupAllocation {
-    // Runtime-created alias objects
-    std::vector<std::pair<DescriptorBinding, vk::raii::TensorARM>> tensors;
-    std::vector<std::pair<DescriptorBinding, vk::raii::Buffer>> buffers;
-    std::vector<std::pair<DescriptorBinding, vk::raii::Image>> images;
+    template <typename Object> struct Peer {
+        DescriptorBinding binding;
+        Object object;
+        vk::DeviceSize offset;
+    };
+    std::vector<Peer<vk::raii::TensorARM>> tensors;
+    std::vector<Peer<vk::raii::Buffer>> buffers;
+    std::vector<Peer<vk::raii::Image>> images;
 
     // Shared allocation requirements
     uint32_t memoryTypeBits = std::numeric_limits<uint32_t>::max();
@@ -279,48 +286,6 @@ const typename BoundResources::value_type *findBoundResource(const BoundResource
     return boundResource.has_value() ? &boundResource->get() : nullptr;
 }
 
-/*******************************************************************************
- * Intermediate object creation
- *******************************************************************************/
-
-vk::raii::TensorARM createIntermediateTensor(const Workload &workload, const ContextView &contextView,
-                                             const DescriptorBinding &descBinding, vk::TensorTilingARM tiling) {
-    const auto &resource = workloadImpl(workload).resources.at(descBinding.resourceIndex);
-    const auto usage = detail::tensorUsageForTiling(workload, descBinding.resourceIndex, tiling);
-    detail::validateTensorTiling(tiling, usage, resource.shape, !resource.stride.empty());
-    const vk::TensorDescriptionARM description(tiling, resource.format, static_cast<uint32_t>(resource.shape.size()),
-                                               resource.shape.data(),
-                                               resource.stride.empty() ? nullptr : resource.stride.data(), usage);
-    const vk::TensorCreateInfoARM createInfo({}, &description, vk::SharingMode::eExclusive);
-    return {contextView.device.get(), createInfo};
-}
-
-vk::raii::Buffer createIntermediateBuffer(const Workload &workload, const ContextView &contextView,
-                                          const DescriptorBinding &descBinding) {
-    const auto &resource = workloadImpl(workload).resources.at(descBinding.resourceIndex);
-    const auto byteSize = detail::storageBufferByteSize(detail::bufferMetadata(resource).byteSize, resource.format,
-                                                        resource.shape, resource.stride);
-    const vk::BufferCreateInfo createInfo({}, byteSize, vk::BufferUsageFlagBits::eStorageBuffer);
-    return {contextView.device.get(), createInfo};
-}
-
-vk::raii::Image createIntermediateImage(const Workload &workload, const ContextView &contextView,
-                                        const DescriptorBinding &descBinding, bool forAliasing,
-                                        vk::ImageTiling tiling) {
-    const auto &workloadState = workloadImpl(workload);
-    const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
-    const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
-
-    const auto requiredUsage = detail::imageMetadata(resource).usage | detail::imageUsage(descriptorType, forAliasing);
-    const auto effectiveUsage = detail::imageUsageForTiling(requiredUsage, forAliasing, tiling);
-
-    const vk::ImageCreateInfo createInfo({}, vk::ImageType::e2D, resource.format, resource.imageExtent(), 1, 1,
-                                         vk::SampleCountFlagBits::e1, tiling, effectiveUsage,
-                                         vk::SharingMode::eExclusive, {}, vk::ImageLayout::eUndefined);
-
-    return {contextView.device.get(), createInfo};
-}
-
 void planRuntimeResourceAllocations(const Workload &workload,
                                     std::vector<DescriptorBinding> &unaliasedIntermediateDescBindings,
                                     std::map<uint32_t, std::vector<DescriptorBinding>> &aliasGroups) {
@@ -360,7 +325,7 @@ PreparedExecution::Impl::Impl(Session &sessionIn, const BindingSet &bindingsIn) 
     std::map<uint32_t, std::vector<DescriptorBinding>> aliasGroups;
     planRuntimeResourceAllocations(sessionImpl.workload, unaliasedIntermediateDescBindings, aliasGroups);
     resolveUnaliasedIntermediateAllocations(unaliasedIntermediateDescBindings);
-    resolveAliasGroups(aliasGroups);
+    resolveAliasGroups(aliasGroups, bindingState.aliasPeerOffsetsByResourceIndex);
 
     createDescriptorSets();
     writeDescriptors();
@@ -434,8 +399,9 @@ void PreparedExecution::Impl::addBoundImage(ImageBindingInfo imageBindingInfo, D
     vk::raii::ImageView ownedImageView(nullptr);
     vk::ImageView imageView = imageBindingInfo.imageView;
     if (imageView == nullptr) {
-        const vk::ImageViewCreateInfo viewCreateInfo({}, imageBindingInfo.image, vk::ImageViewType::e2D,
-                                                     resource.format, {}, subresourceRange);
+        const auto viewType = resource.imageExtent().depth > 1 ? vk::ImageViewType::e3D : vk::ImageViewType::e2D;
+        const vk::ImageViewCreateInfo viewCreateInfo({}, imageBindingInfo.image, viewType, resource.format, {},
+                                                     subresourceRange);
         ownedImageView = vk::raii::ImageView(sessionImpl.contextView.device.get(), viewCreateInfo);
         imageView = *ownedImageView;
     }
@@ -480,21 +446,31 @@ void PreparedExecution::Impl::resolveUnaliasedIntermediateAllocations(
     }
 }
 
-void PreparedExecution::Impl::resolveAliasGroups(
-    const std::map<uint32_t, std::vector<DescriptorBinding>> &aliasGroups) {
+void PreparedExecution::Impl::resolveAliasGroups(const std::map<uint32_t, std::vector<DescriptorBinding>> &aliasGroups,
+                                                 const std::map<uint32_t, vk::DeviceSize> &aliasPeerOffsets) {
     for (const auto &aliasGroup : aliasGroups) {
-        const auto existingBindings = findExistingAliasGroupBindings(aliasGroup.first);
+        const auto &resources = workloadImpl(sessionImpl.workload).resources;
+        const bool createsPeers =
+            std::any_of(aliasGroup.second.begin(), aliasGroup.second.end(), [&resources](const auto &binding) {
+                return resources.at(binding.resourceIndex).role == Resource::Role::Intermediate;
+            });
+        const auto existingBindings = findExistingAliasGroupBindings(aliasGroup.first, createsPeers);
 
         PendingAliasGroupAllocation pendingAllocation;
+        pendingAllocation.memoryTypeBits = existingBindings.memoryTypeBits;
         for (const auto &descBinding : aliasGroup.second) {
-            resolveAliasGroupBinding(descBinding, existingBindings, pendingAllocation);
+            resolveAliasGroupBinding(descBinding, existingBindings, pendingAllocation, aliasPeerOffsets);
         }
 
         if (!pendingAllocation.empty()) {
-            auto memory = allocateAliasGroupMemory(pendingAllocation);
-            bindAliasGroupMemory(pendingAllocation, *memory);
-            const auto aliasMemory = runtimeResources.adoptMemory(std::move(memory), pendingAllocation.memorySize);
-            adoptAliasGroupResources(pendingAllocation, aliasMemory);
+            // All peers in the group have been created and validated before any bind.
+            auto aliasMemory = existingBindings.boundMemory;
+            if (!aliasMemory.has_value()) {
+                auto memory = allocateAliasGroupMemory(pendingAllocation);
+                aliasMemory = runtimeResources.adoptMemory(std::move(memory), pendingAllocation.memorySize);
+            }
+            bindAliasGroupMemory(pendingAllocation, *aliasMemory);
+            adoptAliasGroupResources(pendingAllocation, *aliasMemory);
         }
     }
 }
@@ -502,7 +478,8 @@ void PreparedExecution::Impl::resolveAliasGroups(
 // Resolve unaliased intermediates.
 void PreparedExecution::Impl::resolveUnaliasedIntermediateTensor(const DescriptorBinding &descBinding) {
     const auto tiling = detail::toTensorTiling(sessionImpl.resourceTilings.at(descBinding.resourceIndex));
-    auto tensor = createIntermediateTensor(sessionImpl.workload, sessionImpl.contextView, descBinding, tiling);
+    auto tensor = createIntermediateTensor(sessionImpl.workload, sessionImpl.contextView, descBinding.resourceIndex,
+                                           tiling, sessionImpl.tensorStrides(descBinding.resourceIndex));
     const auto memoryRequirements = resourceMemoryRequirements(sessionImpl.contextView, tensor);
     auto memory = allocateDeviceLocalMemory(sessionImpl.contextView, memoryRequirements);
     bindResourceMemory(sessionImpl.contextView, tensor, {*memory, 0, memoryRequirements.size});
@@ -512,7 +489,7 @@ void PreparedExecution::Impl::resolveUnaliasedIntermediateTensor(const Descripto
 }
 
 void PreparedExecution::Impl::resolveUnaliasedIntermediateBuffer(const DescriptorBinding &descBinding) {
-    auto buffer = createIntermediateBuffer(sessionImpl.workload, sessionImpl.contextView, descBinding);
+    auto buffer = createIntermediateBuffer(sessionImpl.workload, sessionImpl.contextView, descBinding.resourceIndex);
     const auto memoryRequirements = resourceMemoryRequirements(sessionImpl.contextView, buffer);
     auto memory = allocateDeviceLocalMemory(sessionImpl.contextView, memoryRequirements);
     bindResourceMemory(sessionImpl.contextView, buffer, {*memory, 0, memoryRequirements.size});
@@ -523,7 +500,8 @@ void PreparedExecution::Impl::resolveUnaliasedIntermediateBuffer(const Descripto
 
 void PreparedExecution::Impl::resolveUnaliasedIntermediateImage(const DescriptorBinding &descBinding) {
     const auto tiling = detail::toImageTiling(sessionImpl.resourceTilings.at(descBinding.resourceIndex));
-    auto image = createIntermediateImage(sessionImpl.workload, sessionImpl.contextView, descBinding, false, tiling);
+    auto image = createIntermediateImage(sessionImpl.workload, sessionImpl.contextView, descBinding.resourceIndex,
+                                         false, tiling);
     const auto memoryRequirements = resourceMemoryRequirements(sessionImpl.contextView, image);
     auto memory = allocateDeviceLocalMemory(sessionImpl.contextView, memoryRequirements);
     const BoundMemoryInfo bindingMemory{*memory, 0, memoryRequirements.size};
@@ -535,45 +513,76 @@ void PreparedExecution::Impl::resolveUnaliasedIntermediateImage(const Descriptor
 
 // Resolve alias groups.
 PreparedExecution::Impl::ExistingAliasGroupBindings
-PreparedExecution::Impl::findExistingAliasGroupBindings(uint32_t aliasGroupId) const {
+PreparedExecution::Impl::findExistingAliasGroupBindings(uint32_t aliasGroupId, bool createsPeers) const {
     ExistingAliasGroupBindings existingBindings;
     const auto &workload = sessionImpl.workload;
-    const auto findBoundResourceInAliasGroup = [&workload, aliasGroupId](const auto &boundResources) {
-        return findRefIf(boundResources, [&workload, aliasGroupId](const auto &boundResource) {
-            const auto &resource = workloadImpl(workload).resources.at(boundResource.descBinding.resourceIndex);
-            return resource.aliasGroupId.has_value() && *resource.aliasGroupId == aliasGroupId;
-        });
+    const auto belongsToGroup = [&workload, aliasGroupId](const auto &boundResource) {
+        return workloadImpl(workload).resources.at(boundResource.descBinding.resourceIndex).aliasGroupId ==
+               aliasGroupId;
     };
-
-    if (const auto boundTensor = findBoundResourceInAliasGroup(boundTensors)) {
-        const auto &tensor = boundTensor->get();
-        existingBindings.boundTensor = TensorBindingInfo{tensor.tensor, tensor.memory};
-    }
-    if (const auto boundBuffer = findBoundResourceInAliasGroup(boundBuffers)) {
-        const auto &buffer = boundBuffer->get();
-        existingBindings.boundBuffer = BufferBindingInfo{buffer.buffer, buffer.memory};
-    }
-    if (const auto boundImage = findBoundResourceInAliasGroup(boundImages)) {
-        const auto &image = boundImage->get();
-        existingBindings.boundImage = ImageBindingInfo{image.image,   image.memory, image.imageView,
-                                                       image.sampler, image.layout, image.subresourceRange};
-    }
-
-    const auto rememberBoundMemory = [&existingBindings](const auto &existingBinding) {
-        if (existingBinding.has_value() && existingBinding->memory.memory != nullptr) {
-            existingBindings.boundMemory = existingBinding->memory;
+    const auto rememberBoundMemory = [&, aliasGroupId](BoundMemoryInfo memory) {
+        if (memory.memory == nullptr) {
+            throw std::runtime_error("Manually bound aliases must provide memory for alias group " +
+                                     std::to_string(aliasGroupId));
+        }
+        if (existingBindings.boundMemory.has_value()) {
+            const auto &previous = *existingBindings.boundMemory;
+            if (previous.memory != memory.memory || previous.offset != memory.offset || previous.size != memory.size) {
+                throw std::runtime_error("Conflicting backing regions for alias group " + std::to_string(aliasGroupId));
+            }
+        }
+        existingBindings.boundMemory = memory;
+    };
+    const auto rememberRequirements = [&](auto handle, uint32_t resourceIndex) {
+        if (!createsPeers) {
+            return;
+        }
+        const auto requirements = aliasMemoryRequirements(sessionImpl.contextView, handle);
+        const auto &memory = requirements.template get<vk::MemoryRequirements2>().memoryRequirements;
+        (void)detail::validateAliasMemoryBinding(
+            resourceIndex, *existingBindings.boundMemory, 0, memory,
+            requirements.template get<vk::MemoryDedicatedRequirements>().requiresDedicatedAllocation);
+        existingBindings.memoryTypeBits &= memory.memoryTypeBits;
+        if (existingBindings.memoryTypeBits == 0) {
+            throw std::runtime_error("Alias resources have no common memory type");
         }
     };
-    rememberBoundMemory(existingBindings.boundTensor);
-    rememberBoundMemory(existingBindings.boundBuffer);
-    rememberBoundMemory(existingBindings.boundImage);
+    for (const auto &bound : boundTensors) {
+        if (belongsToGroup(bound)) {
+            rememberBoundMemory(bound.memory);
+            rememberRequirements(bound.tensor, bound.descBinding.resourceIndex);
+            if (!existingBindings.boundTensor.has_value()) {
+                existingBindings.boundTensor = TensorBindingInfo{bound.tensor, bound.memory};
+            }
+        }
+    }
+    for (const auto &bound : boundBuffers) {
+        if (belongsToGroup(bound)) {
+            rememberBoundMemory(bound.memory);
+            rememberRequirements(bound.buffer, bound.descBinding.resourceIndex);
+            if (!existingBindings.boundBuffer.has_value()) {
+                existingBindings.boundBuffer = BufferBindingInfo{bound.buffer, bound.memory};
+            }
+        }
+    }
+    for (const auto &bound : boundImages) {
+        if (belongsToGroup(bound)) {
+            rememberBoundMemory(bound.memory);
+            rememberRequirements(bound.image, bound.descBinding.resourceIndex);
+            if (!existingBindings.boundImage.has_value()) {
+                existingBindings.boundImage = ImageBindingInfo{bound.image,   bound.memory, bound.imageView,
+                                                               bound.sampler, bound.layout, bound.subresourceRange};
+            }
+        }
+    }
 
     return existingBindings;
 }
 
 void PreparedExecution::Impl::resolveAliasGroupBinding(const DescriptorBinding &descBinding,
                                                        const ExistingAliasGroupBindings &existingBindings,
-                                                       PendingAliasGroupAllocation &pendingAllocation) {
+                                                       PendingAliasGroupAllocation &pendingAllocation,
+                                                       const std::map<uint32_t, vk::DeviceSize> &aliasPeerOffsets) {
     const auto &workloadState = workloadImpl(sessionImpl.workload);
     const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
     const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
@@ -582,61 +591,52 @@ void PreparedExecution::Impl::resolveAliasGroupBinding(const DescriptorBinding &
         return;
     }
 
-    if (existingBindings.hasBoundAlias() && !existingBindings.boundMemory.has_value()) {
-        throw std::runtime_error("Manually bound aliases must provide memory for aliased workload resource " +
-                                 std::to_string(descBinding.resourceIndex));
+    const auto peerOffset = aliasPeerOffsets.find(descBinding.resourceIndex);
+    if (peerOffset != aliasPeerOffsets.end() && !existingBindings.boundMemory.has_value()) {
+        throw std::runtime_error("Alias peer offsets require external backing");
     }
+    const auto addPendingResource = [&](auto object, auto &objects) {
+        const auto chain = aliasMemoryRequirements(sessionImpl.contextView, *object);
+        const auto &requirements = chain.template get<vk::MemoryRequirements2>().memoryRequirements;
+        const bool dedicated = chain.template get<vk::MemoryDedicatedRequirements>().requiresDedicatedAllocation;
+        vk::DeviceSize offset = 0;
+        if (existingBindings.boundMemory.has_value()) {
+            const auto byteOffset = peerOffset == aliasPeerOffsets.end() ? 0 : peerOffset->second;
+            offset = detail::validateAliasMemoryBinding(descBinding.resourceIndex, *existingBindings.boundMemory,
+                                                        byteOffset, requirements, dedicated);
+        } else {
+            if (dedicated) {
+                throw std::runtime_error("Alias peer requires a dedicated allocation");
+            }
+            pendingAllocation.memorySize = std::max(pendingAllocation.memorySize, requirements.size);
+        }
+        pendingAllocation.memoryTypeBits &= requirements.memoryTypeBits;
+        if (pendingAllocation.memoryTypeBits == 0) {
+            throw std::runtime_error("Alias resources have no common memory type");
+        }
+        objects.push_back({descBinding, std::move(object), offset});
+    };
 
     switch (descriptorType) {
     case vk::DescriptorType::eTensorARM: {
         const auto tiling = detail::toTensorTiling(sessionImpl.resourceTilings.at(descBinding.resourceIndex));
-        auto tensor = createIntermediateTensor(sessionImpl.workload, sessionImpl.contextView, descBinding, tiling);
-        if (existingBindings.boundMemory.has_value()) {
-            const auto aliasMemory = *existingBindings.boundMemory;
-            bindResourceMemory(sessionImpl.contextView, tensor, aliasMemory);
-            const auto tensorBindingInfo = runtimeResources.adoptTensor(std::move(tensor), aliasMemory);
-            addBoundTensor(tensorBindingInfo, descBinding);
-            return;
-        }
-
-        const auto requirements = resourceMemoryRequirements(sessionImpl.contextView, tensor);
-        pendingAllocation.memoryTypeBits &= requirements.memoryTypeBits;
-        pendingAllocation.memorySize = std::max(pendingAllocation.memorySize, requirements.size);
-        pendingAllocation.tensors.emplace_back(descBinding, std::move(tensor));
+        addPendingResource(createIntermediateTensor(sessionImpl.workload, sessionImpl.contextView,
+                                                    descBinding.resourceIndex, tiling,
+                                                    sessionImpl.tensorStrides(descBinding.resourceIndex)),
+                           pendingAllocation.tensors);
         return;
     }
-    case vk::DescriptorType::eStorageBuffer: {
-        auto buffer = createIntermediateBuffer(sessionImpl.workload, sessionImpl.contextView, descBinding);
-        if (existingBindings.boundMemory.has_value()) {
-            const auto aliasMemory = *existingBindings.boundMemory;
-            bindResourceMemory(sessionImpl.contextView, buffer, aliasMemory);
-            const auto bufferBindingInfo = runtimeResources.adoptBuffer(std::move(buffer), aliasMemory);
-            addBoundBuffer(bufferBindingInfo, descBinding);
-            return;
-        }
-
-        const auto requirements = resourceMemoryRequirements(sessionImpl.contextView, buffer);
-        pendingAllocation.memoryTypeBits &= requirements.memoryTypeBits;
-        pendingAllocation.memorySize = std::max(pendingAllocation.memorySize, requirements.size);
-        pendingAllocation.buffers.emplace_back(descBinding, std::move(buffer));
+    case vk::DescriptorType::eStorageBuffer:
+        addPendingResource(
+            createIntermediateBuffer(sessionImpl.workload, sessionImpl.contextView, descBinding.resourceIndex),
+            pendingAllocation.buffers);
         return;
-    }
     case vk::DescriptorType::eCombinedImageSampler:
     case vk::DescriptorType::eStorageImage: {
         const auto tiling = detail::toImageTiling(sessionImpl.resourceTilings.at(descBinding.resourceIndex));
-        auto image = createIntermediateImage(sessionImpl.workload, sessionImpl.contextView, descBinding, true, tiling);
-        if (existingBindings.boundMemory.has_value()) {
-            const auto aliasMemory = *existingBindings.boundMemory;
-            bindResourceMemory(sessionImpl.contextView, image, aliasMemory);
-            const auto imageBindingInfo = runtimeResources.adoptImage(std::move(image), aliasMemory);
-            addBoundImage(imageBindingInfo, descBinding);
-            return;
-        }
-
-        const auto requirements = resourceMemoryRequirements(sessionImpl.contextView, image);
-        pendingAllocation.memoryTypeBits &= requirements.memoryTypeBits;
-        pendingAllocation.memorySize = std::max(pendingAllocation.memorySize, requirements.size);
-        pendingAllocation.images.emplace_back(descBinding, std::move(image));
+        addPendingResource(createIntermediateImage(sessionImpl.workload, sessionImpl.contextView,
+                                                   descBinding.resourceIndex, true, tiling),
+                           pendingAllocation.images);
         return;
     }
     default:
@@ -655,6 +655,11 @@ void PreparedExecution::Impl::addExistingAliasBinding(const DescriptorBinding &d
 
     switch (descriptorType) {
     case vk::DescriptorType::eTensorARM: {
+        if (findRefIf(boundTensors, [&descBinding](const auto &bound) {
+                return bound.descBinding.resourceIndex == descBinding.resourceIndex;
+            }).has_value()) {
+            return;
+        }
         if (!existingBindings.boundTensor.has_value()) {
             throwNoAlias("tensor");
         }
@@ -662,6 +667,11 @@ void PreparedExecution::Impl::addExistingAliasBinding(const DescriptorBinding &d
         return;
     }
     case vk::DescriptorType::eStorageBuffer: {
+        if (findRefIf(boundBuffers, [&descBinding](const auto &bound) {
+                return bound.descBinding.resourceIndex == descBinding.resourceIndex;
+            }).has_value()) {
+            return;
+        }
         if (!existingBindings.boundBuffer.has_value()) {
             throwNoAlias("buffer");
         }
@@ -670,6 +680,11 @@ void PreparedExecution::Impl::addExistingAliasBinding(const DescriptorBinding &d
     }
     case vk::DescriptorType::eCombinedImageSampler:
     case vk::DescriptorType::eStorageImage: {
+        if (findRefIf(boundImages, [&descBinding](const auto &bound) {
+                return bound.descBinding.resourceIndex == descBinding.resourceIndex;
+            }).has_value()) {
+            return;
+        }
         if (!existingBindings.boundImage.has_value()) {
             throwNoAlias("image");
         }
@@ -692,36 +707,33 @@ PreparedExecution::Impl::allocateAliasGroupMemory(const PendingAliasGroupAllocat
 }
 
 void PreparedExecution::Impl::bindAliasGroupMemory(PendingAliasGroupAllocation &pendingAllocation,
-                                                   vk::DeviceMemory aliasMemory) const {
-    const BoundMemoryInfo bindingMemory{aliasMemory, 0, pendingAllocation.memorySize};
-    for (auto &pendingTensor : pendingAllocation.tensors) {
-        bindResourceMemory(sessionImpl.contextView, pendingTensor.second, bindingMemory);
-    }
-
-    for (auto &pendingBuffer : pendingAllocation.buffers) {
-        bindResourceMemory(sessionImpl.contextView, pendingBuffer.second, bindingMemory);
-    }
-
-    for (auto &pendingImage : pendingAllocation.images) {
-        bindResourceMemory(sessionImpl.contextView, pendingImage.second, bindingMemory);
-    }
+                                                   BoundMemoryInfo aliasMemory) const {
+    const auto bind = [&](auto &peers) {
+        for (auto &peer : peers) {
+            const auto remainingSize = aliasMemory.size - (peer.offset - aliasMemory.offset);
+            bindResourceMemory(sessionImpl.contextView, peer.object, {aliasMemory.memory, peer.offset, remainingSize});
+        }
+    };
+    bind(pendingAllocation.tensors);
+    bind(pendingAllocation.buffers);
+    bind(pendingAllocation.images);
 }
 
 void PreparedExecution::Impl::adoptAliasGroupResources(PendingAliasGroupAllocation &pendingAllocation,
                                                        BoundMemoryInfo aliasMemory) {
-    for (auto &[descBinding, tensor] : pendingAllocation.tensors) {
-        const auto tensorBindingInfo = runtimeResources.adoptTensor(std::move(tensor), aliasMemory);
-        addBoundTensor(tensorBindingInfo, descBinding);
+    for (auto &peer : pendingAllocation.tensors) {
+        const auto tensorBindingInfo = runtimeResources.adoptTensor(std::move(peer.object), aliasMemory);
+        addBoundTensor(tensorBindingInfo, peer.binding);
     }
 
-    for (auto &[descBinding, buffer] : pendingAllocation.buffers) {
-        const auto bufferBindingInfo = runtimeResources.adoptBuffer(std::move(buffer), aliasMemory);
-        addBoundBuffer(bufferBindingInfo, descBinding);
+    for (auto &peer : pendingAllocation.buffers) {
+        const auto bufferBindingInfo = runtimeResources.adoptBuffer(std::move(peer.object), aliasMemory);
+        addBoundBuffer(bufferBindingInfo, peer.binding);
     }
 
-    for (auto &[descBinding, image] : pendingAllocation.images) {
-        const auto imageBindingInfo = runtimeResources.adoptImage(std::move(image), aliasMemory);
-        addBoundImage(imageBindingInfo, descBinding);
+    for (auto &peer : pendingAllocation.images) {
+        const auto imageBindingInfo = runtimeResources.adoptImage(std::move(peer.object), aliasMemory);
+        addBoundImage(imageBindingInfo, peer.binding);
     }
 }
 
@@ -813,8 +825,7 @@ void PreparedExecution::Impl::insertInitialImageLayoutTransitions(vk::CommandBuf
     const auto &workloadState = workloadImpl(sessionImpl.workload);
 
     for (auto &boundImage : boundImages) {
-        // Externally managed and already transitioned images
-        if (!boundImage.layout.has_value() || !transitionedImages.insert(boundImage.image).second) {
+        if (!boundImage.layout.has_value()) {
             continue;
         }
 
@@ -829,8 +840,11 @@ void PreparedExecution::Impl::insertInitialImageLayoutTransitions(vk::CommandBuf
                 });
             });
         if (firstConsumerExecutableIt == workloadState.executables.end()) {
-            throw std::runtime_error("No executable uses workload image resource " +
-                                     std::to_string(imageResourceIndex));
+            // A public image may only provide memory for a dispatched alias peer.
+            continue;
+        }
+        if (!transitionedImages.insert(boundImage.image).second) {
+            continue;
         }
 
         // Image transition

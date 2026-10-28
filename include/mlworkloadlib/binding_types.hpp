@@ -18,6 +18,8 @@ namespace mlsdk::workloadlib {
  * @brief Non-owning memory information for a bound Vulkan resource.
  *
  * Required when ResourceRequirementsView::requiresBoundMemoryInfo() is true.
+ * Alias bindings must describe the same finite allocation region. The caller
+ * guarantees accurate allocation metadata and compatible external resources.
  */
 struct BoundMemoryInfo {
     vk::DeviceMemory memory = nullptr;

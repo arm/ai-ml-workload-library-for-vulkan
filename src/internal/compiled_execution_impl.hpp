@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -43,6 +44,7 @@ struct CompiledState {
     // Only graph tensors and their alias peers have a tiling entry.
     std::vector<std::optional<ResourceTiling>> pipelineTilings;
     std::vector<CompiledExecutable> executables;
+    std::map<uint32_t, std::vector<int64_t>> aliasTensorStrides;
 };
 
 } // namespace mlsdk::workloadlib::detail

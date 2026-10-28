@@ -4,6 +4,7 @@
  */
 #include "internal/binding_set_impl.hpp"
 #include "internal/module_compiler.hpp"
+#include "internal/runtime_resource.hpp"
 #include "internal/session_impl.hpp"
 #include "internal/session_tiling.hpp"
 #include "internal/utils.hpp"
@@ -21,6 +22,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -111,8 +113,17 @@ void validateExecutableBindings(const Workload &workload, const Executable &exec
     }
 }
 
+const std::vector<int64_t> &
+effectiveTensorStrides(const Workload &workload, uint32_t resourceIndex,
+                       const std::map<uint32_t, std::vector<int64_t>> &tensorStrideOverrides) {
+    const auto strideOverride = tensorStrideOverrides.find(resourceIndex);
+    return strideOverride == tensorStrideOverrides.end() ? workloadImpl(workload).resources.at(resourceIndex).stride
+                                                         : strideOverride->second;
+}
+
 void populateDataGraphResources(DataGraphPipelineCreateStorage &storage, const Executable &executable,
-                                const Workload &workload, const std::vector<detail::ResourceTiling> &resourceTilings) {
+                                const Workload &workload, const std::vector<detail::ResourceTiling> &resourceTilings,
+                                const std::map<uint32_t, std::vector<int64_t>> &tensorStrideOverrides) {
     const auto &workloadState = workloadImpl(workload);
     storage.resourceTensorDescriptions.reserve(executable.bindings.size());
     storage.imageLayouts.reserve(executable.bindings.size());
@@ -126,13 +137,18 @@ void populateDataGraphResources(DataGraphPipelineCreateStorage &storage, const E
             storage.resourceInfos.emplace_back(descBinding.set, descBinding.binding, 0, &storage.imageLayouts.back());
         } else {
             const auto tensorTiling = detail::toTensorTiling(resourceTilings.at(descBinding.resourceIndex));
-            auto tensorUsage = vk::TensorUsageFlagsARM{vk::TensorUsageFlagBitsARM::eDataGraph};
+            const auto &strides =
+                descriptorType == vk::DescriptorType::eTensorARM
+                    ? effectiveTensorStrides(workload, descBinding.resourceIndex, tensorStrideOverrides)
+                    : resource.stride;
             if (descriptorType == vk::DescriptorType::eTensorARM) {
-                tensorUsage = detail::tensorUsageForTiling(workload, descBinding.resourceIndex, tensorTiling);
+                storage.resourceTensorDescriptions.push_back(
+                    detail::tensorDescription(workload, descBinding.resourceIndex, tensorTiling, strides));
+            } else {
+                storage.resourceTensorDescriptions.emplace_back(
+                    tensorTiling, resource.format, static_cast<uint32_t>(resource.shape.size()), resource.shape.data(),
+                    strides.empty() ? nullptr : strides.data(), vk::TensorUsageFlagBitsARM::eDataGraph);
             }
-            storage.resourceTensorDescriptions.emplace_back(
-                tensorTiling, resource.format, static_cast<uint32_t>(resource.shape.size()), resource.shape.data(),
-                resource.stride.empty() ? nullptr : resource.stride.data(), tensorUsage);
             storage.resourceInfos.emplace_back(descBinding.set, descBinding.binding, 0,
                                                &storage.resourceTensorDescriptions.back());
         }
@@ -277,14 +293,15 @@ vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const M
                                            const vk::raii::PipelineLayout &pipelineLayout, const Workload &workload,
                                            const ContextView &contextView, const vk::raii::PipelineCache *pipelineCache,
                                            bool enableNeuralStatistics,
-                                           const std::vector<detail::ResourceTiling> &resourceTilings) {
+                                           const std::vector<detail::ResourceTiling> &resourceTilings,
+                                           const std::map<uint32_t, std::vector<int64_t>> &tensorStrideOverrides) {
     if (enableNeuralStatistics && (executable.dataGraphPipelineFlags &
                                    vk::PipelineCreateFlagBits2::eProtectedAccessOnly) != vk::PipelineCreateFlags2{}) {
         throw std::runtime_error("Neural statistics cannot be enabled for a protected-access-only data graph pipeline");
     }
 
     DataGraphPipelineCreateStorage storage;
-    populateDataGraphResources(storage, executable, workload, resourceTilings);
+    populateDataGraphResources(storage, executable, workload, resourceTilings, tensorStrideOverrides);
     populateDataGraphConstants(storage, executable, workload);
 
     SpecializationInfoStorage specializationInfo;
@@ -438,7 +455,14 @@ void Session::Impl::selectTiling(uint32_t resourceIndex, detail::ResourceTiling 
                                      " tiling differs from the compiled data graph pipeline");
         }
     }
-    detail::selectResourceTiling(workload, resourceTilings, resourceIndex, tiling);
+    auto selectedTilings = resourceTilings;
+    detail::selectResourceTiling(workload, selectedTilings, resourceIndex, tiling);
+    for (const auto &[index, strides] : tensorStrideOverrides) {
+        const auto tensorTiling = detail::toTensorTiling(selectedTilings.at(index));
+        detail::validateTensorTiling(tensorTiling, detail::tensorUsageForTiling(workload, index, tensorTiling),
+                                     workloadImpl(workload).resources.at(index).shape, !strides.empty());
+    }
+    resourceTilings.swap(selectedTilings);
 }
 
 /*******************************************************************************
@@ -470,6 +494,11 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
 #ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
         if (const auto binaryInput = dataGraphBinaryInputs.find(executableIndex);
             binaryInput != dataGraphBinaryInputs.end()) {
+            if (std::any_of(executable.bindings.begin(), executable.bindings.end(), [&](const auto &binding) {
+                    return tensorStrideOverrides.count(binding.resourceIndex) != 0;
+                })) {
+                throw std::runtime_error("Tensor stride overrides are not supported by data graph binaries");
+            }
             compiledExecutable.pipeline =
                 createDataGraphBinaryPipeline(executable, compiledExecutable.pipelineLayout, contextView,
                                               binaryInput->second, options.neuralStatistics.has_value());
@@ -480,9 +509,10 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
         auto compiledModule = moduleForExecutable(workload, moduleImplementations, executableIndex);
         detail::compileModuleToSpirv(compiledModule, executable.type);
         compiledExecutable.shaderModule = createShaderModule(compiledModule, contextView);
-        compiledExecutable.pipeline = createDataGraphPipeline(
-            executable, compiledModule, compiledExecutable.shaderModule, compiledExecutable.pipelineLayout, workload,
-            contextView, options.pipelineCache, options.neuralStatistics.has_value(), resourceTilings);
+        compiledExecutable.pipeline =
+            createDataGraphPipeline(executable, compiledModule, compiledExecutable.shaderModule,
+                                    compiledExecutable.pipelineLayout, workload, contextView, options.pipelineCache,
+                                    options.neuralStatistics.has_value(), resourceTilings, tensorStrideOverrides);
     }
 }
 
@@ -583,11 +613,28 @@ DataGraphSessionMemoryInfo Session::Impl::dataGraphSessionMemory(uint32_t execut
 }
 
 void Session::Impl::compileOrReuseExecutables() {
+    std::map<uint32_t, std::vector<int64_t>> aliasTensorStrides;
+    const auto &workloadState = workloadImpl(workload);
+    for (const auto &executable : workloadState.executables) {
+        if (executable.type != ExecutableKind::Graph) {
+            continue;
+        }
+        for (const auto &binding : executable.bindings) {
+            const auto &resource = workloadState.resources.at(binding.resourceIndex);
+            if (resource.role == detail::Resource::Role::Intermediate && resource.aliasGroupId.has_value() &&
+                resource.descriptorType == vk::DescriptorType::eTensorARM) {
+                aliasTensorStrides.emplace(binding.resourceIndex, tensorStrides(binding.resourceIndex));
+            }
+        }
+    }
     if (compiledExecutionState->compiledState.has_value()) {
         if (!moduleImplementations.empty() || !dataGraphBinaryInputs.empty()) {
             throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
         }
         detail::validateCompiledTilings(resourceTilings, compiledExecutionState->compiledState->pipelineTilings);
+        if (aliasTensorStrides != compiledExecutionState->compiledState->aliasTensorStrides) {
+            throw std::runtime_error("Session alias tensor strides do not match the compiled execution");
+        }
         return;
     }
 
@@ -598,7 +645,8 @@ void Session::Impl::compileOrReuseExecutables() {
         createPipeline(compiledExecutable, executableIndex);
     }
     compiledExecutionState->compiledState.emplace(
-        detail::CompiledState{detail::fixedPipelineTilings(workload, resourceTilings), std::move(compiledExecutables)});
+        detail::CompiledState{detail::fixedPipelineTilings(workload, resourceTilings), std::move(compiledExecutables),
+                              std::move(aliasTensorStrides)});
     moduleImplementations.clear();
     dataGraphBinaryInputs.clear();
 }
@@ -609,6 +657,23 @@ void Session::Impl::configure() {
     }
 
     detail::validateAliasGroupTilings(workload, resourceTilings);
+    detail::validateAliasImageTensorLayouts(workload, resourceTilings);
+    std::optional<vk::PhysicalDeviceTensorPropertiesARM> tensorLimits;
+    const auto &resources = workloadImpl(workload).resources;
+    for (size_t index = 0; index < resources.size(); ++index) {
+        const auto &resource = resources[index];
+        if (resource.aliasGroupId.has_value() && resource.role != detail::Resource::Role::Constant &&
+            std::holds_alternative<detail::Resource::TensorMetadata>(resource.metadata)) {
+            if (!tensorLimits.has_value()) {
+                tensorLimits =
+                    contextView.physicalDevice.get()
+                        .getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceTensorPropertiesARM>()
+                        .get<vk::PhysicalDeviceTensorPropertiesARM>();
+            }
+            detail::validateAliasTensorDescription(static_cast<uint32_t>(index), resource,
+                                                   tensorStrides(static_cast<uint32_t>(index)), &*tensorLimits);
+        }
+    }
 
     // Compiled executables
     compileOrReuseExecutables();
@@ -647,6 +712,10 @@ Session::~Session() = default;
 Session::Impl &Session::sessionImpl() noexcept { return *impl_; }
 
 const Session::Impl &Session::sessionImpl() const noexcept { return *impl_; }
+
+const std::vector<int64_t> &Session::Impl::tensorStrides(uint32_t resourceIndex) const {
+    return effectiveTensorStrides(workload, resourceIndex, tensorStrideOverrides);
+}
 
 /*******************************************************************************
  * Session configuration
@@ -812,6 +881,57 @@ vk::ImageTiling Session::imageTiling(ResourceView resource) const {
         throw std::runtime_error("Session::imageTiling() requires an image resource");
     }
     return detail::toImageTiling(sessionState.resourceTilings.at(resource.resourceIndex_));
+}
+
+void Session::setTensorStrides(AliasPeerView peer, std::vector<int64_t> strides) {
+    auto &sessionState = sessionImpl();
+    if (sessionState.configured) {
+        throw std::runtime_error("Session::setTensorStrides() must be called before Session::configure()");
+    }
+    if (peer.workload_ != &sessionState.workload) {
+        throw std::runtime_error("AliasPeerView belongs to a different Workload");
+    }
+    const auto &resource = workloadImpl(sessionState.workload).resources.at(peer.resourceIndex_);
+    const auto fail = [index = peer.resourceIndex_](std::string_view message) {
+        throw std::runtime_error("Alias resource " + std::to_string(index) + ": " + std::string(message));
+    };
+    if (resource.role != detail::Resource::Role::Intermediate || !resource.aliasGroupId.has_value() ||
+        resource.descriptorType != vk::DescriptorType::eTensorARM) {
+        fail("tensor strides require an aliased intermediate tensor");
+    }
+    const auto tiling = detail::toTensorTiling(sessionState.resourceTilings.at(peer.resourceIndex_));
+    if (tiling != vk::TensorTilingARM::eLinear) {
+        fail("only linear tensor tiling accepts strides");
+    }
+    if (strides.empty()) {
+        fail("tensor stride count must match its non-empty shape");
+    }
+    detail::validateAliasTensorDescription(peer.resourceIndex_, resource, strides);
+    if (sessionState.compiledExecutionState->compiledState.has_value()) {
+        const auto &fixedStrides = sessionState.compiledExecutionState->compiledState->aliasTensorStrides;
+        const auto compiled = fixedStrides.find(peer.resourceIndex_);
+        if (compiled != fixedStrides.end() && compiled->second != strides) {
+            fail("tensor strides differ from the compiled data graph pipeline");
+        }
+    }
+    sessionState.tensorStrideOverrides.insert_or_assign(peer.resourceIndex_, std::move(strides));
+}
+
+AliasPeerMemoryRequirements Session::aliasPeerMemoryRequirements(AliasPeerView peer) const {
+    const auto &state = sessionImpl();
+    if (!state.configured) {
+        throw std::runtime_error("Session::configure() must be called before querying alias peer memory requirements");
+    }
+    if (peer.workload_ != &state.workload) {
+        throw std::runtime_error("AliasPeerView belongs to a different Workload");
+    }
+    const auto &resource = workloadImpl(state.workload).resources.at(peer.resourceIndex_);
+    if (resource.role != detail::Resource::Role::Intermediate || !resource.aliasGroupId.has_value()) {
+        throw std::runtime_error("Memory requirements require an intermediate alias peer");
+    }
+    return detail::queryAliasPeerMemoryRequirements(state.workload, state.contextView, peer.resourceIndex_,
+                                                    state.resourceTilings.at(peer.resourceIndex_),
+                                                    state.tensorStrides(peer.resourceIndex_));
 }
 
 void Session::configure() { sessionImpl().configure(); }

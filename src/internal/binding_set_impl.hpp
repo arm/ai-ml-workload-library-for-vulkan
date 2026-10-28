@@ -34,6 +34,7 @@ struct BindingSet::Impl {
     std::map<uint32_t, TensorBindingInfo> tensorBindingsByResourceIndex;
     std::map<uint32_t, BufferBindingInfo> bufferBindingsByResourceIndex;
     std::map<uint32_t, ImageBindingInfo> imageBindingsByResourceIndex;
+    std::map<uint32_t, vk::DeviceSize> aliasPeerOffsetsByResourceIndex;
 
     std::map<uint32_t, std::vector<std::byte>> pushConstantsByExecutableIndex;
 };
