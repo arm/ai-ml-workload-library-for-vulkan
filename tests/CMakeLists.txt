@@ -4,6 +4,7 @@
 #
 
 include(gtest)
+include(spirv-headers)
 include(spirv-tools)
 
 set(ML_WORKLOAD_LIB_TEST_SOURCES

@@ -256,9 +256,7 @@ class Builder:
         if self.run_tests:
             cmake_setup_cmd.append("-DML_WORKLOAD_LIB_BUILD_TESTS=ON")
             cmake_setup_cmd.append(f"-DSPIRV_TOOLS_PATH={self.spirv_tools_path}")
-            cmake_setup_cmd.append(
-                f"-DSPIRV-Headers_SOURCE_DIR={self.spirv_headers_path}"
-            )
+            cmake_setup_cmd.append(f"-DSPIRV_HEADERS_PATH={self.spirv_headers_path}")
             cmake_setup_cmd.append(f"-DGTEST_PATH={self.gtest_path}")
 
         if self.coverage:
