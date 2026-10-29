@@ -220,7 +220,12 @@ void populateDataGraphConstants(DataGraphPipelineCreateStorage &storage, const E
  *******************************************************************************/
 
 Module moduleForExecutable(const Workload &workload, const std::map<uint32_t, Module> &moduleImplementations,
+                           const std::map<uint32_t, Module> &executableModuleImplementations,
                            uint32_t executableIndex) {
+    if (const auto implementation = executableModuleImplementations.find(executableIndex);
+        implementation != executableModuleImplementations.end()) {
+        return implementation->second;
+    }
     const auto &workloadState = workloadImpl(workload);
     const auto &executable = workloadState.executables.at(executableIndex);
     const auto &workloadModule = workloadState.modules.at(executable.moduleIndex);
@@ -526,17 +531,16 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
     }
 #endif
 
+    auto compiledModule =
+        moduleForExecutable(workload, moduleImplementations, executableModuleImplementations, executableIndex);
+    detail::compileModuleToSpirv(compiledModule, executable.type);
+    compiledExecutable.shaderModule = createShaderModule(compiledModule, contextView);
+
     if (executable.type == ExecutableKind::Compute) {
-        auto compiledModule = moduleForExecutable(workload, moduleImplementations, executableIndex);
-        detail::compileModuleToSpirv(compiledModule, executable.type);
-        compiledExecutable.shaderModule = createShaderModule(compiledModule, contextView);
         compiledExecutable.pipeline = createComputePipeline(executable, compiledModule, compiledExecutable.shaderModule,
                                                             compiledExecutable.pipelineLayout, contextView,
                                                             options.pipelineCache, options.pipelineRobustness);
     } else {
-        auto compiledModule = moduleForExecutable(workload, moduleImplementations, executableIndex);
-        detail::compileModuleToSpirv(compiledModule, executable.type);
-        compiledExecutable.shaderModule = createShaderModule(compiledModule, contextView);
         compiledExecutable.pipeline =
             createDataGraphPipeline(executable, compiledModule, compiledExecutable.shaderModule,
                                     compiledExecutable.pipelineLayout, workload, contextView, options.pipelineCache,
@@ -656,7 +660,8 @@ void Session::Impl::compileOrReuseExecutables() {
         }
     }
     if (compiledExecutionState->compiledState.has_value()) {
-        if (!moduleImplementations.empty() || !dataGraphBinaryInputs.empty()) {
+        if (!moduleImplementations.empty() || !executableModuleImplementations.empty() ||
+            !dataGraphBinaryInputs.empty()) {
             throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
         }
         detail::validateCompiledTilings(resourceTilings, compiledExecutionState->compiledState->pipelineTilings);
@@ -676,6 +681,7 @@ void Session::Impl::compileOrReuseExecutables() {
         detail::CompiledState{detail::fixedPipelineTilings(workload, resourceTilings), std::move(compiledExecutables),
                               std::move(aliasTensorStrides)});
     moduleImplementations.clear();
+    executableModuleImplementations.clear();
     dataGraphBinaryInputs.clear();
 }
 
@@ -751,14 +757,39 @@ const std::vector<int64_t> &Session::Impl::tensorStrides(uint32_t resourceIndex)
  * Session configuration
  *******************************************************************************/
 
-void Session::bindModule(PlaceholderModuleView placeholderModule, ModuleImplementation implementation) {
-    auto &sessionState = sessionImpl();
-    if (sessionState.configured) {
-        throw std::runtime_error("Session::bindModule() must be called before Session::configure()");
+void Session::Impl::validateCompilationInputsMutable() const {
+    if (configured) {
+        throw std::runtime_error("Compilation inputs must be supplied before Session::configure()");
     }
-    if (sessionState.compiledExecutionState->compiledState.has_value()) {
+    if (compiledExecutionState->compiledState.has_value()) {
         throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
     }
+}
+
+void Session::bindModule(ExecutableView executable, ModuleImplementation implementation) {
+    auto &sessionState = sessionImpl();
+    sessionState.validateCompilationInputsMutable();
+    if (executable.workload_ != &sessionState.workload) {
+        throw std::runtime_error("ExecutableView belongs to a different Workload");
+    }
+    if (executable.index_ >= workloadImpl(sessionState.workload).executables.size()) {
+        throw std::runtime_error("ExecutableView index is invalid");
+    }
+    if (implementation.codeKind == ModuleCodeKind::Missing) {
+        throw std::runtime_error("ModuleImplementation must provide executable module code");
+    }
+    if (sessionState.dataGraphBinaryInputs.count(executable.index_) != 0) {
+        throw std::runtime_error("An executable module and data graph binary cannot target the same executable");
+    }
+    const auto &workloadState = workloadImpl(sessionState.workload);
+    const auto &module = workloadState.modules.at(workloadState.executables[executable.index_].moduleIndex);
+    sessionState.executableModuleImplementations.insert_or_assign(
+        executable.index_, detail::moduleFromImplementation(std::move(implementation), module.name, module.entryPoint));
+}
+
+void Session::bindModule(PlaceholderModuleView placeholderModule, ModuleImplementation implementation) {
+    auto &sessionState = sessionImpl();
+    sessionState.validateCompilationInputsMutable();
     if (placeholderModule.workload_ != &sessionState.workload) {
         throw std::runtime_error("PlaceholderModuleView belongs to a different Workload");
     }
@@ -787,12 +818,7 @@ void Session::bindDataGraphBinary(ArrayView<const std::byte> binary, DataGraphBi
                                   ArrayView<const uint8_t> pipelineIdentifier, uint32_t executableIndex) {
 #ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
     auto &sessionState = sessionImpl();
-    if (sessionState.configured) {
-        throw std::runtime_error("Session::bindDataGraphBinary() must be called before Session::configure()");
-    }
-    if (sessionState.compiledExecutionState->compiledState.has_value()) {
-        throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
-    }
+    sessionState.validateCompilationInputsMutable();
     const auto &workloadState = workloadImpl(sessionState.workload);
     if (executableIndex >= workloadState.executables.size()) {
         throw std::runtime_error("Data graph executable index is out of range");
@@ -803,6 +829,9 @@ void Session::bindDataGraphBinary(ArrayView<const std::byte> binary, DataGraphBi
     }
     if (sessionState.moduleImplementations.count(workloadExecutable.moduleIndex) != 0) {
         throw std::runtime_error("A placeholder module and data graph binary cannot target the same module");
+    }
+    if (sessionState.executableModuleImplementations.count(executableIndex) != 0) {
+        throw std::runtime_error("An executable module and data graph binary cannot target the same executable");
     }
     if (binary.data() == nullptr || binary.empty()) {
         throw std::runtime_error("Data graph binary payload must not be empty");

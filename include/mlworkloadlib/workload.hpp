@@ -376,6 +376,7 @@ class ExecutableView {
 
     friend class Workload;
     friend class BindingSet;
+    friend class Session;
 
     const Workload *workload_ = nullptr;
     uint32_t index_ = 0;

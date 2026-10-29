@@ -799,6 +799,75 @@ TEST_F(VgfSessionExecutionTest, RunComputeShaderSegmentWithBoundPlaceholderModul
     EXPECT_EQ(outputBuffer.read(elements), expected);
 }
 
+// Different arithmetic makes wrong module selection visible in the output.
+TEST_F(VgfSessionExecutionTest, ExecutableModuleReplacementKeepsSharedModuleStepsIndependent) {
+    const auto bytes = writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
+        const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "shared", "main");
+        addInt32BuffersSegment(encoder, module, "first");
+        addInt32BuffersSegment(encoder, module, "second");
+    });
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    const auto makeImplementation = [](bool subtract) {
+        auto assembly = readSpvasmFile(ML_WORKLOAD_LIB_ADD_INT32_BUFFERS_SPVASM);
+        if (subtract) {
+            replace(assembly, "OpIAdd", "OpISub");
+        }
+        ModuleImplementation implementation;
+        implementation.codeKind = ModuleCodeKind::Spirv;
+        implementation.spirv = assembleSpirv(assembly);
+        return implementation;
+    };
+    // Rebinding changes only the selected executable; the later fallback must not override it.
+    session.bindModule(workload.executable(0), makeImplementation(false));
+    session.bindModule(workload.executable(0), makeImplementation(true));
+    session.bindModule(workload.placeholderModule(0), makeImplementation(false));
+    EXPECT_EQ(workload.executable(0).module().index(), workload.executable(1).module().index());
+    EXPECT_TRUE(workload.executable(0).module().requiresImplementation());
+    session.configure();
+    EXPECT_THROW(session.bindModule(workload.executable(0), makeImplementation(true)), std::runtime_error);
+
+    constexpr size_t elements = 10;
+    constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
+    const Buffer lhs(physicalDevice, device, bufferSize);
+    const Buffer rhs(physicalDevice, device, bufferSize);
+    const Buffer firstOutput(physicalDevice, device, bufferSize);
+    const Buffer secondOutput(physicalDevice, device, bufferSize);
+    lhs.write(std::vector<int32_t>(elements, 9));
+    rhs.write(std::vector<int32_t>(elements, 4));
+    firstOutput.write(std::vector<int32_t>(elements, 0));
+    secondOutput.write(std::vector<int32_t>(elements, 0));
+    auto bindings = session.createBindingSet();
+    ASSERT_EQ(workload.resourceCount(), 6);
+    for (uint32_t step = 0; step < 2; ++step) {
+        const auto firstResourceIndex = step * 3;
+        bindings.bindBuffer(workload.resource(firstResourceIndex), BufferBindingInfo{*lhs.buffer});
+        bindings.bindBuffer(workload.resource(firstResourceIndex + 1), BufferBindingInfo{*rhs.buffer});
+        bindings.bindBuffer(workload.resource(firstResourceIndex + 2),
+                            BufferBindingInfo{step == 0 ? *firstOutput.buffer : *secondOutput.buffer});
+    }
+    session.prepare(bindings).run();
+    EXPECT_EQ(firstOutput.read(elements), std::vector<int32_t>(elements, 5));
+    EXPECT_EQ(secondOutput.read(elements), std::vector<int32_t>(elements, 13));
+}
+
+TEST_F(VgfSessionExecutionTest, ExecutableModuleReplacementRejectsInvalidInputs) {
+    const auto bytes = makePlaceholderAddInt32BuffersVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto otherWorkload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    ModuleImplementation implementation;
+    implementation.codeKind = ModuleCodeKind::Spirv;
+    implementation.spirv = assembleAddInt32BuffersSpirv();
+    EXPECT_THROW(session.bindModule(otherWorkload.executable(0), implementation), std::runtime_error);
+    EXPECT_THROW(session.bindModule(workload.executable(0), {}), std::runtime_error);
+    ModuleImplementation empty;
+    empty.codeKind = ModuleCodeKind::Spirv;
+    EXPECT_THROW(session.bindModule(workload.executable(0), empty), std::runtime_error);
+}
+
 TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRetriesAfterFailedConfigure) {
     constexpr size_t elements = 10;
     constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
@@ -840,46 +909,53 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRetriesAfterFailedConfigu
 }
 
 TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRejectsModuleBindingsAfterCompilation) {
-    const auto bytes = makePlaceholderAddInt32BuffersVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
-    auto context = wrappedContext();
-    CompiledExecution compiledExecution(context, workload);
-    const auto spirv = assembleAddInt32BuffersSpirv();
+    for (const bool executableBinding : {false, true}) {
+        SCOPED_TRACE(executableBinding);
+        const auto bytes = makePlaceholderAddInt32BuffersVgf();
+        auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+        auto context = wrappedContext();
+        CompiledExecution compiledExecution(context, workload);
+        const auto spirv = assembleAddInt32BuffersSpirv();
 
-    const auto bindPlaceholder = [&workload](Session &session, std::vector<uint32_t> code) {
-        ModuleImplementation implementation;
-        implementation.codeKind = ModuleCodeKind::Spirv;
-        implementation.spirv = std::move(code);
-        session.bindModule(workload.placeholderModule(0), std::move(implementation));
-    };
+        const auto bindModule = [&workload, executableBinding](Session &session, std::vector<uint32_t> code) {
+            ModuleImplementation implementation;
+            implementation.codeKind = ModuleCodeKind::Spirv;
+            implementation.spirv = std::move(code);
+            if (executableBinding) {
+                session.bindModule(workload.executable(0), std::move(implementation));
+            } else {
+                session.bindModule(workload.placeholderModule(0), std::move(implementation));
+            }
+        };
 
-    Session preboundSession(context, workload, compiledExecution);
-    bindPlaceholder(preboundSession, spirv);
+        Session preboundSession(context, workload, compiledExecution);
+        bindModule(preboundSession, spirv);
 
-    {
-        Session firstSession(context, workload, compiledExecution);
-        bindPlaceholder(firstSession, spirv);
-        firstSession.configure();
+        {
+            Session firstSession(context, workload, compiledExecution);
+            bindModule(firstSession, spirv);
+            firstSession.configure();
+        }
+
+        try {
+            preboundSession.configure();
+            FAIL() << "Pre-bound module was silently ignored";
+        } catch (const std::runtime_error &error) {
+            EXPECT_STREQ("Compilation inputs cannot be rebound after compiled execution is configured", error.what());
+        }
+
+        Session unboundSession(context, workload, compiledExecution);
+        EXPECT_NO_THROW(unboundSession.configure());
+
+        Session lateBindingSession(context, workload, compiledExecution);
+        try {
+            bindModule(lateBindingSession, spirv);
+            FAIL() << "Late module binding was accepted";
+        } catch (const std::runtime_error &error) {
+            EXPECT_STREQ("Compilation inputs cannot be rebound after compiled execution is configured", error.what());
+        }
+        EXPECT_NO_THROW(lateBindingSession.configure());
     }
-
-    try {
-        preboundSession.configure();
-        FAIL() << "Pre-bound placeholder module was silently ignored";
-    } catch (const std::runtime_error &error) {
-        EXPECT_STREQ("Compilation inputs cannot be rebound after compiled execution is configured", error.what());
-    }
-
-    Session unboundSession(context, workload, compiledExecution);
-    EXPECT_NO_THROW(unboundSession.configure());
-
-    Session lateBindingSession(context, workload, compiledExecution);
-    try {
-        bindPlaceholder(lateBindingSession, spirv);
-        FAIL() << "Late placeholder module binding was accepted";
-    } catch (const std::runtime_error &error) {
-        EXPECT_STREQ("Compilation inputs cannot be rebound after compiled execution is configured", error.what());
-    }
-    EXPECT_NO_THROW(lateBindingSession.configure());
 }
 
 TEST_F(VgfSessionExecutionTest, RunGlslComputeShaderSegmentWithPushConstants) {
