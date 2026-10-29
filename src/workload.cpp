@@ -66,33 +66,63 @@ ResourceAccess detail::Resource::accessForRole(detail::Resource::Role role) {
     throw std::runtime_error("Unsupported workload resource role");
 }
 
+vk::DeviceSize detail::Resource::byteSize() const { return resourceByteSize(*this); }
+
 vk::Extent3D detail::Resource::imageExtent() const {
-    const auto &imageInfo = imageMetadata(*this);
-    if (imageInfo.extent.width != 0 || imageInfo.extent.height != 0 || imageInfo.extent.depth != 0) {
-        return imageInfo.extent;
+    if (const auto extent = imageExtentIfKnown()) {
+        return *extent;
     }
-    const auto dimension = [](std::string_view name, int64_t value) {
-        constexpr auto maxDimension = static_cast<int64_t>(std::numeric_limits<uint32_t>::max());
-        if (value <= 0 || value > maxDimension) {
-            throw std::runtime_error("Workload image " + std::string(name) + " must be between 1 and UINT32_MAX; got " +
-                                     std::to_string(value));
+    throw std::runtime_error("Workload image extent requires a concrete shape");
+}
+
+std::optional<vk::Extent3D> detail::Resource::imageExtentIfKnown() const {
+    const auto &imageInfo = imageMetadata(*this);
+    (void)detail::imageViewType(imageInfo.imageType);
+    const auto validateExtent = [&imageInfo](vk::Extent3D extent) {
+        if (extent.width == 0 || extent.height == 0 || extent.depth == 0) {
+            throw std::runtime_error("Image dimensions must be positive");
         }
-        return static_cast<uint32_t>(value);
+        if (imageInfo.imageType == vk::ImageType::e1D && (extent.height != 1 || extent.depth != 1)) {
+            throw std::runtime_error("1D image height and depth must be 1");
+        }
+        if (imageInfo.imageType == vk::ImageType::e2D && extent.depth != 1) {
+            throw std::runtime_error("2D image depth must be 1");
+        }
+        return extent;
     };
+    if (imageInfo.extent.width != 0 || imageInfo.extent.height != 0 || imageInfo.extent.depth != 0) {
+        return validateExtent(imageInfo.extent);
+    }
+    if (shape.empty()) {
+        return std::nullopt;
+    }
 
     if (shape.size() != 3 && shape.size() != 4) {
         throw std::runtime_error("Workload image shape must be HWC or NHWC; got rank " + std::to_string(shape.size()));
     }
-    if (shape.size() == 4 && shape[0] != 1) {
+    bool unresolved = false;
+    for (const auto dimension : shape) {
+        constexpr auto maxDimension = static_cast<int64_t>(std::numeric_limits<uint32_t>::max());
+        if (dimension != -1 && (dimension <= 0 || dimension > maxDimension)) {
+            throw std::runtime_error("Workload image dimensions must be -1 or between 1 and UINT32_MAX; got " +
+                                     std::to_string(dimension));
+        }
+        unresolved = unresolved || dimension == -1;
+    }
+    if (shape.size() == 4 && shape[0] != -1 && shape[0] != 1) {
         throw std::runtime_error("Workload NHWC image batch must be 1; got " + std::to_string(shape[0]));
     }
     const auto channelCount = vk::componentCount(format);
-    if (shape.back() != channelCount) {
+    if (!detail::isKnownFormat(format) || (shape.back() != -1 && shape.back() != channelCount)) {
         throw std::runtime_error("Workload image channel count must match format component count " +
                                  std::to_string(channelCount) + "; got " + std::to_string(shape.back()));
     }
+    if (unresolved) {
+        return std::nullopt;
+    }
     const auto heightIndex = shape.size() - 3;
-    return {dimension("width", shape[heightIndex + 1]), dimension("height", shape[heightIndex]), 1};
+    return validateExtent(
+        {static_cast<uint32_t>(shape[heightIndex + 1]), static_cast<uint32_t>(shape[heightIndex]), 1});
 }
 
 vk::ImageLayout detail::Resource::requiredImageLayout() const {
@@ -326,36 +356,43 @@ bool ResourceRequirementsView::requiresBoundMemoryInfo() const {
 
 vk::DeviceSize ResourceRequirementsView::elementCount() const {
     const auto &resource = workloadResource(*workload_, resourceIndex_);
-    return resource.elementCount != 0 ? resource.elementCount : detail::elementCount(resource.shape);
+    if (resource.elementCount != 0) {
+        return resource.elementCount;
+    }
+    if (!resource.shape.empty()) {
+        return detail::elementCount(resource.shape);
+    }
+    if (std::holds_alternative<Resource::ImageMetadata>(resource.metadata) && detail::isKnownFormat(resource.format)) {
+        if (const auto extent = resource.imageExtentIfKnown()) {
+            return detail::elementCount(
+                {extent->width, extent->height, extent->depth, vk::componentCount(resource.format)});
+        }
+    }
+    return 0;
 }
 
 vk::DeviceSize ResourceRequirementsView::byteSize() const {
     const auto &resource = workloadResource(*workload_, resourceIndex_);
-    if (const auto *metadata = std::get_if<Resource::BufferMetadata>(&resource.metadata)) {
-        if (metadata->byteSize != 0) {
-            return metadata->byteSize;
+    const auto *buffer = std::get_if<Resource::BufferMetadata>(&resource.metadata);
+    if (buffer != nullptr && buffer->byteSize != 0) {
+        return buffer->byteSize;
+    }
+    if (!detail::hasKnownFormatByteSize(resource.format)) {
+        return 0;
+    }
+    if (std::holds_alternative<Resource::ImageMetadata>(resource.metadata)) {
+        if (!resource.imageExtentIfKnown()) {
+            return 0;
         }
-    }
-    vk::DeviceSize elementSize = 0;
-    switch (resource.format) {
-    case vk::Format::eR8Sint:
-        elementSize = 1;
-        break;
-    case vk::Format::eR32Sint:
-    case vk::Format::eR32Sfloat:
-    case vk::Format::eR8G8B8A8Snorm:
-    case vk::Format::eR8G8B8A8Unorm:
-        elementSize = 4;
-        break;
-    default:
+    } else if (resource.shape.empty() && buffer != nullptr) {
+        if (resource.elementCount == 0) {
+            return 0;
+        }
+    } else if (resource.shape.empty() || std::any_of(resource.shape.begin(), resource.shape.end(),
+                                                     [](int64_t dimension) { return dimension <= 0; })) {
         return 0;
     }
-
-    try {
-        return detail::byteSizeFromShapeAndStride(resource.shape, resource.stride, elementSize, "Workload byte size");
-    } catch (const std::runtime_error &) {
-        return 0;
-    }
+    return resource.byteSize();
 }
 
 TensorRequirementsView ResourceRequirementsView::asTensor() const {
@@ -414,6 +451,10 @@ vk::BufferUsageFlags BufferRequirementsView::usage() const {
 /*******************************************************************************
  * Image requirement views
  *******************************************************************************/
+
+vk::ImageType ImageRequirementsView::imageType() const {
+    return detail::imageMetadata(workloadResource(*workload_, resourceIndex_)).imageType;
+}
 
 vk::Extent3D ImageRequirementsView::extent() const {
     return workloadResource(*workload_, resourceIndex_).imageExtent();

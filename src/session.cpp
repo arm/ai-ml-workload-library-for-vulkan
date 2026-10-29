@@ -101,14 +101,34 @@ void validateExecutableBindings(const Workload &workload, const Executable &exec
 
     const auto &workloadState = workloadImpl(workload);
     for (const auto &descBinding : executable.bindings) {
+        validateSupportedDescriptorType(workloadState.descriptorTypeForBinding(descBinding));
+    }
+}
+
+void validateExecutableResourceMetadata(const Workload &workload, const Executable &executable) {
+    const auto &workloadState = workloadImpl(workload);
+    for (const auto &descBinding : executable.bindings) {
         const auto descriptorType = workloadState.descriptorTypeForBinding(descBinding);
-        validateSupportedDescriptorType(descriptorType);
+        if (descriptorType == vk::DescriptorType::eStorageBuffer) {
+            continue;
+        }
+        const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
+        if (resource.role != detail::Resource::Role::Intermediate &&
+            (executable.type == ExecutableKind::Compute ||
+             descriptorType == vk::DescriptorType::eCombinedImageSampler ||
+             descriptorType == vk::DescriptorType::eStorageImage)) {
+            continue;
+        }
         if (descriptorType == vk::DescriptorType::eCombinedImageSampler ||
             descriptorType == vk::DescriptorType::eStorageImage) {
-            const auto &resource = workloadState.resources.at(descBinding.resourceIndex);
-            if (resource.format != vk::Format::eR8G8B8A8Snorm) {
-                throw std::runtime_error("Session only supports eR8G8B8A8Snorm image resources");
-            }
+            (void)resource.imageExtent();
+            continue;
+        }
+        if (resource.byteSize() == 0) {
+            throw std::runtime_error("Session requires non-zero resource size metadata");
+        }
+        if (descriptorType == vk::DescriptorType::eTensorARM) {
+            detail::validateTensorMetadata(resource.format, resource.shape, resource.stride);
         }
     }
 }
@@ -142,8 +162,14 @@ void populateDataGraphResources(DataGraphPipelineCreateStorage &storage, const E
                     ? effectiveTensorStrides(workload, descBinding.resourceIndex, tensorStrideOverrides)
                     : resource.stride;
             if (descriptorType == vk::DescriptorType::eTensorARM) {
-                storage.resourceTensorDescriptions.push_back(
-                    detail::tensorDescription(workload, descBinding.resourceIndex, tensorTiling, strides));
+                const auto description =
+                    detail::tensorDescription(workload, descBinding.resourceIndex, tensorTiling, strides);
+                detail::validateTensorMetadata(resource.format, resource.shape, strides);
+                detail::validateTensorTiling(tensorTiling, description.usage, resource.shape, !strides.empty());
+                if (!(description.usage & vk::TensorUsageFlagBitsARM::eDataGraph)) {
+                    throw std::runtime_error("Graph tensor resources require eDataGraph usage");
+                }
+                storage.resourceTensorDescriptions.push_back(description);
             } else {
                 storage.resourceTensorDescriptions.emplace_back(
                     tensorTiling, resource.format, static_cast<uint32_t>(resource.shape.size()), resource.shape.data(),
@@ -179,6 +205,7 @@ void populateDataGraphConstants(DataGraphPipelineCreateStorage &storage, const E
         }
         detail::validateTensorTiling(vk::TensorTilingARM::eLinear, detail::tensorMetadata(resource).usage,
                                      resource.shape, !resource.stride.empty());
+        detail::validateTensorMetadata(resource.format, resource.shape, resource.stride);
         storage.constantTensorDescriptions.emplace_back(
             vk::TensorTilingARM::eLinear, resource.format, static_cast<uint32_t>(resource.shape.size()),
             resource.shape.data(), resource.stride.empty() ? nullptr : resource.stride.data(),
@@ -475,13 +502,29 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
         throw std::runtime_error("Session only supports data graph and compute shader executables");
     }
 
-    // Pipeline layout
     validateExecutableBindings(workload, executable);
+    validateExecutableResourceMetadata(workload, executable);
+
+    // Pipeline layout
     compiledExecutable.pushConstantRanges = executable.pushConstantRanges;
     compiledExecutable.descriptorSetLayouts = createDescriptorSetLayouts(executable.bindings, workload, contextView);
     compiledExecutable.pipelineLayout =
         createPipelineLayout(compiledExecutable.descriptorSetLayouts, executable, contextView);
     const auto &options = compiledExecutionState->options;
+
+#ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
+    if (const auto binaryInput = dataGraphBinaryInputs.find(executableIndex);
+        executable.type == ExecutableKind::Graph && binaryInput != dataGraphBinaryInputs.end()) {
+        if (std::any_of(executable.bindings.begin(), executable.bindings.end(),
+                        [&](const auto &binding) { return tensorStrideOverrides.count(binding.resourceIndex) != 0; })) {
+            throw std::runtime_error("Tensor stride overrides are not supported by data graph binaries");
+        }
+        compiledExecutable.pipeline =
+            createDataGraphBinaryPipeline(executable, compiledExecutable.pipelineLayout, contextView,
+                                          binaryInput->second, options.neuralStatistics.has_value());
+        return;
+    }
+#endif
 
     if (executable.type == ExecutableKind::Compute) {
         auto compiledModule = moduleForExecutable(workload, moduleImplementations, executableIndex);
@@ -491,21 +534,6 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
                                                             compiledExecutable.pipelineLayout, contextView,
                                                             options.pipelineCache, options.pipelineRobustness);
     } else {
-#ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
-        if (const auto binaryInput = dataGraphBinaryInputs.find(executableIndex);
-            binaryInput != dataGraphBinaryInputs.end()) {
-            if (std::any_of(executable.bindings.begin(), executable.bindings.end(), [&](const auto &binding) {
-                    return tensorStrideOverrides.count(binding.resourceIndex) != 0;
-                })) {
-                throw std::runtime_error("Tensor stride overrides are not supported by data graph binaries");
-            }
-            compiledExecutable.pipeline =
-                createDataGraphBinaryPipeline(executable, compiledExecutable.pipelineLayout, contextView,
-                                              binaryInput->second, options.neuralStatistics.has_value());
-            return;
-        }
-#endif
-
         auto compiledModule = moduleForExecutable(workload, moduleImplementations, executableIndex);
         detail::compileModuleToSpirv(compiledModule, executable.type);
         compiledExecutable.shaderModule = createShaderModule(compiledModule, contextView);

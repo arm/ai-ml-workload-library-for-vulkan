@@ -77,6 +77,7 @@ struct Resource {
         vk::ImageLayout layout = vk::ImageLayout::eUndefined;
         vk::ImageSubresourceRange subresourceRange;
         std::optional<SamplerConfig> samplerConfig;
+        vk::ImageType imageType = vk::ImageType::e2D;
     };
 
     std::string name;
@@ -94,7 +95,10 @@ struct Resource {
     static Role publicRoleForAccess(ResourceAccess access);
     static ResourceAccess accessForRole(Role role);
 
+    vk::DeviceSize byteSize() const;
+
     // Image resource queries
+    std::optional<vk::Extent3D> imageExtentIfKnown() const;
     vk::Extent3D imageExtent() const;
     vk::ImageLayout requiredImageLayout() const;
     vk::ImageSubresourceRange requiredImageSubresourceRange() const;

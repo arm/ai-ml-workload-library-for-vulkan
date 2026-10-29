@@ -86,7 +86,7 @@ struct RuntimeContextDeviceRequirements {
  */
 class RuntimeAllocation {
   public:
-    /** @brief Returns the resource's backing-memory range. */
+    /** @brief Returns the backing-memory range sized from Vulkan memory requirements. */
     BoundMemoryInfo memory() const;
 
     RuntimeAllocation(const RuntimeAllocation &) = delete;

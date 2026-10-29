@@ -255,9 +255,7 @@ TensorAllocation Context::createTensor(ResourceView resource, vk::TensorTilingAR
     std::vector<int64_t> shape(shapeView.begin(), shapeView.end());
     detail::validateTensorTiling(tiling, usage, shape, !strideView.empty());
     std::vector<int64_t> stride(strideView.begin(), strideView.end());
-    if (shape.empty()) {
-        throw std::runtime_error("Context::createTensor() requires non-empty tensor shape metadata");
-    }
+    detail::validateTensorMetadata(requirements.format(), shape, stride);
 
     vk::TensorDescriptionARM description;
     description.tiling = tiling;
@@ -341,8 +339,8 @@ ImageAllocation Context::createImage(ResourceView resource, vk::ImageTiling tili
         throw std::runtime_error("Context::createImage() requires non-zero image extent metadata");
     }
 
-    const auto imageType = extent.depth > 1 ? vk::ImageType::e3D : vk::ImageType::e2D;
-    const auto viewType = extent.depth > 1 ? vk::ImageViewType::e3D : vk::ImageViewType::e2D;
+    const auto imageType = imageRequirements.imageType();
+    const auto viewType = detail::imageViewType(imageType);
 
     const auto contextView = this->contextView();
 

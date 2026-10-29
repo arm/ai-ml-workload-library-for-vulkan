@@ -93,9 +93,10 @@ vk::TensorDescriptionARM tensorDescription(const Workload &workload, uint32_t re
 vk::raii::TensorARM createIntermediateTensor(const Workload &workload, const ContextView &contextView,
                                              uint32_t resourceIndex, vk::TensorTilingARM tiling,
                                              const std::vector<int64_t> &strides) {
+    const auto &resource = workloadImpl(workload).resources.at(resourceIndex);
+    validateTensorMetadata(resource.format, resource.shape, strides);
     const auto description = tensorDescription(workload, resourceIndex, tiling, strides);
-    validateTensorTiling(tiling, description.usage, workloadImpl(workload).resources.at(resourceIndex).shape,
-                         !strides.empty());
+    validateTensorTiling(tiling, description.usage, resource.shape, !strides.empty());
     const vk::TensorCreateInfoARM createInfo({}, &description, vk::SharingMode::eExclusive);
     return {contextView.device.get(), createInfo};
 }
@@ -103,8 +104,7 @@ vk::raii::TensorARM createIntermediateTensor(const Workload &workload, const Con
 vk::raii::Buffer createIntermediateBuffer(const Workload &workload, const ContextView &contextView,
                                           uint32_t resourceIndex) {
     const auto &resource = workloadImpl(workload).resources.at(resourceIndex);
-    const auto byteSize = detail::storageBufferByteSize(detail::bufferMetadata(resource).byteSize, resource.format,
-                                                        resource.shape, resource.stride);
+    const auto byteSize = resource.byteSize();
     const vk::BufferCreateInfo createInfo({}, byteSize, vk::BufferUsageFlagBits::eStorageBuffer);
     return {contextView.device.get(), createInfo};
 }
@@ -119,7 +119,7 @@ vk::raii::Image createIntermediateImage(const Workload &workload, const ContextV
     const auto effectiveUsage = detail::imageUsageForTiling(requiredUsage, forAliasing, tiling);
 
     const auto extent = resource.imageExtent();
-    const auto imageType = extent.depth > 1 ? vk::ImageType::e3D : vk::ImageType::e2D;
+    const auto imageType = detail::imageMetadata(resource).imageType;
     const vk::ImageCreateInfo createInfo(forAliasing ? vk::ImageCreateFlagBits::eAlias : vk::ImageCreateFlags{},
                                          imageType, resource.format, extent, 1, 1, vk::SampleCountFlagBits::e1, tiling,
                                          effectiveUsage, vk::SharingMode::eExclusive, {}, vk::ImageLayout::eUndefined);

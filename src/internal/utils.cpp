@@ -10,6 +10,7 @@
 #include <vulkan/vulkan_format_traits.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -110,7 +111,8 @@ vk::DeviceSize byteSizeFromShapeAndStride(const std::vector<int64_t> &shape, con
 }
 
 vk::DeviceSize storageBufferByteSize(vk::DeviceSize explicitByteSize, vk::Format format,
-                                     const std::vector<int64_t> &shape, const std::vector<int64_t> &stride) {
+                                     const std::vector<int64_t> &shape, const std::vector<int64_t> &stride,
+                                     vk::DeviceSize fallbackElementCount) {
     if (explicitByteSize != 0) {
         return explicitByteSize;
     }
@@ -118,25 +120,88 @@ vk::DeviceSize storageBufferByteSize(vk::DeviceSize explicitByteSize, vk::Format
         throw std::runtime_error("Storage buffer stride rank must match shape rank");
     }
 
-    vk::DeviceSize elementSize = 0;
-    switch (format) {
-    case vk::Format::eR8Sint:
-        elementSize = 1;
-        break;
-    case vk::Format::eR32Sint:
-    case vk::Format::eR32Sfloat:
-        elementSize = 4;
-        break;
-    default:
-        throw std::runtime_error("Session does not support storage buffer format " +
-                                 std::to_string(static_cast<uint32_t>(format)));
+    const auto formatSize = formatByteSize(format);
+
+    // Match Scenario Runner's element sizes for VGF buffers.
+    vk::DeviceSize elementSize = 1;
+    while (elementSize < formatSize) {
+        elementSize = checkedDeviceSizeMultiply(elementSize, 2, "Storage buffer element size");
     }
 
-    const auto size = byteSizeFromShapeAndStride(shape, stride, elementSize, "Storage buffer byte size");
+    const auto size = shape.empty()
+                          ? checkedDeviceSizeMultiply(fallbackElementCount, elementSize, "Storage buffer byte size")
+                          : byteSizeFromShapeAndStride(shape, stride, elementSize, "Storage buffer byte size");
     if (size == 0) {
         throw std::runtime_error("Storage buffer byte size must not be zero");
     }
     return size;
+}
+
+bool hasKnownFormatByteSize(vk::Format format) {
+    return isKnownFormat(format) && vk::planeCount(format) == 1 && !vk::isCompressed(format) &&
+           vk::blockExtent(format) == std::array<uint8_t, 3>{1, 1, 1};
+}
+
+vk::DeviceSize formatByteSize(vk::Format format) {
+    if (!hasKnownFormatByteSize(format)) {
+        throw std::runtime_error(
+            "Format byte size requires a known, uncompressed, single-plane format with one texel per block");
+    }
+    return vk::blockSize(format);
+}
+
+vk::DeviceSize resourceByteSize(const Resource &resource) {
+    if (const auto *buffer = std::get_if<Resource::BufferMetadata>(&resource.metadata)) {
+        return storageBufferByteSize(buffer->byteSize, resource.format, resource.shape, resource.stride,
+                                     resource.elementCount);
+    }
+    if (std::holds_alternative<Resource::ImageMetadata>(resource.metadata)) {
+        const auto texelSize = formatByteSize(resource.format);
+        const auto extent = resource.imageExtent();
+        if (extent.width == 0 || extent.height == 0 || extent.depth == 0) {
+            throw std::runtime_error("Image dimensions must be positive");
+        }
+
+        auto texelCount = checkedDeviceSizeMultiply(extent.width, extent.height, "Image byte size");
+        texelCount = checkedDeviceSizeMultiply(texelCount, extent.depth, "Image byte size");
+        return checkedDeviceSizeMultiply(texelCount, texelSize, "Image byte size");
+    }
+
+    const auto elementSize = formatByteSize(resource.format);
+    const auto size = byteSizeFromShapeAndStride(resource.shape, resource.stride, elementSize, "Workload byte size");
+    if (size == 0) {
+        throw std::runtime_error("Workload resource byte size cannot be determined");
+    }
+    return size;
+}
+
+void validateTensorMetadata(vk::Format format, const std::vector<int64_t> &shape, const std::vector<int64_t> &stride) {
+    const auto elementSize = formatByteSize(format);
+    if (vk::componentCount(format) != 1) {
+        throw std::runtime_error("Tensor format must be a single-component format");
+    }
+    if (shape.empty() || elementCount(shape) == 0) {
+        throw std::runtime_error("Tensor dimensions must be positive and non-empty");
+    }
+    if (!stride.empty()) {
+        if (stride.size() != shape.size() || stride.back() != static_cast<int64_t>(elementSize)) {
+            throw std::runtime_error("Tensor strides must match the shape rank and innermost element size");
+        }
+        for (std::size_t index = 0; index < stride.size(); ++index) {
+            if (stride[index] <= 0 || static_cast<vk::DeviceSize>(stride[index]) % elementSize != 0) {
+                throw std::runtime_error("Tensor strides must be positive multiples of the element size");
+            }
+            if (index != 0 &&
+                static_cast<vk::DeviceSize>(stride[index - 1]) <
+                    checkedDeviceSizeMultiply(static_cast<vk::DeviceSize>(stride[index]),
+                                              static_cast<vk::DeviceSize>(shape[index]), "Tensor stride span")) {
+                throw std::runtime_error("Tensor strides must not overlap elements");
+            }
+        }
+        (void)checkedDeviceSizeMultiply(static_cast<vk::DeviceSize>(stride.front()),
+                                        static_cast<vk::DeviceSize>(shape.front()), "Tensor storage size");
+    }
+    (void)byteSizeFromShapeAndStride(shape, stride, elementSize, "Workload byte size");
 }
 
 vk::ImageAspectFlags imageAspectMask(vk::Format format) {
@@ -156,6 +221,19 @@ vk::ImageAspectFlags imageAspectMask(vk::Format format) {
         return vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil;
     default:
         return vk::ImageAspectFlagBits::eColor;
+    }
+}
+
+vk::ImageViewType imageViewType(vk::ImageType imageType) {
+    switch (imageType) {
+    case vk::ImageType::e1D:
+        return vk::ImageViewType::e1D;
+    case vk::ImageType::e2D:
+        return vk::ImageViewType::e2D;
+    case vk::ImageType::e3D:
+        return vk::ImageViewType::e3D;
+    default:
+        throw std::runtime_error("Unsupported image type");
     }
 }
 

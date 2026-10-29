@@ -400,7 +400,7 @@ TEST_F(AliasMemoryExecutionTest, QueriesDedicatedHintsAndRejectsIncompatiblePeer
     }
 }
 
-TEST_F(AliasMemoryExecutionTest, RejectsUnsupportedLinearImageLayouts) {
+TEST_F(AliasMemoryExecutionTest, RequiresCallerOwnedImagesForLinearTensorAliases) {
     auto context = wrappedContext();
     for (const bool internalImage : {false, true}) {
         SCOPED_TRACE(internalImage);
@@ -418,9 +418,11 @@ TEST_F(AliasMemoryExecutionTest, RejectsUnsupportedLinearImageLayouts) {
         Session session(context, workload);
         if (!internalImage) {
             session.setImageTiling(workload.resource(0), vk::ImageTiling::eLinear);
+            EXPECT_NO_THROW(session.configure());
+        } else {
+            EXPECT_THAT([&] { session.configure(); },
+                        ::testing::ThrowsMessage<std::runtime_error>(::testing::HasSubstr("caller-owned image")));
         }
-        EXPECT_THAT([&] { session.configure(); }, ::testing::ThrowsMessage<std::runtime_error>(::testing::HasSubstr(
-                                                      internalImage ? "caller-owned image" : "rank-three tensor")));
     }
 }
 

@@ -58,13 +58,19 @@ void validateImageTensorAliases(const Workload &workload) {
             continue;
         }
         const auto components = vk::componentCount(image.format);
-        const auto requiredRank = image.imageExtent().depth > 1 ? 4 : 3;
+        const auto imageType = imageMetadata(image).imageType;
+        auto requiredRank = 4;
+        if (imageType == vk::ImageType::e1D) {
+            requiredRank = 2;
+        } else if (imageType == vk::ImageType::e2D) {
+            requiredRank = 3;
+        }
         for (const auto &tensor : resources) {
             if (tensor.aliasGroupId != image.aliasGroupId || tensor.role == Resource::Role::Constant ||
                 !std::holds_alternative<Resource::TensorMetadata>(tensor.metadata)) {
                 continue;
             }
-            // Image extents determine dimensionality; extra outer tensor dimensions are singleton.
+            // Image type determines dimensionality; extra outer tensor dimensions are singleton.
             if (tensor.shape.size() < static_cast<size_t>(requiredRank) || tensor.shape.back() != components ||
                 !std::all_of(tensor.shape.begin(), tensor.shape.end() - requiredRank,
                              [](int64_t dimension) { return dimension == 1; })) {
@@ -196,11 +202,6 @@ void validateAliasImageTensorLayouts(const Workload &workload, const std::vector
             // We do not negotiate library-created image pitches/offsets before graph compilation.
             if (image.role == Resource::Role::Intermediate) {
                 throw std::runtime_error(pair + ": linear image/tensor aliases require a caller-owned image");
-            }
-            // The aliasing rules refer to depthPitch for rank > 3, but that pitch is undefined for 2D images.
-            if (image.imageExtent().depth == 1 && tensor.shape.size() != 3) {
-                throw std::runtime_error(pair + ": a 2D linear image requires a rank-three tensor alias; "
-                                                "depthPitch is undefined for 2D images");
             }
         }
     }
