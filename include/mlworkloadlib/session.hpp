@@ -81,6 +81,9 @@ class Session final {
     Session(Session &&) = delete;
     Session &operator=(Session &&) = delete;
 
+    /** @brief Returns the borrowed original Workload. */
+    const Workload &workload() const;
+
     /***************************************************************************
      * Configuration
      **************************************************************************/

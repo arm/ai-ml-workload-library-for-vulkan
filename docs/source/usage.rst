@@ -153,6 +153,14 @@ Similarly, executables expose their module and descriptor interface:
    :start-after: // [executable-inspection-begin]
    :end-before: // [executable-inspection-end]
 
+``Session::workload()`` and ``BindingSet::workload()`` provide read-only access
+to the original workload, which must outlive them.
+
+``ExecutableView::specializationInfo()`` returns a copy of the original explicit
+specialization entries and bytes, excluding shader defaults.
+``pushConstantSize()`` returns the largest original range end (``offset + size``),
+or zero when no ranges are declared.
+
 Resource binding
 ----------------
 

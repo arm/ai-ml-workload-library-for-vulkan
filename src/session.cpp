@@ -733,6 +733,8 @@ Session::Session(Context &context, const Workload &workload, CompiledExecution &
 
 Session::~Session() = default;
 
+const Workload &Session::workload() const { return sessionImpl().workload; }
+
 /*******************************************************************************
  * Session state access
  *******************************************************************************/

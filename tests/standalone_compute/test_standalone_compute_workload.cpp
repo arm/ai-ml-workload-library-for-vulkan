@@ -33,6 +33,8 @@ TEST(StandaloneComputeWorkload, ExposesPublicExecutablesBindingsResourcesAndDisp
     EXPECT_EQ(executable.index(), 0);
     EXPECT_EQ(executable.name(), "compute");
     EXPECT_EQ(executable.type(), ExecutableKind::Compute);
+    EXPECT_TRUE(executable.specializationInfo().empty());
+    EXPECT_EQ(executable.pushConstantSize(), 0);
     const auto module = executable.module();
     EXPECT_EQ(module.index(), 0);
     EXPECT_EQ(module.name(), "compute");
@@ -114,14 +116,20 @@ TEST(StandaloneComputeWorkload, AcceptsSpecializationConstants) {
     description.specializationInfo.mapEntries = {vk::SpecializationMapEntry(0, 0, 4)};
     description.specializationInfo.data = {std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
 
-    EXPECT_NO_THROW((void)Workload::fromComputeShader(std::move(description)));
+    const auto expected = description.specializationInfo;
+    auto workload = Workload::fromComputeShader(std::move(description));
+    const auto executable = workload.executable(0);
+    const auto specialization = executable.specializationInfo();
+    EXPECT_EQ(specialization.mapEntries, expected.mapEntries);
+    EXPECT_EQ(specialization.data, expected.data);
 }
 
 TEST(StandaloneComputeWorkload, AcceptsPushConstants) {
     auto description = makeAddInt32BuffersDescription();
     description.pushConstantSize = 4;
 
-    EXPECT_NO_THROW((void)Workload::fromComputeShader(std::move(description)));
+    auto workload = Workload::fromComputeShader(std::move(description));
+    EXPECT_EQ(workload.executable(0).pushConstantSize(), 4);
 }
 
 TEST(StandaloneComputeWorkload, ExposesImageSamplerRequirements) {

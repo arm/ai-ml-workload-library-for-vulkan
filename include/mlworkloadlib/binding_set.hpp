@@ -43,6 +43,13 @@ class BindingSet {
     /** @brief Replaces this instance with the bindings and Session association from another instance. */
     BindingSet &operator=(BindingSet &&) noexcept;
 
+    /**
+     * @brief Returns the borrowed original Workload associated with this binding set.
+     *
+     * The Workload must outlive this binding set. Throws if this binding set is invalid.
+     */
+    const Workload &workload() const;
+
     /***************************************************************************
      * Resource binding
      **************************************************************************/
