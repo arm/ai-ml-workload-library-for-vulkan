@@ -64,6 +64,9 @@ Resource resourceBase(std::string name, Resource::Role role, std::optional<vk::D
     if (!stride.empty() && stride.size() != shape.size()) {
         throw std::runtime_error("Workload resource stride rank must undefined or match shape rank");
     }
+    if (std::any_of(stride.begin(), stride.end(), [](int64_t value) { return value < 0; })) {
+        throw std::runtime_error("Workload resource strides must not be negative");
+    }
 
     Resource workloadResource;
     workloadResource.name = std::move(name);
@@ -244,6 +247,12 @@ void WorkloadBuilder::setPublicResourceName(uint32_t resourceIndex, std::string 
 }
 
 uint32_t WorkloadBuilder::appendResource(Resource workloadResource) {
+    if (!std::holds_alternative<Resource::ImageMetadata>(workloadResource.metadata) &&
+        hasKnownFormatByteSize(workloadResource.format) && !workloadResource.shape.empty() &&
+        std::all_of(workloadResource.shape.begin(), workloadResource.shape.end(),
+                    [](int64_t dimension) { return dimension > 0; })) {
+        (void)workloadResource.byteSize();
+    }
     const auto resourceIndex = static_cast<uint32_t>(workloadState_->resources.size());
     workloadState_->resources.push_back(std::move(workloadResource));
     return resourceIndex;
