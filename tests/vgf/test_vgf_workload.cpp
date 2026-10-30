@@ -280,6 +280,56 @@ TEST(VgfWorkload, DecodesPublicResourceAliasRequirements) {
  * Validation coverage
  *******************************************************************************/
 
+TEST(VgfWorkload, RejectsNegativeResourceStridesDuringImport) {
+    for (const auto descriptorType : {VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER}) {
+        for (const int64_t stride : {-16, -4, -1}) {
+            SCOPED_TRACE(testing::PrintToString(descriptorType));
+            SCOPED_TRACE(stride);
+            const auto data = writeVgf(
+                [&](Encoder &encoder) { encoder.AddInputResource(descriptorType, VK_FORMAT_R32_SINT, {4}, {stride}); });
+
+            EXPECT_THROW((void)Workload::fromVGF(data.data(), data.size()), std::runtime_error);
+        }
+    }
+}
+
+TEST(VgfWorkload, RejectsResourceByteSizeOverflowDuringImport) {
+    constexpr auto max = std::numeric_limits<int64_t>::max();
+    struct Layout {
+        std::vector<int64_t> shape;
+        std::vector<int64_t> stride;
+    };
+    const std::vector<Layout> layouts = {
+        {{max}, {}},                // Contiguous element count fits, but byte size does not.
+        {{4}, {max}},               // A single dimension span overflows.
+        {{3}, {max}},               // The span fits, but adding the element size overflows.
+        {{2, 2, 2}, {max, max, 4}}, // Individual spans fit, but their sum overflows.
+    };
+    for (const auto descriptorType : {VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER}) {
+        for (const auto &layout : layouts) {
+            SCOPED_TRACE(testing::PrintToString(descriptorType));
+            SCOPED_TRACE(testing::PrintToString(layout.shape));
+            SCOPED_TRACE(testing::PrintToString(layout.stride));
+            const auto data = writeVgf([&](Encoder &encoder) {
+                encoder.AddInputResource(descriptorType, VK_FORMAT_R32_SINT, layout.shape, layout.stride);
+            });
+
+            EXPECT_THROW((void)Workload::fromVGF(data.data(), data.size()), std::runtime_error);
+        }
+    }
+}
+
+TEST(VgfWorkload, AcceptsResourceByteSizeNearDeviceSizeLimit) {
+    constexpr auto max = std::numeric_limits<int64_t>::max();
+    for (const auto descriptorType : {VK_DESCRIPTOR_TYPE_TENSOR_ARM, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER}) {
+        const auto data = writeVgf(
+            [&](Encoder &encoder) { encoder.AddInputResource(descriptorType, VK_FORMAT_R32_SINT, {2}, {max}); });
+
+        const auto workload = Workload::fromVGF(data.data(), data.size());
+        EXPECT_EQ(workload.resource(0).requirements().byteSize(), static_cast<vk::DeviceSize>(max) + 4);
+    }
+}
+
 TEST(VgfWorkload, RejectsInvalidImageMetadata) {
     const std::vector<std::vector<int64_t>> invalidShapes = {
         {3, 5},                                                                    // Invalid rank.

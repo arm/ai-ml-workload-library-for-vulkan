@@ -52,6 +52,8 @@
   sharing external memory, with range, alignment, and memory-requirement checks
   before binding.
 - Expanded supported formats with corresponding resource metadata size calculations
+- Reject negative resource strides and tensor or storage-buffer byte-size
+  overflow during VGF workload import.
 
 ## Version 0.11.0 – *Initial Public Release*
 
