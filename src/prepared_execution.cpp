@@ -19,7 +19,6 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -69,6 +68,65 @@ struct PreparedExecution::Impl::BoundImage {
 struct PreparedExecution::Impl::DescriptorSetState {
     vk::raii::DescriptorPool descriptorPool{nullptr};
     std::vector<vk::raii::DescriptorSet> descriptorSets;
+};
+
+struct PreparedExecution::Impl::ResourceUse {
+    uint32_t resourceIndex = 0;
+    vk::AccessFlags2 accessMask;
+    bool writes = false;
+};
+
+struct PreparedExecution::Impl::SynchronizationState {
+    struct ResourceInfo {
+        uint32_t synchronizationSlotIndex = 0;
+        std::optional<uint32_t> imageStateIndex;
+        bool isOptimalTensor = false;
+    };
+
+    struct Slot {
+        bool isAliasGroup = false;
+        std::vector<uint32_t> imageStateIndices;
+
+        vk::PipelineStageFlags2 pendingStageMask;
+        vk::AccessFlags2 pendingAccessMask;
+        bool pendingWrites = false;
+        bool used = false;
+        bool lastImplicitBarrier = true;
+
+        void recordUse(const ResourceUse &use, vk::PipelineStageFlags2 stageMask, bool implicitBarrier,
+                       bool imageBarrierEmitted);
+    };
+
+    struct Image {
+        vk::Image image{nullptr};
+        vk::ImageSubresourceRange subresourceRange;
+        std::optional<vk::ImageLayout> initialLayout;
+        vk::ImageLayout currentLayout = vk::ImageLayout::eUndefined;
+        vk::ImageLayout descriptorLayout = vk::ImageLayout::eUndefined;
+        uint32_t synchronizationSlotIndex = 0;
+        bool used = false;
+    };
+
+    std::vector<ResourceInfo> resources;
+    std::vector<Slot> slots;
+    std::vector<Image> images;
+
+    std::vector<ResourceUse> collectResourceUses(const detail::Executable &executable) const;
+    BarrierBatch buildExecutableBarriers(const detail::Executable &executable, const std::vector<ResourceUse> &uses);
+    BarrierBatch buildExitBarriers();
+
+    bool prepareImageAccess(BarrierBatch &barriers, const ResourceInfo &resource, vk::PipelineStageFlags2 stageMask,
+                            vk::AccessFlags2 accessMask);
+    // Returns whether a barrier was emitted, including same-layout entry barriers.
+    bool ensureImageLayout(BarrierBatch &barriers, uint32_t imageIndex, vk::ImageLayout layout,
+                           vk::PipelineStageFlags2 dstStageMask, vk::AccessFlags2 dstAccessMask);
+};
+
+struct PreparedExecution::Impl::BarrierBatch {
+    std::vector<vk::MemoryBarrier2> memoryBarriers;
+    std::vector<vk::ImageMemoryBarrier2> imageBarriers;
+
+    void record(const vk::raii::Device &device, vk::CommandBuffer commandBuffer) const;
 };
 
 /*******************************************************************************
@@ -178,6 +236,18 @@ void waitForFence(const vk::raii::Device &device, const vk::raii::Fence &fence) 
         throw std::runtime_error("vkWaitForFences failed with VkResult " +
                                  std::to_string(static_cast<int32_t>(result)));
     }
+}
+
+vk::AccessFlags2 resourceAccessMask(ResourceAccess access, vk::AccessFlags2 readAccess, vk::AccessFlags2 writeAccess) {
+    switch (access) {
+    case ResourceAccess::Read:
+        return readAccess;
+    case ResourceAccess::Write:
+        return writeAccess;
+    case ResourceAccess::ReadWrite:
+        return readAccess | writeAccess;
+    }
+    return {};
 }
 
 void recordPipelineBarrier(const vk::raii::Device &device, vk::CommandBuffer commandBuffer,
@@ -333,6 +403,7 @@ PreparedExecution::Impl::Impl(Session &sessionIn, const BindingSet &bindingsIn) 
 
     createDescriptorSets();
     writeDescriptors();
+    buildExecutionBarriers();
 }
 
 /*******************************************************************************
@@ -821,193 +892,261 @@ void PreparedExecution::Impl::writeDescriptors() const {
  * Barrier recording
  *******************************************************************************/
 
-void PreparedExecution::Impl::insertInitialImageLayoutTransitions(vk::CommandBuffer commandBuffer) {
-    // Pending transitions
-    std::vector<vk::ImageMemoryBarrier2> imageBarriers;
-    std::set<vk::Image> transitionedImages;
-    imageBarriers.reserve(boundImages.size());
+void PreparedExecution::Impl::buildExecutionBarriers() {
     const auto &workloadState = workloadImpl(sessionImpl.workload);
-
-    for (auto &boundImage : boundImages) {
-        if (!boundImage.layout.has_value()) {
-            continue;
-        }
-
-        // First workload consumer
-        const auto imageResourceIndex = boundImage.descBinding.resourceIndex;
-        const auto firstConsumerExecutableIt = std::find_if(
-            workloadState.executables.begin(), workloadState.executables.end(),
-            [imageResourceIndex](const auto &executable) {
-                const auto &bindings = executable.bindings;
-                return std::any_of(bindings.begin(), bindings.end(), [imageResourceIndex](const auto &descBinding) {
-                    return descBinding.resourceIndex == imageResourceIndex;
-                });
-            });
-        if (firstConsumerExecutableIt == workloadState.executables.end()) {
-            // A public image may only provide memory for a dispatched alias peer.
-            continue;
-        }
-        if (!transitionedImages.insert(boundImage.image).second) {
-            continue;
-        }
-
-        // Image transition
-        const auto oldLayout = *boundImage.layout;
-        const auto descriptorLayout = requiredImageLayout(sessionImpl.workload, boundImage.descBinding);
-        vk::ImageMemoryBarrier2 imageBarrier;
-        imageBarrier.srcStageMask = oldLayout == vk::ImageLayout::eUndefined ? vk::PipelineStageFlagBits2::eTopOfPipe
-                                                                             : vk::PipelineStageFlagBits2::eAllCommands;
-        imageBarrier.srcAccessMask =
-            oldLayout == vk::ImageLayout::eUndefined ? vk::AccessFlags2{} : vk::AccessFlagBits2::eMemoryWrite;
-        const auto firstConsumerType = firstConsumerExecutableIt->type;
-        const auto descriptorType = workloadState.descriptorTypeForBinding(boundImage.descBinding);
-        imageBarrier.dstStageMask = detail::pipelineStage(firstConsumerType);
-        imageBarrier.dstAccessMask = detail::imageAccess(firstConsumerType, descriptorType);
-        imageBarrier.oldLayout = oldLayout;
-        imageBarrier.newLayout = descriptorLayout;
-        imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        imageBarrier.image = boundImage.image;
-        imageBarrier.subresourceRange = boundImage.subresourceRange;
-        imageBarriers.push_back(imageBarrier);
-        boundImage.layout = descriptorLayout;
+    auto state = buildSynchronizationState();
+    executableBarriers.reserve(workloadState.executables.size() + 1);
+    for (const auto &executable : workloadState.executables) {
+        const auto uses = state.collectResourceUses(executable);
+        executableBarriers.push_back(state.buildExecutableBarriers(executable, uses));
     }
-
-    // Barrier recording
-    if (imageBarriers.empty()) {
-        return;
-    }
-
-    vk::DependencyInfo dependencyInfo;
-    dependencyInfo.imageMemoryBarrierCount = static_cast<uint32_t>(imageBarriers.size());
-    dependencyInfo.pImageMemoryBarriers = imageBarriers.data();
-
-    recordPipelineBarrier(sessionImpl.contextView.device.get(), commandBuffer, dependencyInfo);
+    executableBarriers.push_back(state.buildExitBarriers());
 }
 
-void PreparedExecution::Impl::insertExecutableBarrier(vk::CommandBuffer commandBuffer,
-                                                      const detail::Executable &producer,
-                                                      const detail::Executable &consumer) const {
+PreparedExecution::Impl::SynchronizationState PreparedExecution::Impl::buildSynchronizationState() const {
     const auto &workloadState = workloadImpl(sessionImpl.workload);
-    const auto producerType = producer.type;
-    const auto consumerType = consumer.type;
+    SynchronizationState state;
+    state.resources.resize(workloadState.resources.size());
+    state.slots.reserve(workloadState.resources.size());
+    state.images.reserve(boundImages.size());
 
-    // Barrier buckets
-    std::vector<vk::MemoryBarrier2> memoryBarriers;
-    std::vector<vk::TensorMemoryBarrierARM> tensorBarriers;
-    std::vector<vk::BufferMemoryBarrier2> bufferBarriers;
-    std::vector<vk::ImageMemoryBarrier2> imageBarriers;
-    std::vector<uint32_t> barrierAliasGroupIds;
-    std::vector<uint32_t> barrierResourceIndices;
-
-    // Producer-visible writes
-    for (const auto &producerBinding : producer.bindings) {
-        const auto &resource = workloadState.resources.at(producerBinding.resourceIndex);
-        if ((resource.role != Resource::Role::Output && resource.role != Resource::Role::Intermediate) ||
-            std::find(barrierResourceIndices.begin(), barrierResourceIndices.end(), producerBinding.resourceIndex) !=
-                barrierResourceIndices.end()) {
-            continue;
-        }
-
-        // Whole alias group barrier
+    std::map<uint32_t, uint32_t> synchronizationSlotByAliasGroup;
+    for (uint32_t resourceIndex = 0; resourceIndex < workloadState.resources.size(); ++resourceIndex) {
+        const auto &resource = workloadState.resources[resourceIndex];
+        auto &info = state.resources[resourceIndex];
+        info.isOptimalTensor = resource.descriptorType == vk::DescriptorType::eTensorARM &&
+                               sessionImpl.resourceTilings.at(resourceIndex) == detail::ResourceTiling::Optimal;
         if (resource.aliasGroupId.has_value()) {
-            if (std::find(barrierAliasGroupIds.begin(), barrierAliasGroupIds.end(), *resource.aliasGroupId) !=
-                barrierAliasGroupIds.end()) {
-                continue;
+            const auto [it, inserted] = synchronizationSlotByAliasGroup.try_emplace(
+                *resource.aliasGroupId, static_cast<uint32_t>(state.slots.size()));
+            if (inserted) {
+                state.slots.emplace_back().isAliasGroup = true;
             }
-
-            vk::MemoryBarrier2 memoryBarrier;
-            memoryBarrier.srcStageMask = detail::pipelineStage(producerType);
-            memoryBarrier.srcAccessMask = detail::writeAccess(producerType);
-            memoryBarrier.dstStageMask = detail::pipelineStage(consumerType);
-            memoryBarrier.dstAccessMask = detail::readAccess(consumerType) | detail::writeAccess(consumerType);
-
-            memoryBarriers.push_back(memoryBarrier);
-            barrierAliasGroupIds.push_back(*resource.aliasGroupId);
-            continue;
-        }
-
-        // Resource-specific barrier
-        const auto descriptorType = workloadState.descriptorTypeForBinding(producerBinding);
-        switch (descriptorType) {
-        case vk::DescriptorType::eTensorARM: {
-            const auto *tensor = findBoundResource(boundTensors, producerBinding.resourceIndex, ResourceKind::Tensor);
-            vk::TensorMemoryBarrierARM tensorBarrier;
-            tensorBarrier.srcStageMask = detail::pipelineStage(producerType);
-            tensorBarrier.srcAccessMask = detail::writeAccess(producerType);
-            tensorBarrier.dstStageMask = detail::pipelineStage(consumerType);
-            tensorBarrier.dstAccessMask = detail::readAccess(consumerType) | detail::writeAccess(consumerType);
-            tensorBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            tensorBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            tensorBarrier.tensor = tensor->tensor;
-
-            tensorBarriers.push_back(tensorBarrier);
-            barrierResourceIndices.push_back(producerBinding.resourceIndex);
-            break;
-        }
-        case vk::DescriptorType::eStorageBuffer: {
-            const auto *buffer =
-                findBoundResource(boundBuffers, producerBinding.resourceIndex, ResourceKind::StorageBuffer);
-            vk::BufferMemoryBarrier2 bufferBarrier;
-            bufferBarrier.srcStageMask = detail::pipelineStage(producerType);
-            bufferBarrier.srcAccessMask = detail::writeAccess(producerType);
-            bufferBarrier.dstStageMask = detail::pipelineStage(consumerType);
-            bufferBarrier.dstAccessMask = detail::readAccess(consumerType) | detail::writeAccess(consumerType);
-            bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            bufferBarrier.buffer = buffer->buffer;
-            bufferBarrier.offset = 0;
-            bufferBarrier.size = vk::WholeSize;
-
-            bufferBarriers.push_back(bufferBarrier);
-            barrierResourceIndices.push_back(producerBinding.resourceIndex);
-            break;
-        }
-        case vk::DescriptorType::eCombinedImageSampler:
-        case vk::DescriptorType::eStorageImage: {
-            const auto *image = findBoundResource(boundImages, producerBinding.resourceIndex, ResourceKind::Image);
-            const auto descriptorLayout = requiredImageLayout(sessionImpl.workload, producerBinding);
-            vk::ImageMemoryBarrier2 imageBarrier;
-            imageBarrier.srcStageMask = detail::pipelineStage(producerType);
-            imageBarrier.srcAccessMask = detail::writeAccess(producerType);
-            imageBarrier.dstStageMask = detail::pipelineStage(consumerType);
-            imageBarrier.dstAccessMask = detail::readAccess(consumerType) | detail::writeAccess(consumerType);
-            imageBarrier.oldLayout = descriptorLayout;
-            imageBarrier.newLayout = descriptorLayout;
-            imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            imageBarrier.image = image->image;
-            imageBarrier.subresourceRange = image->subresourceRange;
-
-            imageBarriers.push_back(imageBarrier);
-            barrierResourceIndices.push_back(producerBinding.resourceIndex);
-            break;
-        }
-        default:
-            throw std::runtime_error("Session does not support descriptor type " +
-                                     std::to_string(static_cast<uint32_t>(descriptorType)));
+            info.synchronizationSlotIndex = it->second;
+        } else {
+            info.synchronizationSlotIndex = static_cast<uint32_t>(state.slots.size());
+            state.slots.emplace_back();
         }
     }
 
-    // Barrier recording
-    if (memoryBarriers.empty() && tensorBarriers.empty() && bufferBarriers.empty() && imageBarriers.empty()) {
+    // Descriptor setup has already checked the handles. Resolve image identity and
+    // layout metadata once, including images used only as external alias backing.
+    for (const auto &boundImage : boundImages) {
+        const auto resourceIndex = boundImage.descBinding.resourceIndex;
+        auto &info = state.resources.at(resourceIndex);
+        const auto slotIndex = info.synchronizationSlotIndex;
+        const auto descriptorLayout = requiredImageLayout(sessionImpl.workload, boundImage.descBinding);
+        const auto sameImageState = [&boundImage](const SynchronizationState::Image &imageState) {
+            return imageState.image == boundImage.image && imageState.subresourceRange == boundImage.subresourceRange;
+        };
+        const auto existing = std::find_if(state.images.begin(), state.images.end(), sameImageState);
+        uint32_t imageStateIndex = 0;
+        if (existing == state.images.end()) {
+            imageStateIndex = static_cast<uint32_t>(state.images.size());
+            state.images.push_back({boundImage.image, boundImage.subresourceRange, boundImage.layout,
+                                    boundImage.layout.value_or(descriptorLayout), descriptorLayout, slotIndex});
+        } else {
+            if (existing->descriptorLayout != descriptorLayout || existing->synchronizationSlotIndex != slotIndex) {
+                throw std::runtime_error("The same bound image requires incompatible layout or alias group state");
+            }
+            imageStateIndex = static_cast<uint32_t>(std::distance(state.images.begin(), existing));
+            if (!existing->initialLayout.has_value()) {
+                existing->initialLayout = boundImage.layout;
+                if (boundImage.layout.has_value()) {
+                    existing->currentLayout = *boundImage.layout;
+                }
+            } else if (boundImage.layout.has_value() && existing->initialLayout != boundImage.layout) {
+                throw std::runtime_error("Conflicting layouts provided for the same bound image");
+            }
+        }
+
+        info.imageStateIndex = imageStateIndex;
+        auto &slotImages = state.slots.at(slotIndex).imageStateIndices;
+        if (std::find(slotImages.begin(), slotImages.end(), imageStateIndex) == slotImages.end()) {
+            slotImages.push_back(imageStateIndex);
+        }
+    }
+    return state;
+}
+
+std::vector<PreparedExecution::Impl::ResourceUse>
+PreparedExecution::Impl::SynchronizationState::collectResourceUses(const detail::Executable &executable) const {
+    std::vector<ResourceUse> uses;
+    uses.reserve(executable.bindings.size());
+    const auto readAccess = detail::readAccess(executable.type);
+    const auto writeAccess = detail::writeAccess(executable.type);
+    for (const auto &binding : executable.bindings) {
+        const auto &resource = resources.at(binding.resourceIndex);
+        const auto existingUse = std::find_if(uses.begin(), uses.end(), [&](const auto &use) {
+            return resources[use.resourceIndex].synchronizationSlotIndex == resource.synchronizationSlotIndex;
+        });
+        const auto accessMask = resourceAccessMask(binding.access, readAccess, writeAccess);
+        const bool writes = binding.access != ResourceAccess::Read;
+        if (existingUse != uses.end()) {
+            // One dependency covers the group's memory. Multiple peers may be
+            // accessed together when they require the same image layout state.
+            const auto &existingResource = resources[existingUse->resourceIndex];
+            if (existingResource.imageStateIndex != resource.imageStateIndex ||
+                existingResource.isOptimalTensor != resource.isOptimalTensor) {
+                throw std::runtime_error("Executable accesses alias peers requiring different image layout states");
+            }
+            existingUse->accessMask |= accessMask;
+            existingUse->writes |= writes;
+        } else {
+            uses.push_back({binding.resourceIndex, accessMask, writes});
+        }
+    }
+    return uses;
+}
+
+PreparedExecution::Impl::BarrierBatch PreparedExecution::Impl::SynchronizationState::buildExitBarriers() {
+    // Restore reusable entry layouts so prebuilt barriers can be replayed.
+    // Preinitialized entries are one-shot; Undefined entries discard on replay.
+    BarrierBatch barriers;
+    for (uint32_t imageIndex = 0; imageIndex < images.size(); ++imageIndex) {
+        const auto &image = images[imageIndex];
+        const auto entryLayout = image.initialLayout.value_or(image.descriptorLayout);
+        const bool reusableEntryLayout =
+            entryLayout != vk::ImageLayout::eUndefined && entryLayout != vk::ImageLayout::ePreinitialized;
+        const auto exitLayout = reusableEntryLayout ? entryLayout : image.descriptorLayout;
+        if (!image.used || image.currentLayout == exitLayout) {
+            continue;
+        }
+        // The caller chooses the next consumer.
+        const auto dstStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+        const auto dstAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+        ensureImageLayout(barriers, imageIndex, exitLayout, dstStageMask, dstAccessMask);
+        const auto &slot = slots.at(image.synchronizationSlotIndex);
+        // The image barrier restores the layout, but its access scopes cover only
+        // this image. Also make pending writes through alias peers visible.
+        if (slot.pendingWrites) {
+            barriers.memoryBarriers.emplace_back(slot.pendingStageMask, slot.pendingAccessMask, dstStageMask,
+                                                 dstAccessMask);
+        }
+    }
+    return barriers;
+}
+
+bool PreparedExecution::Impl::SynchronizationState::ensureImageLayout(BarrierBatch &barriers, uint32_t imageIndex,
+                                                                      vk::ImageLayout layout,
+                                                                      vk::PipelineStageFlags2 dstStageMask,
+                                                                      vk::AccessFlags2 dstAccessMask) {
+    auto &image = images.at(imageIndex);
+    const bool initialBarrier = !image.used && image.initialLayout.has_value();
+    const bool layoutChanged = image.currentLayout != layout;
+    image.used = true;
+    if (!layoutChanged && !initialBarrier) {
+        return false;
+    }
+    const auto &slot = slots.at(image.synchronizationSlotIndex);
+    if (layoutChanged && slot.used && !slot.lastImplicitBarrier) {
+        throw std::runtime_error("Image alias layout transition follows an executable with implicit barriers disabled");
+    }
+
+    vk::ImageMemoryBarrier2 barrier;
+    if (slot.pendingStageMask) {
+        barrier.srcStageMask = slot.pendingStageMask;
+        barrier.srcAccessMask = slot.pendingAccessMask;
+    } else if (!slot.used) {
+        // Discarding contents does not order earlier accesses.
+        barrier.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+        barrier.srcAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+    }
+    barrier.dstStageMask = dstStageMask;
+    barrier.dstAccessMask = dstAccessMask;
+    barrier.oldLayout = image.currentLayout;
+    barrier.newLayout = layout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image.image;
+    barrier.subresourceRange = image.subresourceRange;
+    barriers.imageBarriers.push_back(barrier);
+    image.currentLayout = layout;
+    return true;
+}
+
+bool PreparedExecution::Impl::SynchronizationState::prepareImageAccess(BarrierBatch &barriers,
+                                                                       const ResourceInfo &resource,
+                                                                       vk::PipelineStageFlags2 stageMask,
+                                                                       vk::AccessFlags2 accessMask) {
+    if (resource.imageStateIndex.has_value()) {
+        const auto imageIndex = *resource.imageStateIndex;
+        return ensureImageLayout(barriers, imageIndex, images[imageIndex].descriptorLayout, stageMask, accessMask);
+    }
+    bool imageBarrierEmitted = false;
+    if (resource.isOptimalTensor) {
+        for (const auto imageIndex : slots[resource.synchronizationSlotIndex].imageStateIndices) {
+            imageBarrierEmitted |=
+                ensureImageLayout(barriers, imageIndex, vk::ImageLayout::eTensorAliasingARM, stageMask, accessMask);
+        }
+    }
+    return imageBarrierEmitted;
+}
+
+void PreparedExecution::Impl::SynchronizationState::Slot::recordUse(const ResourceUse &use,
+                                                                    vk::PipelineStageFlags2 stageMask,
+                                                                    bool implicitBarrier, bool imageBarrierEmitted) {
+    used = true;
+    lastImplicitBarrier = implicitBarrier;
+    // Retain writer scope across readers, which may execute at different stages.
+    if (use.writes || imageBarrierEmitted) {
+        pendingStageMask = {};
+        pendingAccessMask = {};
+        pendingWrites = false;
+    }
+    if (implicitBarrier) {
+        pendingStageMask |= stageMask;
+        pendingAccessMask |= use.accessMask;
+        pendingWrites |= use.writes || imageBarrierEmitted;
+        if (imageBarrierEmitted) {
+            // Layout transitions may write even for read-only executables. Keep
+            // the same conservative write scope for same-layout entry barriers.
+            pendingAccessMask |= vk::AccessFlagBits2::eMemoryWrite;
+        }
+    }
+}
+
+PreparedExecution::Impl::BarrierBatch
+PreparedExecution::Impl::SynchronizationState::buildExecutableBarriers(const detail::Executable &executable,
+                                                                       const std::vector<ResourceUse> &uses) {
+    BarrierBatch barriers;
+    const auto stageMask = detail::pipelineStage(executable.type);
+    for (const auto &use : uses) {
+        const auto &resource = resources.at(use.resourceIndex);
+        auto &slot = slots.at(resource.synchronizationSlotIndex);
+
+        const bool imageBarrierEmitted = prepareImageAccess(barriers, resource, stageMask, use.accessMask);
+        const bool memoryDependency = slot.pendingStageMask && (slot.pendingWrites || use.writes);
+        const bool externalAliasDependency = slot.isAliasGroup && !slot.used && imageBarrierEmitted;
+        if (memoryDependency || externalAliasDependency) {
+            vk::MemoryBarrier2 memoryBarrier;
+            // Include writes through externally managed aliases.
+            memoryBarrier.srcStageMask = slot.used ? slot.pendingStageMask : vk::PipelineStageFlagBits2::eAllCommands;
+            memoryBarrier.srcAccessMask = slot.used
+                                              ? slot.pendingAccessMask
+                                              : vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+            memoryBarrier.dstStageMask = stageMask;
+            memoryBarrier.dstAccessMask = use.accessMask;
+            barriers.memoryBarriers.push_back(memoryBarrier);
+        }
+        slot.recordUse(use, stageMask, executable.implicitBarrier, imageBarrierEmitted);
+    }
+    return barriers;
+}
+
+void PreparedExecution::Impl::BarrierBatch::record(const vk::raii::Device &device,
+                                                   vk::CommandBuffer commandBuffer) const {
+    if (memoryBarriers.empty() && imageBarriers.empty()) {
         return;
     }
 
-    vk::TensorDependencyInfoARM tensorDependencyInfo(static_cast<uint32_t>(tensorBarriers.size()),
-                                                     tensorBarriers.data());
     vk::DependencyInfo dependencyInfo;
     dependencyInfo.memoryBarrierCount = static_cast<uint32_t>(memoryBarriers.size());
     dependencyInfo.pMemoryBarriers = memoryBarriers.data();
-    dependencyInfo.bufferMemoryBarrierCount = static_cast<uint32_t>(bufferBarriers.size());
-    dependencyInfo.pBufferMemoryBarriers = bufferBarriers.data();
     dependencyInfo.imageMemoryBarrierCount = static_cast<uint32_t>(imageBarriers.size());
     dependencyInfo.pImageMemoryBarriers = imageBarriers.data();
-    if (!tensorBarriers.empty()) {
-        dependencyInfo.pNext = &tensorDependencyInfo;
-    }
 
-    recordPipelineBarrier(sessionImpl.contextView.device.get(), commandBuffer, dependencyInfo);
+    recordPipelineBarrier(device, commandBuffer, dependencyInfo);
 }
 
 /*******************************************************************************
@@ -1026,12 +1165,10 @@ void PreparedExecution::Impl::record(vk::CommandBuffer commandBuffer, const Reco
         throw std::runtime_error("Vulkan command recording functions are not available");
     }
 
-    // Initial image layouts
-    insertInitialImageLayoutTransitions(commandBuffer);
-
-    // Executable dispatch
     const auto &workloadState = workloadImpl(sessionState.workload);
     for (std::size_t executableIndex = 0; executableIndex < sessionState.executableStates.size(); ++executableIndex) {
+        executableBarriers[executableIndex].record(sessionState.contextView.device.get(), commandBuffer);
+
         const auto &executableState = sessionState.executableStates[executableIndex];
         const auto &executable = workloadState.executables.at(executableIndex);
         const auto &compiledExecutable = executableState.compiledExecutable.get();
@@ -1072,11 +1209,8 @@ void PreparedExecution::Impl::record(vk::CommandBuffer commandBuffer, const Reco
                                       executable.dispatchShape[1], executable.dispatchShape[2]);
         }
         invokeExecutableHook(ExecutableRecordPhase::After);
-
-        if (executable.implicitBarrier && executableIndex + 1 < sessionState.executableStates.size()) {
-            insertExecutableBarrier(commandBuffer, executable, workloadState.executables.at(executableIndex + 1));
-        }
     }
+    executableBarriers.back().record(sessionState.contextView.device.get(), commandBuffer);
 }
 
 void PreparedExecution::Impl::run() {

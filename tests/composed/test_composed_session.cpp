@@ -271,6 +271,50 @@ Workload makeOutputImageAliasedToIntermediateImageWorkload() {
     return builder.finish();
 }
 
+Workload makeImageTensorRoundTripWorkload() {
+    WorkloadBuilder builder;
+    auto sourceImageRequirements = makeStorageImageRequirements();
+    sourceImageRequirements.image.extent = vk::Extent3D{8, 8, 1};
+    sourceImageRequirements.elementCount = vk::DeviceSize{8} * 8 * 4;
+    auto destinationImageRequirements = makeStorageImageRequirements();
+    destinationImageRequirements.image.extent = vk::Extent3D{4, 4, 1};
+    destinationImageRequirements.elementCount = vk::DeviceSize{4} * 4 * 4;
+    const auto input =
+        builder.addResource("input", makeBufferRequirements(sizeof(int32_t) * 8 * 8 * 4), Resource::Role::Input);
+    const auto sourceTensor = builder.addResource(
+        "source_tensor", tensorRequirements(vk::Format::eR8Sint, {1, 8, 8, 4}), Resource::Role::Intermediate, 53);
+    const auto destinationTensor = builder.addResource(
+        "destination_tensor", tensorRequirements(vk::Format::eR8Sint, {4, 4, 4}), Resource::Role::Intermediate, 59);
+    const auto sourceImage =
+        builder.addResource("source_image", sourceImageRequirements, Resource::Role::Intermediate, 53);
+    const auto destinationImage =
+        builder.addResource("destination_image", destinationImageRequirements, Resource::Role::Intermediate, 59);
+    const auto outputRequirements = makeBufferRequirements(sizeof(int32_t) * 4 * 4 * 4);
+    const auto firstOutput = builder.addResource("first_output", outputRequirements, Resource::Role::Output);
+    const auto secondOutput = builder.addResource("second_output", outputRequirements, Resource::Role::Output);
+    const auto graphModule = builder.addModule(
+        makeSpirvModule(assembleSpirv(readSpvasmFile(ML_WORKLOAD_LIB_MAXPOOL_IMAGE_ALIAS_SPVASM))), "pool", "main");
+    const auto imageReader = builder.addModule(makeSpirvModule(assembleReadStorageImageSpirv()), "read_image", "main");
+    const auto imageWriter =
+        builder.addModule(makeSpirvModule(assembleBufferToStorageImageSpirv()), "write_image", "main");
+    const auto writer = builder.addExecutable("write_source_image", ExecutableKind::Compute, imageWriter);
+    builder.setDispatchShape(writer, DispatchShape{8, 8, 1});
+    builder.addDescriptorBinding(writer, sourceImage, 0, 0, ResourceAccess::Write);
+    builder.addDescriptorBinding(writer, input, 0, 1, ResourceAccess::Read);
+    const auto addRoundTrip = [&](const char *graphName, const char *computeName, uint32_t output) {
+        const auto graph = builder.addExecutable(graphName, ExecutableKind::Graph, graphModule);
+        builder.addDescriptorBinding(graph, sourceTensor, 0, 0, ResourceAccess::Read);
+        builder.addDescriptorBinding(graph, destinationTensor, 0, 1, ResourceAccess::Write);
+        const auto compute = builder.addExecutable(computeName, ExecutableKind::Compute, imageReader);
+        builder.setDispatchShape(compute, DispatchShape{4, 4, 4});
+        builder.addDescriptorBinding(compute, destinationImage, 0, 0, ResourceAccess::Read);
+        builder.addDescriptorBinding(compute, output, 0, 1, ResourceAccess::Write);
+    };
+    addRoundTrip("first_graph", "first_image_read", firstOutput);
+    addRoundTrip("second_graph", "second_image_read", secondOutput);
+    return builder.finish();
+}
+
 Workload makeAliasWorkload(AliasScenario scenario) {
     switch (scenario) {
     case AliasScenario::OutputBufferAliasedToIntermediateBuffer:
@@ -363,6 +407,36 @@ TEST_F(ComposedSessionExecutionTest, RejectsIncompatibleBufferAndImageAliasingRe
     auto workload = builder.finish();
 
     EXPECT_THROW((void)Session(context, workload), std::runtime_error);
+}
+
+TEST_F(ComposedSessionExecutionTest, RecordRepeatedImageTensorRoundTrips) {
+    auto workload = makeImageTensorRoundTripWorkload();
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.configure();
+    const std::vector<int64_t> inputShape{1, 8, 8, 4};
+    const Buffer inputBuffer(physicalDevice, device, Tensor::numElements(inputShape) * sizeof(int32_t));
+    constexpr size_t elements = size_t{4} * 4 * 4;
+    const Buffer firstOutput(physicalDevice, device, elements * sizeof(int32_t));
+    const Buffer secondOutput(physicalDevice, device, elements * sizeof(int32_t));
+    auto bindings = session.createBindingSet();
+    bindings.bindBuffer(workload.resource(0), {*inputBuffer.buffer});
+    bindings.bindBuffer(workload.resource(1), {*firstOutput.buffer});
+    bindings.bindBuffer(workload.resource(2), {*secondOutput.buffer});
+    auto execution = session.prepare(bindings);
+    for (const uint32_t seed : {7U, 23U}) {
+        const auto input = makeMaxpoolInput(inputShape, seed);
+        const auto pooled = expectedMaxpool(input, inputShape);
+        const std::vector<int32_t> expected(pooled.begin(), pooled.end());
+        inputBuffer.write(std::vector<int32_t>(input.begin(), input.end()));
+        firstOutput.write(std::vector<int32_t>(elements, -1));
+        secondOutput.write(std::vector<int32_t>(elements, -1));
+        // Both rounds and all image/tensor handoffs are library-owned.
+        recordAndSubmitCommands(device, queue, queueFamilyIndex,
+                                [&](vk::CommandBuffer commandBuffer) { execution.record(commandBuffer); });
+        EXPECT_EQ(firstOutput.read(elements), expected);
+        EXPECT_EQ(secondOutput.read(elements), expected);
+    }
 }
 
 TEST_F(ComposedSessionExecutionTest, RecordTwoSagWorkloadsWithAppTensorHandoff) {

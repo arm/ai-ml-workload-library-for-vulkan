@@ -27,6 +27,13 @@ vk::TensorUsageFlagsARM tensorUsageForTiling(const Workload &workload, uint32_t 
     const auto &resources = workloadImpl(workload).resources;
     const auto &resource = resources.at(resourceIndex);
     auto usage = tensorMetadata(resource).usage;
+    for (const auto &executable : workloadImpl(workload).executables) {
+        if (std::any_of(executable.bindings.begin(), executable.bindings.end(),
+                        [resourceIndex](const auto &binding) { return binding.resourceIndex == resourceIndex; })) {
+            usage |= executable.type == ExecutableKind::Graph ? vk::TensorUsageFlagBitsARM::eDataGraph
+                                                              : vk::TensorUsageFlagBitsARM::eShader;
+        }
+    }
     if (!usage) {
         usage = vk::TensorUsageFlagBitsARM::eDataGraph;
     }
