@@ -25,6 +25,8 @@
 
 ### Resource Binding and Execution
 
+- Added `Session::bindModule(ExecutableView, ModuleImplementation)` to supply or
+  replace code independently for each executable.
 - Added original workload access through `Session::workload()` and
   `BindingSet::workload()`, and original specialization and push-constant size
   inspection through `ExecutableView`.

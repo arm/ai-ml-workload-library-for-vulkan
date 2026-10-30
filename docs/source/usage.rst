@@ -16,9 +16,11 @@ A workload is executed through the following sequence:
 2. Create a runtime-owned ``Context``, or wrap the application's Vulkan® instance,
    physical device, device, queue family, and queue.
 
-3. Create a ``Session``, bind any needed placeholder modules or data-graph
-   binaries, then call ``Session::configure()``.
+3. Create a ``Session``, bind any needed executable or placeholder modules or
+   data-graph binaries, then call ``Session::configure()``.
 
+   - To replace embedded code or supply missing code for one executable, call
+     ``Session::bindModule(workload.executable(index), implementation)``.
    - For a placeholder module, call
      ``Session::bindModule(workload.placeholderModule(index), implementation)``.
    - For an external data-graph binary, call
@@ -28,9 +30,10 @@ A workload is executed through the following sequence:
      Multiple executables can share one binary with different selectors or use
      separate binaries.
 
-   A placeholder module and binary cannot target the same module. Unselected
-   graph and compute executables continue to use their workload modules. A
-   VGF graph selected for binary execution may omit its shader module.
+   A data-graph binary cannot target an executable that has an
+   executable-specific module binding or uses a bound placeholder module.
+   Unselected graph and compute executables continue to use their workload
+   modules. A VGF graph selected for binary execution may omit its shader module.
 
 4. Create a ``BindingSet`` and bind each public resource using caller-owned or
    runtime-owned allocations.
@@ -160,6 +163,23 @@ to the original workload, which must outlive them.
 specialization entries and bytes, excluding shader defaults.
 ``pushConstantSize()`` returns the largest original range end (``offset + size``),
 or zero when no ranges are declared.
+
+Executable module replacement
+-----------------------------
+
+Bind replacement code with
+``Session::bindModule(workload.executable(index), implementation)`` before
+pipeline compilation. This overrides embedded code and placeholder bindings for
+that executable, allowing steps sharing a module to use different
+implementations. The original workload remains unchanged.
+
+Replacement code must use the workload's entry point and descriptor interface
+and be compatible with its push-constant layout. An executable cannot have both
+a module replacement and a data-graph binary.
+
+Successful pipeline compilation fixes the code for all sessions sharing a
+``CompiledExecution``. Later bindings are rejected, and other sessions must have
+no pending bindings when configured.
 
 Resource binding
 ----------------

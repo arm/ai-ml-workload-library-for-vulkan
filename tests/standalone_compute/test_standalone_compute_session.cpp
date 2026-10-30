@@ -90,6 +90,34 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderWorkload) {
     EXPECT_EQ(outputBuffer.read(elements), expected);
 }
 
+TEST_F(StandaloneComputeSessionExecutionTest, ExecutableModuleReplacementRunsReplacementCode) {
+    auto workload = Workload::fromComputeShader(makeAddInt32BuffersDescription());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    auto assembly = readSpvasmFile(ML_WORKLOAD_LIB_ADD_INT32_BUFFERS_SPVASM);
+    replace(assembly, "OpIAdd", "OpISub");
+    ModuleImplementation implementation;
+    implementation.codeKind = ModuleCodeKind::Spirv;
+    implementation.spirv = assembleSpirv(assembly);
+    session.bindModule(workload.executable(0), std::move(implementation));
+    session.configure();
+    constexpr size_t elements = 10;
+    constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
+    const Buffer lhs(physicalDevice, device, bufferSize);
+    const Buffer rhs(physicalDevice, device, bufferSize);
+    const Buffer output(physicalDevice, device, bufferSize);
+    lhs.write(std::vector<int32_t>(elements, 9));
+    rhs.write(std::vector<int32_t>(elements, 4));
+    output.write(std::vector<int32_t>(elements, 0));
+    auto bindings = session.createBindingSet();
+    bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*lhs.buffer});
+    bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*rhs.buffer});
+    bindings.bindBuffer(workload.resource(2), BufferBindingInfo{*output.buffer});
+    session.prepare(bindings).run();
+    EXPECT_EQ(output.read(elements), std::vector<int32_t>(elements, 5));
+    EXPECT_EQ(workload.executable(0).module().codeKind(), ModuleCodeKind::Spirv);
+}
+
 TEST_F(StandaloneComputeSessionExecutionTest, WrapUsesCallerOwnedVulkanObjects) {
     auto context = Context::wrap({instance, physicalDevice, device, queueFamilyIndex, queue});
     const auto contextView = context.contextView();

@@ -96,6 +96,40 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkload) {
     EXPECT_EQ(outputTensor.read(outputTensor.numElements()), expectedMaxpool(input, inputShape));
 }
 
+TEST_F(StandaloneDataGraphSessionExecutionTest, ExecutableModuleReplacementUsesWorkloadEntryPoint) {
+    auto description = makeMaxpoolDescription();
+    auto implementation = description.module;
+    // Preserve the interface and a non-default entry point. Missing original code
+    // makes success depend on the executable-specific binding reaching the graph path.
+    auto assembly = readSpvasmFile(ML_WORKLOAD_LIB_MAXPOOL_16X16_TO_8X8_SPVASM);
+    replace(assembly, "INPUT_SET", "0");
+    replace(assembly, "INPUT_BINDING", "0");
+    replace(assembly, "OUTPUT_SET", "1");
+    replace(assembly, "OUTPUT_BINDING", "1");
+    replace(assembly, "\"main\"", "\"replacement_entry\"");
+    implementation.spirv = assembleSpirv(assembly);
+    description.entryPoint = "replacement_entry";
+    description.module = {};
+    auto workload = Workload::fromDataGraph(description);
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.bindModule(workload.executable(0), std::move(implementation));
+    session.configure();
+    const std::vector<int64_t> inputShape = {1, 16, 16, 16};
+    const Tensor input(physicalDevice, device, vk::Format::eR8Sint, inputShape);
+    const Tensor output(physicalDevice, device, vk::Format::eR8Sint, {1, 8, 8, 16});
+    const auto values = makeMaxpoolInput(inputShape, 11);
+    input.write(values);
+    output.fill(0, output.numElements());
+    auto bindings = session.createBindingSet();
+    bindings.bindTensor(workload.resource(0), TensorBindingInfo{*input.tensor});
+    bindings.bindTensor(workload.resource(1), TensorBindingInfo{*output.tensor});
+    session.prepare(bindings).run();
+    EXPECT_EQ(output.read(output.numElements()), expectedMaxpool(values, inputShape));
+    EXPECT_TRUE(workload.executable(0).module().requiresImplementation());
+    EXPECT_EQ(workload.executable(0).module().entryPoint(), "replacement_entry");
+}
+
 TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkloadWithPipelineMetadata) {
     const std::vector<int64_t> inputShape = {1, 16, 16, 16};
     const std::vector<int64_t> outputShape = {1, 8, 8, 16};
@@ -604,6 +638,21 @@ TEST(DataGraphBinary, BindsStandaloneGraph) {
     EXPECT_NO_THROW(session.bindDataGraphBinary({bytes.data(), bytes.size()},
                                                 DataGraphBinaryStorageMode::ApplicationBacked,
                                                 {identifier.data(), identifier.size()}));
+}
+
+TEST(DataGraphBinary, RejectsExecutableModuleConflictsInBothCallOrders) {
+    const NullVulkanContext vulkan;
+    auto context = vulkan.wrap();
+    auto workload = Workload::fromDataGraph(DataGraphDescription{});
+    ModuleImplementation implementation;
+    implementation.codeKind = ModuleCodeKind::Spirv;
+    implementation.spirv = {0x07230203};
+    Session moduleFirst(context, workload);
+    moduleFirst.bindModule(workload.executable(0), implementation);
+    EXPECT_THROW(moduleFirst.bindDataGraphBinary(validBinary), std::runtime_error);
+    Session binaryFirst(context, workload);
+    binaryFirst.bindDataGraphBinary(validBinary);
+    EXPECT_THROW(binaryFirst.bindModule(workload.executable(0), implementation), std::runtime_error);
 }
 
 TEST(DataGraphBinary, RejectsConflictingCompilationInputs) {
