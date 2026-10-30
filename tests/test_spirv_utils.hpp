@@ -95,6 +95,16 @@ inline std::vector<uint32_t> assembleAddInt32BuffersSpirv() {
     return assembleSpirv(readSpvasmFile(ML_WORKLOAD_LIB_ADD_INT32_BUFFERS_SPVASM));
 }
 
+// Replace the first addend with specialization ID 0 (shader default 100500).
+inline std::vector<uint32_t> assembleSpecializationAddInt32BuffersSpirv() {
+    auto assembly = readSpvasmFile(ML_WORKLOAD_LIB_ADD_INT32_BUFFERS_SPVASM);
+    replace(assembly, "OpDecorate %gl_WorkGroupSize",
+            "OpDecorate %specialization SpecId 0\nOpDecorate %gl_WorkGroupSize");
+    replace(assembly, "%int = OpTypeInt 32 1", "%int = OpTypeInt 32 1\n%specialization = OpSpecConstant %int 100500");
+    replace(assembly, "OpIAdd %int %29 %37", "OpIAdd %int %specialization %37");
+    return assembleSpirv(assembly);
+}
+
 inline std::vector<uint32_t> assembleWritePushConstantSpirv(uint32_t offset = 0) {
     auto spvasm = readSpvasmFile(ML_WORKLOAD_LIB_WRITE_PUSH_CONSTANT_SPVASM);
     replace(spvasm, "PUSH_CONSTANT_OFFSET", std::to_string(offset));

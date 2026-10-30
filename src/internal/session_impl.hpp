@@ -76,6 +76,8 @@ struct Session::Impl {
 
   public:
     void validateCompilationInputsMutable() const;
+    void validatePendingCompilationInputs() const;
+    const SpecializationInfo &specializationForCompilation(uint32_t executableIndex) const;
     void selectTiling(uint32_t resourceIndex, detail::ResourceTiling tiling);
     void configure();
     std::vector<vk::DataGraphPipelinePropertyARM> dataGraphPipelineProperties(uint32_t executableIndex) const;
@@ -98,6 +100,7 @@ struct Session::Impl {
 
     std::map<uint32_t, Module> moduleImplementations;
     std::map<uint32_t, Module> executableModuleImplementations;
+    std::map<uint32_t, SpecializationInfo> specializationOverrides;
     std::map<uint32_t, DataGraphBinaryInput> dataGraphBinaryInputs;
     std::map<uint32_t, std::vector<int64_t>> tensorStrideOverrides;
 

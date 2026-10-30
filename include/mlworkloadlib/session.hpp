@@ -94,6 +94,12 @@ class Session final {
     /** @brief Supplies or replaces code for a placeholder module before configure(). */
     void bindModule(PlaceholderModuleView placeholderModule, ModuleImplementation implementation);
 
+    /** @brief Replaces one executable's specialization map before pipeline compilation. */
+    void setSpecializationInfo(ExecutableView executable, SpecializationInfo specialization);
+
+    /** @brief Returns a copy of the pending or compiled specialization map, excluding shader defaults. */
+    SpecializationInfo specializationInfo(ExecutableView executable) const;
+
     /** @brief Supplies or replaces borrowed binary bytes for one graph executable before configure(). */
     void bindDataGraphBinary(ArrayView<const std::byte> binary,
                              DataGraphBinaryStorageMode storageMode = DataGraphBinaryStorageMode::ImplementationManaged,
@@ -166,6 +172,7 @@ class Session final {
     // Implementation access
     Impl &sessionImpl() noexcept;
     const Impl &sessionImpl() const noexcept;
+    uint32_t validatedExecutableIndex(ExecutableView executable) const;
     static void validateResourceAccess(const Impl &sessionState, const ResourceView &resource);
     static void validateResourceAccessForSet(const Impl &sessionState, const ResourceView &resource);
 

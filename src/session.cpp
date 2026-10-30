@@ -294,8 +294,8 @@ vk::raii::ShaderModule createShaderModule(const Module &compiledModule, const Co
     return {contextView.device.get(), shaderCreateInfo};
 }
 
-vk::raii::Pipeline createComputePipeline(const Executable &executable, const Module &compiledModule,
-                                         const vk::raii::ShaderModule &shaderModule,
+vk::raii::Pipeline createComputePipeline(const Executable &executable, const SpecializationInfo &specialization,
+                                         const Module &compiledModule, const vk::raii::ShaderModule &shaderModule,
                                          const vk::raii::PipelineLayout &pipelineLayout, const ContextView &contextView,
                                          const vk::raii::PipelineCache *pipelineCache,
                                          const std::optional<PipelineRobustnessOptions> &pipelineRobustness) {
@@ -305,9 +305,9 @@ vk::raii::Pipeline createComputePipeline(const Executable &executable, const Mod
     }
 
     SpecializationInfoStorage specializationInfo;
-    const vk::PipelineShaderStageCreateInfo shaderStageCreateInfo(
-        {}, vk::ShaderStageFlagBits::eCompute, *shaderModule, compiledModule.entryPoint.c_str(),
-        specializationInfo.populate(executable.specializationInfo));
+    const vk::PipelineShaderStageCreateInfo shaderStageCreateInfo({}, vk::ShaderStageFlagBits::eCompute, *shaderModule,
+                                                                  compiledModule.entryPoint.c_str(),
+                                                                  specializationInfo.populate(specialization));
     vk::ComputePipelineCreateInfo pipelineCreateInfo({}, shaderStageCreateInfo, *pipelineLayout);
     vk::PipelineRobustnessCreateInfo pipelineRobustnessInfo;
     if (pipelineRobustness.has_value()) {
@@ -320,8 +320,8 @@ vk::raii::Pipeline createComputePipeline(const Executable &executable, const Mod
     return {contextView.device.get(), pipelineCache, pipelineCreateInfo};
 }
 
-vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const Module &compiledModule,
-                                           const vk::raii::ShaderModule &shaderModule,
+vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const SpecializationInfo &specialization,
+                                           const Module &compiledModule, const vk::raii::ShaderModule &shaderModule,
                                            const vk::raii::PipelineLayout &pipelineLayout, const Workload &workload,
                                            const ContextView &contextView, const vk::raii::PipelineCache *pipelineCache,
                                            bool enableNeuralStatistics,
@@ -338,7 +338,7 @@ vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const M
 
     SpecializationInfoStorage specializationInfo;
     vk::DataGraphPipelineShaderModuleCreateInfoARM shaderModuleInfo(
-        *shaderModule, compiledModule.entryPoint.c_str(), specializationInfo.populate(executable.specializationInfo),
+        *shaderModule, compiledModule.entryPoint.c_str(), specializationInfo.populate(specialization),
         static_cast<uint32_t>(storage.constants.size()), storage.constants.data(), nullptr);
     const vk::DataGraphPipelineCreateInfoARM pipelineCreateInfo(executable.dataGraphPipelineFlags, *pipelineLayout,
                                                                 static_cast<uint32_t>(storage.resourceInfos.size()),
@@ -510,6 +510,8 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
     validateExecutableBindings(workload, executable);
     validateExecutableResourceMetadata(workload, executable);
 
+    compiledExecutable.specializationInfo = specializationForCompilation(executableIndex);
+
     // Pipeline layout
     compiledExecutable.pushConstantRanges = executable.pushConstantRanges;
     compiledExecutable.descriptorSetLayouts = createDescriptorSetLayouts(executable.bindings, workload, contextView);
@@ -537,14 +539,14 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
     compiledExecutable.shaderModule = createShaderModule(compiledModule, contextView);
 
     if (executable.type == ExecutableKind::Compute) {
-        compiledExecutable.pipeline = createComputePipeline(executable, compiledModule, compiledExecutable.shaderModule,
-                                                            compiledExecutable.pipelineLayout, contextView,
-                                                            options.pipelineCache, options.pipelineRobustness);
+        compiledExecutable.pipeline = createComputePipeline(
+            executable, compiledExecutable.specializationInfo, compiledModule, compiledExecutable.shaderModule,
+            compiledExecutable.pipelineLayout, contextView, options.pipelineCache, options.pipelineRobustness);
     } else {
-        compiledExecutable.pipeline =
-            createDataGraphPipeline(executable, compiledModule, compiledExecutable.shaderModule,
-                                    compiledExecutable.pipelineLayout, workload, contextView, options.pipelineCache,
-                                    options.neuralStatistics.has_value(), resourceTilings, tensorStrideOverrides);
+        compiledExecutable.pipeline = createDataGraphPipeline(
+            executable, compiledExecutable.specializationInfo, compiledModule, compiledExecutable.shaderModule,
+            compiledExecutable.pipelineLayout, workload, contextView, options.pipelineCache,
+            options.neuralStatistics.has_value(), resourceTilings, tensorStrideOverrides);
     }
 }
 
@@ -660,10 +662,7 @@ void Session::Impl::compileOrReuseExecutables() {
         }
     }
     if (compiledExecutionState->compiledState.has_value()) {
-        if (!moduleImplementations.empty() || !executableModuleImplementations.empty() ||
-            !dataGraphBinaryInputs.empty()) {
-            throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
-        }
+        validatePendingCompilationInputs();
         detail::validateCompiledTilings(resourceTilings, compiledExecutionState->compiledState->pipelineTilings);
         if (aliasTensorStrides != compiledExecutionState->compiledState->aliasTensorStrides) {
             throw std::runtime_error("Session alias tensor strides do not match the compiled execution");
@@ -682,6 +681,7 @@ void Session::Impl::compileOrReuseExecutables() {
                               std::move(aliasTensorStrides)});
     moduleImplementations.clear();
     executableModuleImplementations.clear();
+    specializationOverrides.clear();
     dataGraphBinaryInputs.clear();
 }
 
@@ -766,25 +766,68 @@ void Session::Impl::validateCompilationInputsMutable() const {
     }
 }
 
-void Session::bindModule(ExecutableView executable, ModuleImplementation implementation) {
-    auto &sessionState = sessionImpl();
-    sessionState.validateCompilationInputsMutable();
+void Session::Impl::validatePendingCompilationInputs() const {
+    if (compiledExecutionState->compiledState.has_value() &&
+        (!moduleImplementations.empty() || !executableModuleImplementations.empty() || !dataGraphBinaryInputs.empty() ||
+         !specializationOverrides.empty())) {
+        throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
+    }
+}
+
+const SpecializationInfo &Session::Impl::specializationForCompilation(uint32_t executableIndex) const {
+    const auto specialization = specializationOverrides.find(executableIndex);
+    if (specialization != specializationOverrides.end()) {
+        return specialization->second;
+    }
+    return workloadImpl(workload).executables.at(executableIndex).specializationInfo;
+}
+
+uint32_t Session::validatedExecutableIndex(ExecutableView executable) const {
+    const auto &sessionState = sessionImpl();
     if (executable.workload_ != &sessionState.workload) {
         throw std::runtime_error("ExecutableView belongs to a different Workload");
     }
     if (executable.index_ >= workloadImpl(sessionState.workload).executables.size()) {
         throw std::runtime_error("ExecutableView index is invalid");
     }
+    return executable.index_;
+}
+
+void Session::setSpecializationInfo(ExecutableView executable, SpecializationInfo specialization) {
+    auto &sessionState = sessionImpl();
+    sessionState.validateCompilationInputsMutable();
+    const auto index = validatedExecutableIndex(executable);
+    detail::validateSpecializationInfo(specialization, "Session");
+    if (sessionState.dataGraphBinaryInputs.count(index) != 0 && !specialization.empty()) {
+        throw std::runtime_error("Data graph binary executables cannot declare specialization constants");
+    }
+    sessionState.specializationOverrides.insert_or_assign(index, std::move(specialization));
+}
+
+SpecializationInfo Session::specializationInfo(ExecutableView executable) const {
+    const auto &sessionState = sessionImpl();
+    const auto index = validatedExecutableIndex(executable);
+    sessionState.validatePendingCompilationInputs();
+    if (const auto &compiled = sessionState.compiledExecutionState->compiledState; compiled.has_value()) {
+        return compiled->executables.at(index).specializationInfo;
+    }
+    return sessionState.specializationForCompilation(index);
+}
+
+void Session::bindModule(ExecutableView executable, ModuleImplementation implementation) {
+    auto &sessionState = sessionImpl();
+    sessionState.validateCompilationInputsMutable();
+    const auto index = validatedExecutableIndex(executable);
     if (implementation.codeKind == ModuleCodeKind::Missing) {
         throw std::runtime_error("ModuleImplementation must provide executable module code");
     }
-    if (sessionState.dataGraphBinaryInputs.count(executable.index_) != 0) {
+    if (sessionState.dataGraphBinaryInputs.count(index) != 0) {
         throw std::runtime_error("An executable module and data graph binary cannot target the same executable");
     }
     const auto &workloadState = workloadImpl(sessionState.workload);
-    const auto &module = workloadState.modules.at(workloadState.executables[executable.index_].moduleIndex);
+    const auto &module = workloadState.modules.at(workloadState.executables[index].moduleIndex);
     sessionState.executableModuleImplementations.insert_or_assign(
-        executable.index_, detail::moduleFromImplementation(std::move(implementation), module.name, module.entryPoint));
+        index, detail::moduleFromImplementation(std::move(implementation), module.name, module.entryPoint));
 }
 
 void Session::bindModule(PlaceholderModuleView placeholderModule, ModuleImplementation implementation) {
@@ -847,7 +890,7 @@ void Session::bindDataGraphBinary(ArrayView<const std::byte> binary, DataGraphBi
     if (!workloadExecutable.constantIndexes.empty()) {
         throw std::runtime_error("Data graph binary executables cannot declare graph constants");
     }
-    if (!workloadExecutable.specializationInfo.empty()) {
+    if (!sessionState.specializationForCompilation(executableIndex).empty()) {
         throw std::runtime_error("Data graph binary executables cannot declare specialization constants");
     }
     constexpr std::size_t headerSize = 16;

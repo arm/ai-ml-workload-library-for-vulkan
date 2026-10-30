@@ -25,6 +25,8 @@
 
 ### Resource Binding and Execution
 
+- Added executable-specific specialization overrides and effective inspection
+  through `Session::setSpecializationInfo()` and `Session::specializationInfo()`.
 - Added `Session::bindModule(ExecutableView, ModuleImplementation)` to supply or
   replace code independently for each executable.
 - Added original workload access through `Session::workload()` and
