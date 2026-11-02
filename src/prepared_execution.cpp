@@ -432,7 +432,8 @@ void PreparedExecution::Impl::addBoundPushConstants(const BindingSet::Impl &bind
         const auto payload = bindingState.pushConstantsByExecutableIndex.find(index);
         const auto providedSize =
             payload == bindingState.pushConstantsByExecutableIndex.end() ? 0 : payload->second.size();
-        if (providedSize != requiredSize) {
+        if (providedSize > requiredSize ||
+            (requiredSize != 0 && payload == bindingState.pushConstantsByExecutableIndex.end())) {
             throw std::runtime_error("BindingSet push constant size does not match executable " +
                                      std::to_string(index) + " requirements");
         }
@@ -1183,12 +1184,19 @@ void PreparedExecution::Impl::record(vk::CommandBuffer commandBuffer, const Reco
         dispatcher->vkCmdBindPipeline(static_cast<VkCommandBuffer>(commandBuffer),
                                       static_cast<VkPipelineBindPoint>(pipelineBindPoint),
                                       static_cast<VkPipeline>(*compiledExecutable.pipeline));
-        for (const auto &range : compiledExecutable.pushConstantRanges) {
-            const auto &payload = pushConstantsByExecutableIndex.at(static_cast<uint32_t>(executableIndex));
-            dispatcher->vkCmdPushConstants(static_cast<VkCommandBuffer>(commandBuffer),
-                                           static_cast<VkPipelineLayout>(*compiledExecutable.pipelineLayout),
-                                           static_cast<VkShaderStageFlags>(range.stageFlags), range.offset, range.size,
-                                           payload.data() + range.offset);
+        const auto payload = pushConstantsByExecutableIndex.find(static_cast<uint32_t>(executableIndex));
+        if (payload != pushConstantsByExecutableIndex.end()) {
+            const auto &bytes = payload->second;
+            for (const auto &range : compiledExecutable.pushConstantRanges) {
+                if (range.offset >= bytes.size()) {
+                    continue;
+                }
+                const auto size = static_cast<uint32_t>(std::min<std::size_t>(range.size, bytes.size() - range.offset));
+                dispatcher->vkCmdPushConstants(static_cast<VkCommandBuffer>(commandBuffer),
+                                               static_cast<VkPipelineLayout>(*compiledExecutable.pipelineLayout),
+                                               static_cast<VkShaderStageFlags>(range.stageFlags), range.offset, size,
+                                               bytes.data() + range.offset);
+            }
         }
         const auto executableView = sessionState.workload.executable(static_cast<uint32_t>(executableIndex));
         const auto invokeExecutableHook = [&](ExecutableRecordPhase phase) {

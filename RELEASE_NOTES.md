@@ -35,6 +35,9 @@
 - Push-constant payloads are copied per executable, allowing different sizes and
   values within a workload. `BindingSet::pushConstants(executable)` returns a
   copy, and `prepare()` captures all payloads for that execution.
+  `BindingSet::bindPushConstants()` accepts partial payloads and explicit empty
+  updates, preserving untouched compatible state in caller-owned Vulkan® command
+  buffers.
 - Added optional `CompiledExecution` for sharing compiled pipelines and layouts
   across sessions for the same context and workload, while retaining separate
   per-session state.

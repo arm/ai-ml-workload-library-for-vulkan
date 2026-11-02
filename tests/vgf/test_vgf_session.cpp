@@ -954,7 +954,7 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRetriesAfterFailedConfigu
 
     auto expected = secondInput;
     std::transform(expected.begin(), expected.end(), expected.begin(),
-                   [value](int32_t element) { return element + value; });
+                   [offset = value](int32_t element) { return element + offset; });
     EXPECT_EQ(outputBuffer.read(elements), expected);
 }
 
@@ -1137,11 +1137,6 @@ TEST_F(VgfSessionExecutionTest, IndependentPushConstantsRetainOffsets) {
     const auto firstStep = workload.executable(0);
     const auto secondStep = workload.executable(1);
 
-    // First step requires 8 bytes: offset 4 + size 4.
-    EXPECT_THROW(bindings.bindPushConstants(firstStep, {firstData, sizeof(int32_t)}), std::runtime_error);
-    // Second step requires 12 bytes: offset 4 + size 8.
-    EXPECT_THROW(bindings.bindPushConstants(secondStep, {firstData, sizeof(firstPayload)}), std::runtime_error);
-
     bindings.bindPushConstants(firstStep, {firstData, sizeof(firstPayload)});
     EXPECT_THROW(session.prepare(bindings), std::runtime_error);
     bindings.bindPushConstants(secondStep, {secondData, sizeof(secondPayload)});
@@ -1149,6 +1144,29 @@ TEST_F(VgfSessionExecutionTest, IndependentPushConstantsRetainOffsets) {
     auto execution = session.prepare(bindings);
 
     execution.run();
+    EXPECT_EQ(firstOutput.read(1), std::vector<int32_t>{23});
+    EXPECT_EQ(secondOutput.read(1), std::vector<int32_t>{57});
+}
+
+TEST_F(VgfSessionExecutionTest, PartialPushConstantsRetainExecutableOffsets) {
+    auto context = wrappedContext();
+    const auto bytes = makeTwoSegmentPushConstantVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    const Buffer firstOutput(physicalDevice, device, sizeof(int32_t));
+    const Buffer secondOutput(physicalDevice, device, sizeof(int32_t));
+    Session session(context, workload);
+    session.configure();
+    auto bindings = session.createBindingSet();
+    bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstOutput.buffer});
+    bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondOutput.buffer});
+    const std::array<int32_t, 2> firstPayload{-100, 23};
+    const std::array<int32_t, 2> secondPayload{-200, 57};
+    bindings.bindPushConstants(workload.executable(0),
+                               {reinterpret_cast<const std::byte *>(firstPayload.data()), sizeof(firstPayload)});
+    // The second range starts at 4 and ends at 12; this prefix updates [4, 8).
+    bindings.bindPushConstants(workload.executable(1),
+                               {reinterpret_cast<const std::byte *>(secondPayload.data()), sizeof(secondPayload)});
+    session.prepare(bindings).run();
     EXPECT_EQ(firstOutput.read(1), std::vector<int32_t>{23});
     EXPECT_EQ(secondOutput.read(1), std::vector<int32_t>{57});
 }

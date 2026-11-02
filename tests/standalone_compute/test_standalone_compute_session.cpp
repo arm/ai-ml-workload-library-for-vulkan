@@ -15,7 +15,9 @@
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
 
+#include <array>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string_view>
@@ -398,9 +400,10 @@ TEST_F(StandaloneComputeSessionExecutionTest, RejectsInvalidPushConstants) {
     bindings.bindPushConstants(executable, {payload.data(), payload.size()});
 
     EXPECT_THROW(bindings.bindPushConstants(executable, {nullptr, payload.size()}), std::runtime_error);
-    EXPECT_THROW(bindings.bindPushConstants(executable, {nullptr, 0}), std::runtime_error);
     EXPECT_THROW(bindings.bindPushConstants(executable, {payload.data(), payload.size() - 1}), std::runtime_error);
-    EXPECT_THROW(bindings.bindPushConstants(executable, {payload.data(), payload.size() + 1}), std::runtime_error);
+    const std::array<std::byte, 8> oversizedPayload{};
+    EXPECT_THROW(bindings.bindPushConstants(executable, {oversizedPayload.data(), oversizedPayload.size()}),
+                 std::runtime_error);
     EXPECT_THROW(bindings.bindPushConstants(foreignWorkload.executable(0), {payload.data(), payload.size()}),
                  std::runtime_error);
     EXPECT_THROW(bindings.pushConstants(foreignWorkload.executable(0)), std::runtime_error);
@@ -433,6 +436,69 @@ TEST_F(StandaloneComputeSessionExecutionTest, RequiresPushConstantsAtPrepare) {
     auto execution = session.prepare(bindings);
     execution.run();
     EXPECT_EQ(output.read(1), std::vector<int32_t>{23});
+}
+
+TEST_F(StandaloneComputeSessionExecutionTest, PartialPushConstantsCopyAndSnapshotShortPayloads) {
+    auto description = makePushConstantOutputDescription();
+    description.pushConstantSize = 36;
+    auto workload = Workload::fromComputeShader(std::move(description));
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.configure();
+    const auto executable = workload.executable(0);
+    const Buffer output(physicalDevice, device, sizeof(int32_t));
+    auto bindings = session.createBindingSet();
+    bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*output.buffer});
+    std::vector<std::byte> payload(28);
+    const int32_t first = 23;
+    std::memcpy(payload.data(), &first, sizeof(first));
+    bindings.bindPushConstants(executable, {payload.data(), payload.size()});
+    const auto original = payload;
+    const int32_t second = 47;
+    std::memcpy(payload.data(), &second, sizeof(second));
+    EXPECT_EQ(bindings.pushConstants(executable), original);
+    auto firstExecution = session.prepare(bindings);
+    bindings.bindPushConstants(executable, {payload.data(), payload.size()});
+    auto secondExecution = session.prepare(bindings);
+    secondExecution.run();
+    EXPECT_EQ(output.read(1), std::vector<int32_t>{47});
+    firstExecution.run();
+    EXPECT_EQ(output.read(1), std::vector<int32_t>{23});
+}
+
+TEST_F(StandaloneComputeSessionExecutionTest, PartialPushConstantsAndEmptyUpdatesPreserveCompatibleCallerState) {
+    auto description = makePushConstantOutputDescription();
+    description.module.spirv = assembleWritePushConstantSpirv(4);
+    description.pushConstantSize = 8;
+    auto workload = Workload::fromComputeShader(std::move(description));
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.configure();
+    const Buffer output(physicalDevice, device, sizeof(int32_t));
+    const vk::PushConstantRange range(vk::ShaderStageFlagBits::eCompute, 0, 8);
+    const vk::raii::PipelineLayout compatibleLayout(device, vk::PipelineLayoutCreateInfo({}, {}, range));
+    auto bindings = session.createBindingSet();
+    bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*output.buffer});
+    const auto payload = bytesOf(int32_t{41});
+    for (const bool empty : {false, true}) {
+        SCOPED_TRACE(empty);
+        bindings.bindPushConstants(workload.executable(0),
+                                   empty ? ArrayView<const std::byte>{}
+                                         : ArrayView<const std::byte>{payload.data(), payload.size()});
+        auto execution = session.prepare(bindings);
+        // The shader reads the second word. A partial update of the first word,
+        // or no update, must preserve that caller-established second word.
+        const std::array<int32_t, 2> seed{11, empty ? 71 : 99};
+        for (int repeat = 0; repeat < 2; ++repeat) {
+            recordAndSubmitCommands(device, queue, queueFamilyIndex, [&](vk::CommandBuffer commandBuffer) {
+                device.getDispatcher()->vkCmdPushConstants(static_cast<VkCommandBuffer>(commandBuffer),
+                                                           static_cast<VkPipelineLayout>(*compatibleLayout),
+                                                           VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(seed), seed.data());
+                execution.record(commandBuffer);
+            });
+            EXPECT_EQ(output.read(1), std::vector<int32_t>{seed[1]});
+        }
+    }
 }
 
 TEST_F(StandaloneComputeSessionExecutionTest, AcceptsEmptyPushConstantsWithoutRanges) {

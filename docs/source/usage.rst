@@ -357,11 +357,13 @@ execution to supply push constants for an executable from the same workload.
 Each call copies the bytes and replaces that executable's previous payload,
 without changing other executables' payloads.
 
-The payload size must equal the largest ``offset + size`` of the executable's
-compiled push-constant ranges, including any leading gap. For example, a
-four-byte range at offset 16 requires a 20-byte payload. Empty data is accepted
-only when the executable requires zero bytes; it cannot clear a nonempty
-payload.
+The payload is indexed from byte offset zero. Its size must be divisible by
+four and cannot exceed the largest compiled range end (``offset + size``).
+Recording updates only the intersections of the supplied prefix with those
+ranges, including their original offsets. It does not pad the payload or
+change the pipeline layout. A 28-byte payload can therefore update a 36-byte
+range. Empty data explicitly records no update; omitting a binding altogether
+still fails preparation when an executable declares nonempty ranges.
 
 For a configured session whose first executable expects a single ``uint32_t``
 at offset zero, using a binding set with its required resources already bound:
@@ -380,6 +382,12 @@ The source bytes need not remain valid after ``bindPushConstants()`` returns.
 ``prepare()`` captures the bound payloads, so later binding changes do not
 affect an already prepared execution. ``bindings.pushConstants(executable)``
 returns a copy of the currently bound payload.
+
+The caller must establish every byte read by the shader, following Vulkan®
+push-constant pipeline-layout compatibility rules. ``record()`` can preserve
+compatible state established earlier in the caller's command buffer. ``run()``
+starts its own command buffer and cannot inherit that state. Inspection returns
+the supplied bytes, without padding.
 
 Running and recording
 ---------------------

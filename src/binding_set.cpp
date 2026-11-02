@@ -168,12 +168,14 @@ void BindingSet::bindPushConstants(ExecutableView executable, ArrayView<const st
 
     const auto &compiledExecutable =
         bindingSetState.session.sessionImpl().executableStates[executable.index_].compiledExecutable.get();
-    if (data.size() != compiledExecutable.requiredPushConstantSize()) {
+    const auto requiredSize = compiledExecutable.requiredPushConstantSize();
+    if (data.size() > requiredSize || data.size() % 4 != 0) {
         throw std::runtime_error("Push constant payload size does not match executable requirements");
     }
 
     if (data.empty()) {
-        bindingSetState.pushConstantsByExecutableIndex.erase(executable.index_);
+        // Keep an explicit empty entry: absence remains an error at prepare().
+        bindingSetState.pushConstantsByExecutableIndex[executable.index_].clear();
         return;
     }
 

@@ -71,16 +71,23 @@ class BindingSet {
     void setAliasPeerOffset(AliasPeerView peer, vk::DeviceSize byteOffset);
 
     /**
-     * @brief Copies a payload for one executable, replacing its previous payload.
+     * @brief Copies push-constant update bytes for an executable, replacing its previous payload.
      *
-     * @p executable must be a valid view from this binding set's Workload.
-     * The size of @p data in bytes must equal the largest offset + size of its
-     * compiled push-constant ranges, or zero if there are no ranges. Its pointer
-     * may be null only when its size is zero. The supplied bytes need not remain
-     * valid after this call.
-     * Empty data removes any stored payload for the executable and is accepted
-     * only when its compiled push-constant requirement is zero.
-     * Other executables' payloads and previously prepared executions are unchanged.
+     * The executable must belong to this binding set's Workload. The payload is
+     * indexed from byte offset zero; its size must be a multiple of four and
+     * cannot exceed the largest compiled push-constant range end. Its pointer
+     * may be null only when its size is zero.
+     *
+     * Recording updates only the intersections of the supplied prefix with the
+     * compiled ranges, leaving other bytes untouched. Empty data explicitly
+     * records no update, even when push-constant ranges exist. Omitting the
+     * binding entirely still fails preparation for nonempty ranges.
+     *
+     * The caller must establish any other bytes read by the shader in the same
+     * command buffer, following Vulkan pipeline-layout compatibility rules.
+     * run() starts its own command buffer and cannot inherit caller push state.
+     * The bytes are copied and prepare() snapshots them. Other executables and
+     * previously prepared executions are unchanged.
      */
     void bindPushConstants(ExecutableView executable, ArrayView<const std::byte> data);
 
