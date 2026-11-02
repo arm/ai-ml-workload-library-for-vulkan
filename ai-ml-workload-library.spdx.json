@@ -3,9 +3,9 @@
   "spdxVersion": "SPDX-2.3",
   "name": "ai-ml-workload-library",
   "dataLicense": "CC0-1.0",
-  "documentNamespace": "https://spdx.org/spdxdocs/ai-ml-workload-library-710df32aedf2112a1bbb",
+  "documentNamespace": "https://spdx.org/spdxdocs/ai-ml-workload-library-4cd619ef183d5a83bb73",
   "creationInfo": {
-    "created": "2026-10-14T08:26:02Z",
+    "created": "2026-11-02T08:12:32Z",
     "creators": [
       "Organization: Arm Limited",
       "Tool: mlsdk-source-sbom-generator"
@@ -92,16 +92,6 @@
       "versionInfo": "v3.1.0"
     },
     {
-      "SPDXID": "SPDXRef-spirv-headers",
-      "name": "KhronosGroup/SPIRV-Headers",
-      "downloadLocation": "NOASSERTION",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "MIT",
-      "copyrightText": "NOASSERTION",
-      "versionInfo": "vulkan-sdk-1.4.357.0"
-    },
-    {
       "SPDXID": "SPDXRef-submodule-directxshadercompiler-directx-headers",
       "name": "DirectX-Headers",
       "downloadLocation": "NOASSERTION",
@@ -182,11 +172,6 @@
       "spdxElementId": "SPDXRef-component-workload-lib",
       "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-pybind11"
-    },
-    {
-      "spdxElementId": "SPDXRef-component-workload-lib",
-      "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-spirv-headers"
     },
     {
       "spdxElementId": "SPDXRef-component-workload-lib",
