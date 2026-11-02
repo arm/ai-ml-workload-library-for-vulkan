@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -272,45 +273,95 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunGlslComputeShaderWithPushAndSpe
         GTEST_SKIP() << "GLSL source module support is not enabled in this build";
     }
 
-    constexpr size_t elements = 10;
-    constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
-    constexpr int32_t pushAdd = 7;
-    constexpr int32_t specializationAdd = 11;
-    constexpr int32_t buildOptionAdd = 3;
-    constexpr int32_t includeAdd = 5;
+    for (const std::string_view mode : {"original", "override", "empty"}) {
+        SCOPED_TRACE(mode);
+        constexpr size_t elements = 10;
+        constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
+        constexpr int32_t pushAdd = 7;
+        constexpr int32_t specializationAdd = 11;
+        const int32_t overrideAdd = mode == "override" ? 42 : 0;
+        const int32_t effectiveAdd = mode == "original" ? specializationAdd : overrideAdd;
+        constexpr int32_t buildOptionAdd = 3;
+        constexpr int32_t includeAdd = 5;
 
-    auto workload = Workload::fromComputeShader(makeAddInt32BuffersGlslDescription(specializationAdd));
-    auto context = Context::wrap({instance, physicalDevice, device, queueFamilyIndex, queue});
+        auto workload = Workload::fromComputeShader(makeAddInt32BuffersGlslDescription(specializationAdd));
+        auto context = Context::wrap({instance, physicalDevice, device, queueFamilyIndex, queue});
 
-    const Buffer firstInputBuffer(physicalDevice, device, bufferSize);
-    const Buffer secondInputBuffer(physicalDevice, device, bufferSize);
-    const Buffer outputBuffer(physicalDevice, device, bufferSize);
+        const Buffer firstInputBuffer(physicalDevice, device, bufferSize);
+        const Buffer secondInputBuffer(physicalDevice, device, bufferSize);
+        const Buffer outputBuffer(physicalDevice, device, bufferSize);
 
-    const std::vector<int32_t> firstInput = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29};
-    const std::vector<int32_t> secondInput = {-1, -2, 3, 4, -5, 6, 7, -8, 9, 10};
-    auto expected = addVectors(firstInput, secondInput);
-    for (auto &value : expected) {
-        value += pushAdd + specializationAdd + buildOptionAdd + includeAdd;
+        const std::vector<int32_t> firstInput = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29};
+        const std::vector<int32_t> secondInput = {-1, -2, 3, 4, -5, 6, 7, -8, 9, 10};
+        auto expected = addVectors(firstInput, secondInput);
+        for (auto &value : expected) {
+            value += pushAdd + effectiveAdd + buildOptionAdd + includeAdd;
+        }
+
+        firstInputBuffer.write(firstInput);
+        secondInputBuffer.write(secondInput);
+        outputBuffer.write(std::vector<int32_t>(elements, 0));
+
+        Session session(context, workload);
+        if (mode != "original") {
+            SpecializationInfo specialization;
+            if (mode == "override") {
+                specialization = {{vk::SpecializationMapEntry(0, 0, sizeof(int32_t))}, bytesOf(effectiveAdd)};
+            }
+            session.setSpecializationInfo(workload.executable(0), std::move(specialization));
+        }
+        session.configure();
+        auto bindings = session.createBindingSet();
+        ASSERT_EQ(workload.resourceCount(), 3);
+        bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstInputBuffer.buffer});
+        bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondInputBuffer.buffer});
+        bindings.bindBuffer(workload.resource(2), BufferBindingInfo{*outputBuffer.buffer});
+        bindings.bindPushConstants(workload.executable(0),
+                                   {reinterpret_cast<const std::byte *>(&pushAdd), sizeof(pushAdd)});
+
+        auto execution = session.prepare(bindings);
+        execution.run();
+
+        EXPECT_EQ(outputBuffer.read(elements), expected);
     }
+}
 
-    firstInputBuffer.write(firstInput);
-    secondInputBuffer.write(secondInput);
-    outputBuffer.write(std::vector<int32_t>(elements, 0));
-
+TEST_F(StandaloneComputeSessionExecutionTest, SpecializationOverridesReplaceMapsAndPreserveOriginals) {
+    auto description = makeAddInt32BuffersDescription();
+    const SpecializationInfo original{{vk::SpecializationMapEntry(0, 0, 4)}, bytesOf(int32_t{11})};
+    description.specializationInfo = original;
+    auto workload = Workload::fromComputeShader(std::move(description));
+    auto foreign = Workload::fromComputeShader(makeAddInt32BuffersDescription());
+    auto context = wrappedContext();
     Session session(context, workload);
-    session.configure();
-    auto bindings = session.createBindingSet();
-    ASSERT_EQ(workload.resourceCount(), 3);
-    bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstInputBuffer.buffer});
-    bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondInputBuffer.buffer});
-    bindings.bindBuffer(workload.resource(2), BufferBindingInfo{*outputBuffer.buffer});
-    bindings.bindPushConstants(workload.executable(0),
-                               {reinterpret_cast<const std::byte *>(&pushAdd), sizeof(pushAdd)});
-
-    auto execution = session.prepare(bindings);
-    execution.run();
-
-    EXPECT_EQ(outputBuffer.read(elements), expected);
+    const auto step = workload.executable(0);
+    EXPECT_EQ(session.specializationInfo(step).data, original.data);
+    const SpecializationInfo replacement{{vk::SpecializationMapEntry(1, 0, 4)}, bytesOf(int32_t{42})};
+    session.setSpecializationInfo(step, replacement);
+    EXPECT_EQ(session.specializationInfo(step).mapEntries, replacement.mapEntries);
+    auto copy = session.specializationInfo(step);
+    copy.data.clear();
+    copy.mapEntries.clear();
+    EXPECT_EQ(session.specializationInfo(step).data, replacement.data);
+    EXPECT_EQ(step.specializationInfo().data, original.data);
+    EXPECT_EQ(step.specializationInfo().mapEntries, original.mapEntries);
+    EXPECT_THROW(session.setSpecializationInfo(foreign.executable(0), {}), std::runtime_error);
+    EXPECT_THROW(session.specializationInfo(foreign.executable(0)), std::runtime_error);
+    const std::vector<SpecializationInfo> invalid = {
+        {{}, bytesOf(int32_t{1})},
+        {{vk::SpecializationMapEntry(0, 0, 4)}, {}},
+        {{vk::SpecializationMapEntry(0, 0, 0)}, bytesOf(int32_t{1})},
+        {{vk::SpecializationMapEntry(0, 5, 4)}, bytesOf(int32_t{1})},
+        {{vk::SpecializationMapEntry(0, 1, 4)}, bytesOf(int32_t{1})},
+        {{vk::SpecializationMapEntry(0, 0, 4), vk::SpecializationMapEntry(0, 0, 4)}, bytesOf(int32_t{1})},
+    };
+    for (const auto &specialization : invalid) {
+        EXPECT_THROW(session.setSpecializationInfo(step, specialization), std::runtime_error);
+        EXPECT_EQ(session.specializationInfo(step).data, replacement.data);
+    }
+    session.setSpecializationInfo(step, {});
+    EXPECT_TRUE(session.specializationInfo(step).empty());
+    EXPECT_EQ(step.specializationInfo().data, original.data);
 }
 
 TEST_F(StandaloneComputeSessionExecutionTest, CopiesPushConstantsOnBindAndInspection) {

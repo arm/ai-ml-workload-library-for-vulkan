@@ -175,7 +175,7 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RejectNeuralStatisticsForProtect
 TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkloadWithPipelineSpecializationConstants) {
     auto context = wrappedContext();
 
-    auto runArshift = [&](bool round) {
+    auto runArshift = [&](bool round, bool isOverride = false) {
         const std::vector<int64_t> tensorShape = {4};
         auto description = makeArshiftSpecBoolDescription(round);
         description.pipeline.identifier = "arshift-disable-optimization";
@@ -193,7 +193,14 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkloadWithPipeline
         utils::writeDeviceMemory(device, boundMemoryInfo(outputTensor), std::vector<uint16_t>(input.size(), 0));
 
         Session session(context, workload);
+        if (isOverride) {
+            session.setSpecializationInfo(workload.executable(0),
+                                          makeArshiftSpecBoolDescription(!round).pipeline.specializationInfo);
+        }
         session.configure();
+        EXPECT_EQ(session.specializationInfo(workload.executable(0)).data,
+                  makeBoolSpecializationConstantData(isOverride ? !round : round));
+        EXPECT_EQ(workload.executable(0).specializationInfo().data, makeBoolSpecializationConstantData(round));
         auto bindings = session.createBindingSet();
         bindings.bindTensor(workload.resource(0), TensorBindingInfo{*inputTensor.tensor});
         bindings.bindTensor(workload.resource(1), TensorBindingInfo{*shiftTensor.tensor});
@@ -207,6 +214,8 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkloadWithPipeline
 
     EXPECT_EQ(runArshift(false), (std::vector<uint16_t>{3, 4, 2, 3}));
     EXPECT_EQ(runArshift(true), (std::vector<uint16_t>{4, 5, 3, 4}));
+    EXPECT_EQ(runArshift(false, true), (std::vector<uint16_t>{4, 5, 3, 4}));
+    EXPECT_EQ(runArshift(true, true), (std::vector<uint16_t>{3, 4, 2, 3}));
 }
 
 TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkloadWithRuntimeCreatedContextAndTensors) {
@@ -653,6 +662,23 @@ TEST(DataGraphBinary, RejectsExecutableModuleConflictsInBothCallOrders) {
     Session binaryFirst(context, workload);
     binaryFirst.bindDataGraphBinary(validBinary);
     EXPECT_THROW(binaryFirst.bindModule(workload.executable(0), implementation), std::runtime_error);
+}
+
+TEST(DataGraphBinary, RejectsSpecializationConflictsInBothCallOrders) {
+    const NullVulkanContext vulkan;
+    auto context = vulkan.wrap();
+    auto workload = Workload::fromDataGraph(DataGraphDescription{});
+    const auto step = workload.executable(0);
+    const auto specialization = makeArshiftSpecBoolDescription(true).pipeline.specializationInfo;
+    Session specializationFirst(context, workload);
+    specializationFirst.setSpecializationInfo(step, specialization);
+    EXPECT_THROW(specializationFirst.bindDataGraphBinary(validBinary), std::runtime_error);
+    specializationFirst.setSpecializationInfo(step, {});
+    EXPECT_NO_THROW(specializationFirst.bindDataGraphBinary(validBinary));
+    Session binaryFirst(context, workload);
+    binaryFirst.bindDataGraphBinary(validBinary);
+    EXPECT_THROW(binaryFirst.setSpecializationInfo(step, specialization), std::runtime_error);
+    EXPECT_NO_THROW(binaryFirst.setSpecializationInfo(step, {}));
 }
 
 TEST(DataGraphBinary, RejectsConflictingCompilationInputs) {

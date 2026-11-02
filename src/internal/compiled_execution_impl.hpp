@@ -33,6 +33,7 @@ struct CompiledExecutable {
         return size;
     }
 
+    SpecializationInfo specializationInfo;
     std::vector<vk::PushConstantRange> pushConstantRanges;
     vk::raii::ShaderModule shaderModule{nullptr};
     std::vector<vk::raii::DescriptorSetLayout> descriptorSetLayouts;

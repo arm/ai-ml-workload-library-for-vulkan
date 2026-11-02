@@ -6,6 +6,7 @@
 #include "mlworkloadlib/session.hpp"
 #include "mlworkloadlib/workload.hpp"
 #include "mlworkloadlib_utils/application_context.hpp"
+#include "standalone_compute/test_standalone_compute_utils.hpp"
 #include "test_alias_execution.hpp"
 #include "test_expected_results.hpp"
 #include "test_resource_requirements.hpp"
@@ -41,6 +42,10 @@ using namespace mlsdk::workloadlib;
 using namespace mlsdk::workloadlib::test;
 
 class VgfSessionExecutionTest : public RuntimeSessionExecutionTest {};
+
+SpecializationInfo intSpecialization(int32_t value) {
+    return {{vk::SpecializationMapEntry(0, 0, sizeof(value))}, bytesOf(value)};
+}
 
 // Capture library arguments before forwarding to Vulkan. The emulation layer
 // can accept mismatched tensor tilings, so execution alone is insufficient.
@@ -852,6 +857,46 @@ TEST_F(VgfSessionExecutionTest, ExecutableModuleReplacementKeepsSharedModuleStep
     EXPECT_EQ(secondOutput.read(elements), std::vector<int32_t>(elements, 13));
 }
 
+TEST_F(VgfSessionExecutionTest, SpecializationOverridesKeepSharedModuleStepsIndependent) {
+    const auto code = assembleSpecializationAddInt32BuffersSpirv();
+    const auto bytes = writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
+        const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "shared", "main", code);
+        addInt32BuffersSegment(encoder, module, "first");
+        addInt32BuffersSegment(encoder, module, "second");
+    });
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    EXPECT_EQ(workload.executable(0).module().index(), workload.executable(1).module().index());
+    // An explicit empty map must restore the shader default after a previous override.
+    for (const bool reset : {false, true}) {
+        SCOPED_TRACE(reset);
+        Session session(context, workload);
+        for (uint32_t index = 0; index < 2; ++index) {
+            session.setSpecializationInfo(workload.executable(index), intSpecialization(index == 0 ? 42 : 7));
+        }
+        if (reset) {
+            session.setSpecializationInfo(workload.executable(0), {});
+        }
+        session.configure();
+        const Buffer input(physicalDevice, device, 10 * sizeof(int32_t));
+        const Buffer firstOutput(physicalDevice, device, 10 * sizeof(int32_t));
+        const Buffer secondOutput(physicalDevice, device, 10 * sizeof(int32_t));
+        input.write(std::vector<int32_t>(10, 0));
+        auto bindings = session.createBindingSet();
+        for (uint32_t index = 0; index < 2; ++index) {
+            const auto firstResourceIndex = index * 3;
+            bindings.bindBuffer(workload.resource(firstResourceIndex), BufferBindingInfo{*input.buffer});
+            bindings.bindBuffer(workload.resource(firstResourceIndex + 1), BufferBindingInfo{*input.buffer});
+            bindings.bindBuffer(workload.resource(firstResourceIndex + 2),
+                                BufferBindingInfo{index == 0 ? *firstOutput.buffer : *secondOutput.buffer});
+            EXPECT_TRUE(workload.executable(index).specializationInfo().empty());
+        }
+        session.prepare(bindings).run();
+        EXPECT_EQ(firstOutput.read(10), std::vector<int32_t>(10, reset ? 100500 : 42));
+        EXPECT_EQ(secondOutput.read(10), std::vector<int32_t>(10, 7));
+    }
+}
+
 TEST_F(VgfSessionExecutionTest, ExecutableModuleReplacementRejectsInvalidInputs) {
     const auto bytes = makePlaceholderAddInt32BuffersVgf();
     auto workload = Workload::fromVGF(bytes.data(), bytes.size());
@@ -878,11 +923,13 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRetriesAfterFailedConfigu
     CompiledExecution compiledExecution(context, workload);
 
     Session session(context, workload, compiledExecution);
+    const int32_t value = 42;
+    session.setSpecializationInfo(workload.executable(0), intSpecialization(value));
     EXPECT_THROW(session.configure(), std::runtime_error);
 
     ModuleImplementation implementation;
     implementation.codeKind = ModuleCodeKind::Spirv;
-    implementation.spirv = assembleAddInt32BuffersSpirv();
+    implementation.spirv = assembleSpecializationAddInt32BuffersSpirv();
     session.bindModule(workload.placeholderModule(0), std::move(implementation));
     session.configure();
 
@@ -905,10 +952,13 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRetriesAfterFailedConfigu
     auto execution = session.prepare(bindings);
     execution.run();
 
-    EXPECT_EQ(outputBuffer.read(elements), addVectors(firstInput, secondInput));
+    auto expected = secondInput;
+    std::transform(expected.begin(), expected.end(), expected.begin(),
+                   [value](int32_t element) { return element + value; });
+    EXPECT_EQ(outputBuffer.read(elements), expected);
 }
 
-TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRejectsModuleBindingsAfterCompilation) {
+TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRejectsPendingModuleBindings) {
     for (const bool executableBinding : {false, true}) {
         SCOPED_TRACE(executableBinding);
         const auto bytes = makePlaceholderAddInt32BuffersVgf();
@@ -930,27 +980,90 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRejectsModuleBindingsAfte
 
         Session preboundSession(context, workload, compiledExecution);
         bindModule(preboundSession, spirv);
-
         {
             Session firstSession(context, workload, compiledExecution);
             bindModule(firstSession, spirv);
             firstSession.configure();
+            EXPECT_THROW(bindModule(firstSession, spirv), std::runtime_error);
         }
 
         try {
             preboundSession.configure();
-            FAIL() << "Pre-bound module was silently ignored";
+            FAIL() << "Pending module binding was silently ignored";
         } catch (const std::runtime_error &error) {
             EXPECT_STREQ("Compilation inputs cannot be rebound after compiled execution is configured", error.what());
         }
+        EXPECT_THROW(preboundSession.specializationInfo(workload.executable(0)), std::runtime_error);
 
         Session unboundSession(context, workload, compiledExecution);
+        EXPECT_TRUE(unboundSession.specializationInfo(workload.executable(0)).empty());
         EXPECT_NO_THROW(unboundSession.configure());
+        EXPECT_TRUE(unboundSession.specializationInfo(workload.executable(0)).empty());
 
         Session lateBindingSession(context, workload, compiledExecution);
         try {
             bindModule(lateBindingSession, spirv);
             FAIL() << "Late module binding was accepted";
+        } catch (const std::runtime_error &error) {
+            EXPECT_STREQ("Compilation inputs cannot be rebound after compiled execution is configured", error.what());
+        }
+        EXPECT_NO_THROW(lateBindingSession.configure());
+    }
+}
+
+TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRejectsPendingSpecializationOverrides) {
+    struct TestCase {
+        const char *name;
+        SpecializationInfo pending;
+        SpecializationInfo compiled;
+    };
+    for (const auto &testCase :
+         {TestCase{"matching", intSpecialization(42), intSpecialization(42)}, TestCase{"empty", {}, {}},
+          TestCase{"different", intSpecialization(7), intSpecialization(42)}}) {
+        SCOPED_TRACE(testCase.name);
+        const auto bytes = makePlaceholderAddInt32BuffersVgf();
+        auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+        const auto step = workload.executable(0);
+        auto context = wrappedContext();
+        CompiledExecution compiledExecution(context, workload);
+
+        Session preboundSession(context, workload, compiledExecution);
+        preboundSession.setSpecializationInfo(step, testCase.pending);
+        {
+            Session firstSession(context, workload, compiledExecution);
+            ModuleImplementation implementation;
+            implementation.codeKind = ModuleCodeKind::Spirv;
+            implementation.spirv = assembleAddInt32BuffersSpirv();
+            firstSession.bindModule(workload.placeholderModule(0), std::move(implementation));
+            firstSession.setSpecializationInfo(step, testCase.compiled);
+            firstSession.configure();
+            EXPECT_THROW(firstSession.setSpecializationInfo(step, testCase.compiled), std::runtime_error);
+        }
+
+        try {
+            preboundSession.configure();
+            FAIL() << "Pending specialization override was silently ignored";
+        } catch (const std::runtime_error &error) {
+            EXPECT_STREQ("Compilation inputs cannot be rebound after compiled execution is configured", error.what());
+        }
+        EXPECT_THROW(preboundSession.specializationInfo(step), std::runtime_error);
+
+        Session unboundSession(context, workload, compiledExecution);
+        EXPECT_EQ(unboundSession.specializationInfo(step).data, testCase.compiled.data);
+        EXPECT_EQ(unboundSession.specializationInfo(step).mapEntries, testCase.compiled.mapEntries);
+        auto copy = unboundSession.specializationInfo(step);
+        copy.data.clear();
+        copy.mapEntries.clear();
+        EXPECT_EQ(unboundSession.specializationInfo(step).data, testCase.compiled.data);
+        EXPECT_EQ(unboundSession.specializationInfo(step).mapEntries, testCase.compiled.mapEntries);
+        EXPECT_NO_THROW(unboundSession.configure());
+        EXPECT_EQ(unboundSession.specializationInfo(step).data, testCase.compiled.data);
+        EXPECT_EQ(unboundSession.specializationInfo(step).mapEntries, testCase.compiled.mapEntries);
+
+        Session lateBindingSession(context, workload, compiledExecution);
+        try {
+            lateBindingSession.setSpecializationInfo(step, testCase.pending);
+            FAIL() << "Late specialization override was accepted";
         } catch (const std::runtime_error &error) {
             EXPECT_STREQ("Compilation inputs cannot be rebound after compiled execution is configured", error.what());
         }

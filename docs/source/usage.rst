@@ -181,6 +181,36 @@ Successful pipeline compilation fixes the code for all sessions sharing a
 ``CompiledExecution``. Later bindings are rejected, and other sessions must have
 no pending bindings when configured.
 
+Executable specialization overrides
+-----------------------------------
+
+Call ``Session::setSpecializationInfo(executable, specialization)`` before pipeline
+compilation to replace one compute or data-graph executable's entire map. For
+example, to select specialization constant ID 0:
+
+.. code-block:: cpp
+
+   const uint32_t value = 42;
+   const auto* bytes = reinterpret_cast<const std::byte*>(&value);
+   SpecializationInfo specialization;
+   specialization.mapEntries = {{0, 0, sizeof(value)}};
+   specialization.data.assign(bytes, bytes + sizeof(value));
+   session.setSpecializationInfo(workload.executable(0), std::move(specialization));
+   session.configure();
+
+An empty map selects shader defaults. Steps sharing a module can use different
+maps. ``ExecutableView::specializationInfo()`` continues to report the original
+workload map. ``Session::specializationInfo(executable)`` returns an independent
+copy of the pending map, or the specialization overrides used to compile the
+pipelines once pipelines exist; it does not inspect shader defaults.
+
+Successful compilation fixes specialization for every session sharing the
+``CompiledExecution``. Later setters are rejected. Another session with pending
+compilation inputs cannot configure or query effective specialization, even when
+its pending values match. A session without pending inputs can inspect and reuse
+the compiled values. Failed pipeline compilation retains overrides for retry.
+Data-graph binaries require an empty effective specialization map.
+
 Resource binding
 ----------------
 
