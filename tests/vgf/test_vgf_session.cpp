@@ -925,13 +925,16 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRetriesAfterFailedConfigu
     Session session(context, workload, compiledExecution);
     const int32_t value = 42;
     session.setSpecializationInfo(workload.executable(0), intSpecialization(value));
+    session.setPushConstantSize(workload.executable(0), 8);
     EXPECT_THROW(session.configure(), std::runtime_error);
+    EXPECT_EQ(session.pushConstantSize(workload.executable(0)), 8u);
 
     ModuleImplementation implementation;
     implementation.codeKind = ModuleCodeKind::Spirv;
     implementation.spirv = assembleSpecializationAddInt32BuffersSpirv();
     session.bindModule(workload.placeholderModule(0), std::move(implementation));
     session.configure();
+    EXPECT_EQ(session.pushConstantSize(workload.executable(0)), 8u);
 
     const Buffer firstInputBuffer(physicalDevice, device, bufferSize);
     const Buffer secondInputBuffer(physicalDevice, device, bufferSize);
@@ -949,6 +952,8 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRetriesAfterFailedConfigu
     bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondInputBuffer.buffer});
     bindings.bindBuffer(workload.resource(2), BufferBindingInfo{*outputBuffer.buffer});
 
+    const auto payload = bytesOf(uint64_t{0});
+    bindings.bindPushConstants(workload.executable(0), {payload.data(), payload.size()});
     auto execution = session.prepare(bindings);
     execution.run();
 
@@ -1047,6 +1052,7 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRejectsPendingSpecializat
             EXPECT_STREQ("Compilation inputs cannot be rebound after compiled execution is configured", error.what());
         }
         EXPECT_THROW(preboundSession.specializationInfo(step), std::runtime_error);
+        EXPECT_THROW(preboundSession.pushConstantSize(step), std::runtime_error);
 
         Session unboundSession(context, workload, compiledExecution);
         EXPECT_EQ(unboundSession.specializationInfo(step).data, testCase.compiled.data);
@@ -1069,6 +1075,72 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRejectsPendingSpecializat
         }
         EXPECT_NO_THROW(lateBindingSession.configure());
     }
+}
+
+TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRejectsPendingPushConstantSizes) {
+    for (const auto &sizes : {std::pair{8u, 8u}, std::pair{0u, 0u}, std::pair{4u, 8u}}) {
+        SCOPED_TRACE(sizes.first);
+        const auto bytes = makePlaceholderAddInt32BuffersVgf();
+        auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+        const auto step = workload.executable(0);
+        auto context = wrappedContext();
+        CompiledExecution compiled(context, workload);
+        Session pending(context, workload, compiled);
+        pending.setPushConstantSize(step, sizes.first);
+        {
+            Session first(context, workload, compiled);
+            first.setPushConstantSize(step, sizes.second);
+            ModuleImplementation implementation;
+            implementation.codeKind = ModuleCodeKind::Spirv;
+            implementation.spirv = assembleAddInt32BuffersSpirv();
+            first.bindModule(step, std::move(implementation));
+            first.configure();
+            EXPECT_EQ(first.pushConstantSize(step), sizes.second);
+            EXPECT_THROW(first.setPushConstantSize(step, sizes.second), std::runtime_error);
+        }
+        EXPECT_THROW(pending.configure(), std::runtime_error);
+        EXPECT_THROW(pending.pushConstantSize(step), std::runtime_error);
+        EXPECT_THROW(pending.specializationInfo(step), std::runtime_error);
+        Session reuse(context, workload, compiled);
+        EXPECT_EQ(reuse.pushConstantSize(step), sizes.second);
+        EXPECT_THROW(reuse.setPushConstantSize(step, sizes.first), std::runtime_error);
+        reuse.configure();
+        EXPECT_EQ(reuse.pushConstantSize(step), sizes.second);
+        EXPECT_EQ(step.pushConstantSize(), 0u);
+    }
+}
+
+TEST_F(VgfSessionExecutionTest, SuppliesMissingPushConstantLayout) {
+    const auto bytes = writeVgf([](mlsdk::vgflib::Encoder &encoder) {
+        const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "write_push_constant", "main");
+        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {1}, {4});
+        const auto binding = encoder.AddBindingSlot(0, output);
+        const auto descriptors = encoder.AddDescriptorSetInfo({binding}, 0);
+        encoder.AddSegmentInfo(module, "write_push_constant", {descriptors}, {}, {binding}, noGraphConstants,
+                               {1, 1, 1});
+    });
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    const auto step = workload.executable(0);
+    ModuleImplementation implementation;
+    implementation.codeKind = ModuleCodeKind::Spirv;
+    implementation.spirv = assembleWritePushConstantSpirv(36);
+    session.bindModule(step, std::move(implementation));
+    session.setPushConstantSize(step, 40);
+    session.configure();
+    EXPECT_EQ(step.pushConstantSize(), 0u);
+    EXPECT_EQ(session.pushConstantSize(step), 40u);
+
+    const Buffer output(physicalDevice, device, sizeof(int32_t));
+    auto bindings = session.createBindingSet();
+    bindings.bindBuffer(workload.resource(0), {*output.buffer});
+    EXPECT_THROW(session.prepare(bindings), std::runtime_error);
+    const std::array<int32_t, 10> payload = {1, 2, 3, 4, 5, 6, 7, 8, 9, 23};
+    const auto payloadBytes = bytesOf(payload);
+    bindings.bindPushConstants(step, {payloadBytes.data(), payloadBytes.size()});
+    session.prepare(bindings).run();
+    EXPECT_EQ(output.read(1), std::vector<int32_t>{payload.back()});
 }
 
 TEST_F(VgfSessionExecutionTest, RunGlslComputeShaderSegmentWithPushConstants) {
@@ -1119,33 +1191,45 @@ TEST_F(VgfSessionExecutionTest, IndependentPushConstantsRetainOffsets) {
     auto context = wrappedContext();
     const auto bytes = makeTwoSegmentPushConstantVgf();
     auto workload = Workload::fromVGF(bytes.data(), bytes.size());
-    const Buffer firstOutput(physicalDevice, device, sizeof(int32_t));
-    const Buffer secondOutput(physicalDevice, device, sizeof(int32_t));
-    std::array<int32_t, 2> firstPayload = {-100, 23};
-    const std::array<int32_t, 3> secondPayload = {-200, 57, -300};
-    const auto *firstData = reinterpret_cast<const std::byte *>(firstPayload.data());
-    const auto *secondData = reinterpret_cast<const std::byte *>(secondPayload.data());
-
-    ASSERT_EQ(workload.executable(0).module().index(), workload.executable(1).module().index());
-
-    Session session(context, workload);
-    session.configure();
-    auto bindings = session.createBindingSet();
-    bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstOutput.buffer});
-    bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondOutput.buffer});
-
     const auto firstStep = workload.executable(0);
     const auto secondStep = workload.executable(1);
+    ASSERT_EQ(firstStep.module().index(), secondStep.module().index());
 
-    bindings.bindPushConstants(firstStep, {firstData, sizeof(firstPayload)});
-    EXPECT_THROW(session.prepare(bindings), std::runtime_error);
-    bindings.bindPushConstants(secondStep, {secondData, sizeof(secondPayload)});
+    for (const bool overrideSizes : {false, true}) {
+        SCOPED_TRACE(overrideSizes);
+        const Buffer firstOutput(physicalDevice, device, sizeof(int32_t));
+        const Buffer secondOutput(physicalDevice, device, sizeof(int32_t));
+        std::vector<int32_t> firstPayload = {-100, 23};
+        std::vector<int32_t> secondPayload = {-200, 57, -300};
+        Session session(context, workload);
+        if (overrideSizes) {
+            // Replace the original offset-four ranges with distinct offset-zero layouts.
+            session.setPushConstantSize(firstStep, 12);
+            session.setPushConstantSize(secondStep, 16);
+            firstPayload.push_back(-400);
+            secondPayload.push_back(-500);
+        }
+        session.configure();
+        EXPECT_EQ(firstStep.pushConstantSize(), 8u);
+        EXPECT_EQ(secondStep.pushConstantSize(), 12u);
+        EXPECT_EQ(session.pushConstantSize(firstStep), overrideSizes ? 12u : 8u);
+        EXPECT_EQ(session.pushConstantSize(secondStep), overrideSizes ? 16u : 12u);
 
-    auto execution = session.prepare(bindings);
+        auto bindings = session.createBindingSet();
+        bindings.bindBuffer(workload.resource(0), {*firstOutput.buffer});
+        bindings.bindBuffer(workload.resource(1), {*secondOutput.buffer});
+        const auto *firstData = reinterpret_cast<const std::byte *>(firstPayload.data());
+        const auto *secondData = reinterpret_cast<const std::byte *>(secondPayload.data());
+        const auto firstSize = firstPayload.size() * sizeof(int32_t);
+        const auto secondSize = secondPayload.size() * sizeof(int32_t);
 
-    execution.run();
-    EXPECT_EQ(firstOutput.read(1), std::vector<int32_t>{23});
-    EXPECT_EQ(secondOutput.read(1), std::vector<int32_t>{57});
+        bindings.bindPushConstants(firstStep, {firstData, firstSize});
+        EXPECT_THROW(session.prepare(bindings), std::runtime_error);
+        bindings.bindPushConstants(secondStep, {secondData, secondSize});
+        session.prepare(bindings).run();
+        EXPECT_EQ(firstOutput.read(1), std::vector<int32_t>{23});
+        EXPECT_EQ(secondOutput.read(1), std::vector<int32_t>{57});
+    }
 }
 
 TEST_F(VgfSessionExecutionTest, PartialPushConstantsRetainExecutableOffsets) {

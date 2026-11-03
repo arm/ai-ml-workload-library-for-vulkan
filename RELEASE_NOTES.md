@@ -25,6 +25,9 @@
 
 ### Resource Binding and Execution
 
+- Added compute executable push-constant layout overrides through
+  `Session::setPushConstantSize()` and effective size inspection through
+  `Session::pushConstantSize()`, including layouts absent from a VGF.
 - Added executable-specific specialization overrides and effective inspection
   through `Session::setSpecializationInfo()` and `Session::specializationInfo()`.
 - Added `Session::bindModule(ExecutableView, ModuleImplementation)` to supply or

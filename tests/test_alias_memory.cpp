@@ -281,8 +281,26 @@ TEST_P(ImplicitBarrierSession, RecordsDependencyAccordingToProducerSetting) {
         std::move(device.allocateCommandBuffers({*commandPool, vk::CommandBufferLevel::ePrimary, 1}).front());
     commandBuffer.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
     AliasRecordingCalls calls(device);
-    EXPECT_CALL(calls, dispatchGraph()).Times(2);
-    EXPECT_CALL(calls, pipelineBarrier(::testing::_)).Times(producerBarrier ? 1 : 0);
+    if (!producerBarrier) {
+        EXPECT_CALL(calls, pipelineBarrier(::testing::_)).Times(0);
+    }
+    const ::testing::InSequence sequence;
+    EXPECT_CALL(calls, dispatchGraph());
+    if (producerBarrier) {
+        EXPECT_CALL(calls, pipelineBarrier(::testing::_)).WillOnce([](const VkDependencyInfo &info) {
+            ASSERT_EQ(info.memoryBarrierCount, 1u);
+            const vk::MemoryBarrier2 barrier(info.pMemoryBarriers[0]);
+            // Accept scopes that cover the producer write and consumer read, including broader scopes.
+            const auto stages = vk::PipelineStageFlagBits2::eDataGraphARM | vk::PipelineStageFlagBits2::eAllCommands;
+            EXPECT_TRUE(barrier.srcStageMask & stages);
+            EXPECT_TRUE(barrier.dstStageMask & stages);
+            EXPECT_TRUE(barrier.srcAccessMask &
+                        (vk::AccessFlagBits2::eDataGraphWriteARM | vk::AccessFlagBits2::eMemoryWrite));
+            EXPECT_TRUE(barrier.dstAccessMask &
+                        (vk::AccessFlagBits2::eDataGraphReadARM | vk::AccessFlagBits2::eMemoryRead));
+        });
+    }
+    EXPECT_CALL(calls, dispatchGraph());
     execution.record(*commandBuffer);
     commandBuffer.end();
 }

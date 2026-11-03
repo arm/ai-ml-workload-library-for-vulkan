@@ -71,7 +71,11 @@ class PreparedExecution {
      * @brief Records workload commands into a caller-owned command buffer.
      *
      * @p commandBuffer must be recording and compatible with the Context queue
-     * family. The caller ends, submits, and synchronizes the command buffer.
+     * family. The library records dependencies between executables according to their
+     * implicit barrier settings, including internal dependencies for VGF workloads.
+     * Image layouts may be restored after the final executable. The caller ends
+     * and submits the command buffer and supplies synchronization with commands
+     * outside this workload recording.
      */
     void record(vk::CommandBuffer commandBuffer);
 

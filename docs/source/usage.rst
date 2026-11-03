@@ -176,8 +176,8 @@ that executable, allowing steps sharing a module to use different
 implementations. The original workload remains unchanged.
 
 Replacement code must use the workload's entry point and descriptor interface
-and be compatible with its push-constant layout. An executable cannot have both
-a module replacement and a data-graph binary.
+and be compatible with the effective push-constant layout. An executable cannot
+have both a module replacement and a data-graph binary.
 
 Successful pipeline compilation fixes the code for all sessions sharing a
 ``CompiledExecution``. Later bindings are rejected, and other sessions must have
@@ -354,6 +354,25 @@ required, including restoration of the entry layout.
 Push constants
 --------------
 
+Before pipeline compilation, call ``Session::setPushConstantSize(executable, size)``
+to replace a compute executable's push-constant layout. A nonzero size creates
+one compute-stage range at offset zero; zero removes all ranges. Sizes must be
+divisible by four and within the device's ``maxPushConstantsSize`` limit.
+Without an override, the original workload ranges and their offsets are kept.
+This allows replacement code to use push constants absent from the VGF:
+
+.. code-block:: cpp
+
+   auto executable = workload.executable(0);
+   session.bindModule(executable, implementation);
+   session.setPushConstantSize(executable, 40);
+   session.configure();
+
+``Session::pushConstantSize(executable)`` returns the effective largest range end;
+``ExecutableView::pushConstantSize()`` retains the original workload value.
+Layout overrides follow the shared compilation rules described above, including
+rejection of pending overrides whose values match the compiled layout.
+
 Call ``BindingSet::bindPushConstants(executable, data)`` before preparing an
 execution to supply push constants for an executable from the same workload.
 Each call copies the bytes and replaces that executable's previous payload,
@@ -399,7 +418,9 @@ library-managed command and fence state.
 
 ``PreparedExecution::record()`` records into a caller-owned command buffer and
 manages dependencies between workload executables according to their
-``implicitBarrier`` settings. The application is responsible for the command-buffer
+``implicitBarrier`` settings. VGF workloads retain library-managed internal
+dependencies. Image layout restoration may also record barriers after the final
+executable. The application is responsible for the command-buffer
 lifecycle, submission, and synchronization with work outside the call.
 
 .. literalinclude:: ../sources/samples/4_record_glsl_compute_with_wrapped_context.cpp

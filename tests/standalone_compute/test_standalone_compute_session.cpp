@@ -366,6 +366,44 @@ TEST_F(StandaloneComputeSessionExecutionTest, SpecializationOverridesReplaceMaps
     EXPECT_EQ(step.specializationInfo().data, original.data);
 }
 
+TEST_F(StandaloneComputeSessionExecutionTest, PushConstantSizeOverridesReplaceLayoutAndPreserveOriginal) {
+    auto workload = Workload::fromComputeShader(makePushConstantOutputDescription());
+    auto foreign = Workload::fromComputeShader(makePushConstantOutputDescription());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    const auto step = workload.executable(0);
+    EXPECT_EQ(session.pushConstantSize(step), 4u);
+    EXPECT_THROW(session.setPushConstantSize(foreign.executable(0), 4), std::runtime_error);
+    EXPECT_THROW(session.pushConstantSize(foreign.executable(0)), std::runtime_error);
+
+    const auto limit = physicalDevice.getProperties().limits.maxPushConstantsSize;
+    session.setPushConstantSize(step, limit);
+    EXPECT_EQ(session.pushConstantSize(step), limit);
+    session.setPushConstantSize(step, 8);
+    EXPECT_EQ(session.pushConstantSize(step), 8u);
+    for (const auto size : {6u, limit + 4}) {
+        EXPECT_THROW(session.setPushConstantSize(step, size), std::runtime_error);
+        EXPECT_EQ(session.pushConstantSize(step), 8u);
+    }
+
+    session.configure();
+    EXPECT_EQ(session.pushConstantSize(step), 8u);
+    EXPECT_EQ(step.pushConstantSize(), 4u);
+
+    const Buffer output(physicalDevice, device, sizeof(int32_t));
+    auto bindings = session.createBindingSet();
+    bindings.bindBuffer(workload.resource(0), {*output.buffer});
+    const std::array<int32_t, 2> payload = {23, 99};
+    const auto oversizedPayload = bytesOf(std::array<int32_t, 3>{});
+    EXPECT_THROW(bindings.bindPushConstants(step, {oversizedPayload.data(), oversizedPayload.size()}),
+                 std::runtime_error);
+
+    const auto payloadBytes = bytesOf(payload);
+    bindings.bindPushConstants(step, {payloadBytes.data(), payloadBytes.size()});
+    session.prepare(bindings).run();
+    EXPECT_EQ(output.read(1), std::vector<int32_t>{23});
+}
+
 TEST_F(StandaloneComputeSessionExecutionTest, CopiesPushConstantsOnBindAndInspection) {
     auto workload = Workload::fromComputeShader(makePushConstantOutputDescription());
     auto context = wrappedContext();
@@ -502,17 +540,42 @@ TEST_F(StandaloneComputeSessionExecutionTest, PartialPushConstantsAndEmptyUpdate
 }
 
 TEST_F(StandaloneComputeSessionExecutionTest, AcceptsEmptyPushConstantsWithoutRanges) {
-    auto workload = Workload::fromComputeShader(makeAddInt32BuffersDescription());
-    auto context = wrappedContext();
-    Session session(context, workload);
-    session.configure();
-    auto bindings = session.createBindingSet();
-    const auto executable = workload.executable(0);
-    const auto payload = bytesOf(int32_t{23});
-    EXPECT_NO_THROW(bindings.bindPushConstants(executable, {nullptr, 0}));
-    EXPECT_NO_THROW(bindings.bindPushConstants(executable, {payload.data(), 0}));
-    EXPECT_THROW(bindings.bindPushConstants(executable, {payload.data(), payload.size()}), std::runtime_error);
-    EXPECT_TRUE(bindings.pushConstants(executable).empty());
+    for (const bool zeroOverride : {false, true}) {
+        SCOPED_TRACE(zeroOverride);
+        auto description = makeAddInt32BuffersDescription();
+        description.pushConstantSize = zeroOverride ? 4 : 0;
+        auto workload = Workload::fromComputeShader(std::move(description));
+        auto context = wrappedContext();
+        Session session(context, workload);
+        const auto executable = workload.executable(0);
+        if (zeroOverride) {
+            session.setPushConstantSize(executable, 8);
+            session.setPushConstantSize(executable, 0);
+        }
+        EXPECT_EQ(session.pushConstantSize(executable), 0u);
+        session.configure();
+        EXPECT_EQ(session.pushConstantSize(executable), 0u);
+        EXPECT_EQ(executable.pushConstantSize(), zeroOverride ? 4u : 0u);
+        auto bindings = session.createBindingSet();
+        const auto payload = bytesOf(int32_t{23});
+        EXPECT_NO_THROW(bindings.bindPushConstants(executable, {nullptr, 0}));
+        EXPECT_NO_THROW(bindings.bindPushConstants(executable, {payload.data(), 0}));
+        EXPECT_THROW(bindings.bindPushConstants(executable, {payload.data(), payload.size()}), std::runtime_error);
+        EXPECT_TRUE(bindings.pushConstants(executable).empty());
+
+        const std::vector<int32_t> firstInput(10, 2);
+        const std::vector<int32_t> secondInput(10, 3);
+        const Buffer firstInputBuffer(physicalDevice, device, 10 * sizeof(int32_t));
+        const Buffer secondInputBuffer(physicalDevice, device, 10 * sizeof(int32_t));
+        const Buffer outputBuffer(physicalDevice, device, 10 * sizeof(int32_t));
+        firstInputBuffer.write(firstInput);
+        secondInputBuffer.write(secondInput);
+        bindings.bindBuffer(workload.resource(0), {*firstInputBuffer.buffer});
+        bindings.bindBuffer(workload.resource(1), {*secondInputBuffer.buffer});
+        bindings.bindBuffer(workload.resource(2), {*outputBuffer.buffer});
+        session.prepare(bindings).run();
+        EXPECT_EQ(outputBuffer.read(10), addVectors(firstInput, secondInput));
+    }
 }
 
 TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderRepeatedDifferentInput) {
