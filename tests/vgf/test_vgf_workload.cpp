@@ -114,6 +114,20 @@ TEST(VgfWorkload, ExposesOriginalPushConstantRangeEndsPerExecutable) {
     EXPECT_EQ(workload.executable(1).pushConstantSize(), 12);
 }
 
+TEST(VgfWorkload, DecodesExternalDataGraphBinaryModule) {
+    const auto data = writeVgf([](Encoder &encoder) {
+        const auto module = encoder.DeclareExternalDataGraphBinaryModule("binary_graph");
+        encoder.AddSegmentInfo(module, "binary_segment", {}, {}, {}, noGraphConstants);
+    });
+
+    const auto workload = Workload::fromVGF(data.data(), data.size());
+    ASSERT_EQ(workload.executableCount(), 1);
+    EXPECT_EQ(workload.executable(0).type(), ExecutableKind::Graph);
+    EXPECT_EQ(workload.executable(0).module().codeKind(), ModuleCodeKind::ExternalDataGraphBinary);
+    EXPECT_FALSE(workload.executable(0).module().requiresImplementation());
+    EXPECT_EQ(workload.placeholderModuleCount(), 0);
+}
+
 TEST(VgfWorkload, DecodesFileBackedImageSamplerAndHidesConstants) {
     const auto &code = assembleMaxpool16x16To8x8Spirv("maxpool_set0", {0, 0, 1, 1});
     const std::array<int32_t, 4> constantData = {1, 2, 3, 4};

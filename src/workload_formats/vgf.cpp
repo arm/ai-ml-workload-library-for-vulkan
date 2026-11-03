@@ -222,6 +222,8 @@ uint32_t addDecodedModule(WorkloadBuilder &builder, const vgflib::ModuleTableDec
     } else if (decoder.hasHLSLCode(moduleIndex)) {
         implementation.codeKind = ModuleCodeKind::Hlsl;
         implementation.source = std::string(decoder.getHLSLModuleCode(moduleIndex));
+    } else if (decoder.isExternalDataGraphBinary(moduleIndex)) {
+        implementation.codeKind = ModuleCodeKind::ExternalDataGraphBinary;
     }
     return builder.addModule(std::move(implementation), std::move(name), std::move(entryPoint));
 }

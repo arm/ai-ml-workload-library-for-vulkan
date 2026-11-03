@@ -818,7 +818,8 @@ void Session::bindModule(ExecutableView executable, ModuleImplementation impleme
     auto &sessionState = sessionImpl();
     sessionState.validateCompilationInputsMutable();
     const auto index = validatedExecutableIndex(executable);
-    if (implementation.codeKind == ModuleCodeKind::Missing) {
+    if (implementation.codeKind == ModuleCodeKind::ExternalDataGraphBinary ||
+        implementation.codeKind == ModuleCodeKind::Missing) {
         throw std::runtime_error("ModuleImplementation must provide executable module code");
     }
     if (sessionState.dataGraphBinaryInputs.count(index) != 0) {
@@ -826,6 +827,9 @@ void Session::bindModule(ExecutableView executable, ModuleImplementation impleme
     }
     const auto &workloadState = workloadImpl(sessionState.workload);
     const auto &module = workloadState.modules.at(workloadState.executables[index].moduleIndex);
+    if (module.codeKind == ModuleCodeKind::ExternalDataGraphBinary) {
+        throw std::runtime_error("External data-graph binary module requires Session::bindDataGraphBinary()");
+    }
     sessionState.executableModuleImplementations.insert_or_assign(
         index, detail::moduleFromImplementation(std::move(implementation), module.name, module.entryPoint));
 }
@@ -842,7 +846,8 @@ void Session::bindModule(PlaceholderModuleView placeholderModule, ModuleImplemen
     if (placeholder.codeKind != ModuleCodeKind::Missing) {
         throw std::runtime_error("PlaceholderModuleView does not reference a missing workload module");
     }
-    if (implementation.codeKind == ModuleCodeKind::Missing) {
+    if (implementation.codeKind == ModuleCodeKind::ExternalDataGraphBinary ||
+        implementation.codeKind == ModuleCodeKind::Missing) {
         throw std::runtime_error("ModuleImplementation must provide executable module code");
     }
     const auto &executables = workloadImpl(sessionState.workload).executables;

@@ -91,6 +91,8 @@ void compileModuleToSpirv(Module &module, ExecutableKind executableKind) {
         }
         module.code = hlslCompiler(module);
         return;
+    case ModuleCodeKind::ExternalDataGraphBinary:
+        throw std::runtime_error("External data-graph binary module requires Session::bindDataGraphBinary()");
     case ModuleCodeKind::Missing:
         throw std::runtime_error("Workload module requires an application-supplied implementation");
     }
