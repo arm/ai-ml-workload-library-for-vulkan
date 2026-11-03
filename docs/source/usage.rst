@@ -33,7 +33,9 @@ A workload is executed through the following sequence:
    A data-graph binary cannot target an executable that has an
    executable-specific module binding or uses a bound placeholder module.
    Unselected graph and compute executables continue to use their workload
-   modules. A VGF graph selected for binary execution may omit its shader module.
+   modules. A VGF graph marked ``ExternalDataGraphBinary`` needs a binary for
+   initial compilation; an unmarked VGF graph may also use one. A graph selected
+   for binary execution may omit its shader module.
 
 4. Create a ``BindingSet`` and bind each public resource using caller-owned or
    runtime-owned allocations.

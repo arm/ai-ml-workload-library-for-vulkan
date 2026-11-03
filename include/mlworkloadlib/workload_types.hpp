@@ -59,6 +59,7 @@ enum class ModuleCodeKind {
     Spirv,
     Glsl,
     Hlsl,
+    ExternalDataGraphBinary,
 };
 
 /*******************************************************************************
@@ -69,6 +70,7 @@ enum class ModuleCodeKind {
  * @brief Module code and compilation options used to construct or complete a workload.
  *
  * Either @ref spirv or @ref source is consumed according to @ref codeKind.
+ * ExternalDataGraphBinary has no module code; the Session supplies its binary.
  * Optional representations require the corresponding Feature to be available
  * when the Session is configured.
  */

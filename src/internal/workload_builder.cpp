@@ -113,6 +113,7 @@ Module moduleFromImplementation(ModuleImplementation implementation, std::string
             throw std::runtime_error("Workload module '" + name + "' source code must not be empty");
         }
         break;
+    case ModuleCodeKind::ExternalDataGraphBinary:
     case ModuleCodeKind::Missing:
         break;
     }

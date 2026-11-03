@@ -54,7 +54,8 @@
   caller-provided bytes, with both storage modes and an optional opaque
   pipeline selector.
 - Added experimental per-segment use of external data-graph binaries in VGF
-  workloads; other graph and compute executables keep their modules.
+  workloads, including an optional `ExternalDataGraphBinary` graph-module
+  marker; other graph and compute executables keep their modules.
 - Support session-selected tensor strides and per-binding offsets for alias peers
   sharing external memory, with range, alignment, and memory-requirement checks
   before binding.
