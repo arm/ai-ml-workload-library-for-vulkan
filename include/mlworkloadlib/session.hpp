@@ -100,6 +100,12 @@ class Session final {
     /** @brief Returns a copy of the pending or compiled specialization map, excluding shader defaults. */
     SpecializationInfo specializationInfo(ExecutableView executable) const;
 
+    /** @brief Replaces a compute executable's push-constant layout before shared pipeline compilation. */
+    void setPushConstantSize(ExecutableView executable, uint32_t size);
+
+    /** @brief Returns the pending or compiled largest push-constant range end, or zero for no ranges. */
+    uint32_t pushConstantSize(ExecutableView executable) const;
+
     /** @brief Supplies or replaces borrowed binary bytes for one graph executable before configure(). */
     void bindDataGraphBinary(ArrayView<const std::byte> binary,
                              DataGraphBinaryStorageMode storageMode = DataGraphBinaryStorageMode::ImplementationManaged,

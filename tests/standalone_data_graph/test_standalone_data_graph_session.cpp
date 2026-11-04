@@ -69,6 +69,15 @@ TEST(DataGraphPipelineCreateInfoTest, NeuralStatisticsPreserveShaderModuleCreate
  * Positive coverage
  *******************************************************************************/
 
+TEST_F(StandaloneDataGraphSessionExecutionTest, RejectsPushConstantSizeOverrides) {
+    auto workload = Workload::fromDataGraph(makeMaxpoolDescription());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    EXPECT_EQ(session.pushConstantSize(workload.executable(0)), 0u);
+    EXPECT_THROW(session.setPushConstantSize(workload.executable(0), 4), std::runtime_error);
+    EXPECT_THROW(session.setPushConstantSize(workload.executable(0), 0), std::runtime_error);
+}
+
 TEST_F(StandaloneDataGraphSessionExecutionTest, RunDataGraphWorkload) {
     const std::vector<int64_t> inputShape = {1, 16, 16, 16};
     const std::vector<int64_t> outputShape = {1, 8, 8, 16};

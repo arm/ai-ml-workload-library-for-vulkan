@@ -280,11 +280,10 @@ void validatePushConstantRanges(const Executable &executable) {
 }
 
 vk::raii::PipelineLayout createPipelineLayout(const std::vector<vk::raii::DescriptorSetLayout> &descriptorSetLayouts,
-                                              const Executable &executable, const ContextView &contextView) {
+                                              const std::vector<vk::PushConstantRange> &pushConstantRanges,
+                                              const ContextView &contextView) {
     const auto rawDescriptorSetLayouts = detail::rawDescriptorSetLayouts(descriptorSetLayouts);
-    validatePushConstantRanges(executable);
-    const vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, rawDescriptorSetLayouts,
-                                                                executable.pushConstantRanges);
+    const vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo({}, rawDescriptorSetLayouts, pushConstantRanges);
     return {contextView.device.get(), pipelineLayoutCreateInfo};
 }
 
@@ -513,10 +512,10 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
     compiledExecutable.specializationInfo = specializationForCompilation(executableIndex);
 
     // Pipeline layout
-    compiledExecutable.pushConstantRanges = executable.pushConstantRanges;
+    compiledExecutable.pushConstantRanges = pushConstantRangesForCompilation(executableIndex);
     compiledExecutable.descriptorSetLayouts = createDescriptorSetLayouts(executable.bindings, workload, contextView);
-    compiledExecutable.pipelineLayout =
-        createPipelineLayout(compiledExecutable.descriptorSetLayouts, executable, contextView);
+    compiledExecutable.pipelineLayout = createPipelineLayout(compiledExecutable.descriptorSetLayouts,
+                                                             compiledExecutable.pushConstantRanges, contextView);
     const auto &options = compiledExecutionState->options;
 
 #ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
@@ -682,6 +681,7 @@ void Session::Impl::compileOrReuseExecutables() {
     moduleImplementations.clear();
     executableModuleImplementations.clear();
     specializationOverrides.clear();
+    pushConstantSizeOverrides.clear();
     dataGraphBinaryInputs.clear();
 }
 
@@ -769,7 +769,7 @@ void Session::Impl::validateCompilationInputsMutable() const {
 void Session::Impl::validatePendingCompilationInputs() const {
     if (compiledExecutionState->compiledState.has_value() &&
         (!moduleImplementations.empty() || !executableModuleImplementations.empty() || !dataGraphBinaryInputs.empty() ||
-         !specializationOverrides.empty())) {
+         !specializationOverrides.empty() || !pushConstantSizeOverrides.empty())) {
         throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
     }
 }
@@ -780,6 +780,19 @@ const SpecializationInfo &Session::Impl::specializationForCompilation(uint32_t e
         return specialization->second;
     }
     return workloadImpl(workload).executables.at(executableIndex).specializationInfo;
+}
+
+std::vector<vk::PushConstantRange> Session::Impl::pushConstantRangesForCompilation(uint32_t executableIndex) const {
+    if (const auto sizeOverride = pushConstantSizeOverrides.find(executableIndex);
+        sizeOverride != pushConstantSizeOverrides.end()) {
+        if (sizeOverride->second == 0) {
+            return {};
+        }
+        return {{vk::ShaderStageFlagBits::eCompute, 0, sizeOverride->second}};
+    }
+    const auto &executable = workloadImpl(workload).executables.at(executableIndex);
+    validatePushConstantRanges(executable);
+    return executable.pushConstantRanges;
 }
 
 uint32_t Session::validatedExecutableIndex(ExecutableView executable) const {
@@ -812,6 +825,34 @@ SpecializationInfo Session::specializationInfo(ExecutableView executable) const 
         return compiled->executables.at(index).specializationInfo;
     }
     return sessionState.specializationForCompilation(index);
+}
+
+void Session::setPushConstantSize(ExecutableView executable, uint32_t size) {
+    auto &sessionState = sessionImpl();
+    sessionState.validateCompilationInputsMutable();
+    const auto index = validatedExecutableIndex(executable);
+    if (workloadImpl(sessionState.workload).executables.at(index).type != ExecutableKind::Compute) {
+        throw std::runtime_error("Push constant size overrides require a compute executable");
+    }
+    const auto limit = sessionState.contextView.physicalDevice.get().getProperties().limits.maxPushConstantsSize;
+    if (size % 4 != 0 || size > limit) {
+        throw std::runtime_error("Push constant size must be divisible by four and within the device limit");
+    }
+    sessionState.pushConstantSizeOverrides.insert_or_assign(index, size);
+}
+
+uint32_t Session::pushConstantSize(ExecutableView executable) const {
+    const auto &sessionState = sessionImpl();
+    const auto index = validatedExecutableIndex(executable);
+    sessionState.validatePendingCompilationInputs();
+    if (const auto &compiled = sessionState.compiledExecutionState->compiledState; compiled.has_value()) {
+        return compiled->executables.at(index).requiredPushConstantSize();
+    }
+    uint32_t size = 0;
+    for (const auto &range : sessionState.pushConstantRangesForCompilation(index)) {
+        size = std::max(size, range.offset + range.size);
+    }
+    return size;
 }
 
 void Session::bindModule(ExecutableView executable, ModuleImplementation implementation) {
