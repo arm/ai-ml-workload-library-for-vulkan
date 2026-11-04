@@ -35,6 +35,9 @@ apt-get install -y clang-format cppcheck
 Configuration files for clang-format, clang-tidy, and cmakelint are present in
 the root folder of the project.
 
+Tests use a focused check set in `tests/.clang-tidy`, inheriting the shared
+warning policy and check options.
+
 ## Python Coding Style
 
 [Black](https://github.com/psf/black) is the code style to use for Python code.
