@@ -279,6 +279,7 @@ install(FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/context.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/prepared_execution.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/session.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/vgf_import_info.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/workload.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/mlworkloadlib/workload_types.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/mlworkloadlib

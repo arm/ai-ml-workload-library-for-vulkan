@@ -28,6 +28,9 @@
 - Added compute executable push-constant layout overrides through
   `Session::setPushConstantSize()` and effective size inspection through
   `Session::pushConstantSize()`, including layouts absent from a VGF.
+- Added optional VGF external-interface mapping through `Workload::fromVGF()`
+  overloads and `VgfImportInfo`, resolving input and output binding IDs to
+  public workload resources, including unused interface entries.
 - Added executable-specific specialization overrides and effective inspection
   through `Session::setSpecializationInfo()` and `Session::specializationInfo()`.
 - Added `Session::bindModule(ExecutableView, ModuleImplementation)` to supply or
