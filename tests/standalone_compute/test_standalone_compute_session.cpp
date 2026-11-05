@@ -614,12 +614,14 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderRepeatedDifferentI
     }
 }
 
-TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderWorkloadWithExternalImageBinding) {
+TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderWorkloadWithRepeatedExternalImageBinding) {
     constexpr size_t elements = 10;
     constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
 
     auto description = makeAddInt32BuffersDescription();
     description.resources.push_back({"image", 0, 3, ResourceAccess::Read, makeSampledImageRequirements(false)});
+    description.resources.push_back(
+        {"repeated_image", 1, 4, ResourceAccess::Read, makeSampledImageRequirements(false)});
     auto workload = Workload::fromComputeShader(std::move(description));
     auto context = wrappedContext();
 
@@ -639,7 +641,7 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderWorkloadWithExtern
     Session session(context, workload);
     session.configure();
     auto bindings = session.createBindingSet();
-    ASSERT_EQ(workload.resourceCount(), 4);
+    ASSERT_EQ(workload.resourceCount(), 5);
     bindings.bindBuffer(workload.resource(0), BufferBindingInfo{*firstInputBuffer.buffer});
     bindings.bindBuffer(workload.resource(1), BufferBindingInfo{*secondInputBuffer.buffer});
     bindings.bindBuffer(workload.resource(2), BufferBindingInfo{*outputBuffer.buffer});
@@ -655,12 +657,18 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderWorkloadWithExtern
     imageBindingInfo.imageView = *imageInput.imageView;
     imageBindingInfo.sampler = *sampler;
     imageBindingInfo.subresourceRange = imageRequirements.requiredSubresourceRange();
+    imageBindingInfo.layout = vk::ImageLayout::eUndefined;
     bindings.bindImage(workload.resource(3), imageBindingInfo);
+    bindings.bindImage(workload.resource(4), imageBindingInfo);
 
     auto execution = session.prepare(bindings);
     execution.run();
 
     EXPECT_EQ(outputBuffer.read(elements), expected);
+
+    imageBindingInfo.layout = vk::ImageLayout::eGeneral;
+    bindings.bindImage(workload.resource(4), imageBindingInfo);
+    EXPECT_THROW(session.prepare(bindings), std::runtime_error);
 }
 
 TEST_F(StandaloneComputeSessionExecutionTest, RecordComputeShaderWorkload) {
