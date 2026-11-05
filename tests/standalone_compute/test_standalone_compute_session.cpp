@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "test_expected_results.hpp"
+#include "test_pipeline_creation.hpp"
 #include "test_standalone_compute_utils.hpp"
 #include "test_vulkan_fixture.hpp"
 #include "test_vulkan_resources.hpp"
@@ -885,4 +886,10 @@ TEST_F(StandaloneComputeSessionExecutionTest, RejectsImageSamplerPolicyViolation
 
     auto callerSamplerBinding = callerSamplerImage.binding();
     EXPECT_THROW(bindings.bindImage(workload.resource(4), callerSamplerBinding), std::runtime_error);
+}
+
+TEST_F(StandaloneComputeSessionExecutionTest, PipelineCreationResultsAndCacheForwarding) {
+    auto context = wrappedContext();
+    auto workload = Workload::fromComputeShader(makeAddInt32BuffersDescription());
+    verifyPipelineCreation(context, workload, device);
 }

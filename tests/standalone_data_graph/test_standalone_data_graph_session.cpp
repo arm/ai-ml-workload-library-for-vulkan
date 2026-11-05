@@ -4,6 +4,7 @@
  */
 #include "internal/utils.hpp"
 #include "test_expected_results.hpp"
+#include "test_pipeline_creation.hpp"
 #include "test_standalone_data_graph_utils.hpp"
 #include "test_vulkan_fixture.hpp"
 #include "test_vulkan_resources.hpp"
@@ -712,3 +713,9 @@ TEST(DataGraphBinary, RejectsConflictingCompilationInputs) {
     EXPECT_THROW(bindModule(binaryFirst), std::runtime_error);
 }
 #endif
+
+TEST_F(StandaloneDataGraphSessionExecutionTest, PipelineCreationResultsAndCacheForwarding) {
+    auto context = wrappedContext();
+    auto workload = Workload::fromDataGraph(makeMaxpoolDescription());
+    verifyPipelineCreation(context, workload, device);
+}
