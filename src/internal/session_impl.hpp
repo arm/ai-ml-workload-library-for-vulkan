@@ -101,6 +101,7 @@ struct Session::Impl {
 
     std::map<uint32_t, Module> moduleImplementations;
     std::map<uint32_t, Module> executableModuleImplementations;
+    std::map<uint32_t, ExecutableOptions> executableOptions;
     std::map<uint32_t, SpecializationInfo> specializationOverrides;
     std::map<uint32_t, uint32_t> pushConstantSizeOverrides;
     std::map<uint32_t, DataGraphBinaryInput> dataGraphBinaryInputs;

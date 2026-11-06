@@ -483,12 +483,26 @@ ownership of their Vulkan® objects to the library.
 Pipeline options
 ----------------
 
-``SessionOptions`` accepts a pipeline cache and optional compute-pipeline
-robustness and neural statistics settings. The application must enable the
-corresponding Vulkan® extensions and device features before requesting them.
-Neural statistics settings are applied during graph pipeline and graph session
-creation.
-The pipeline cache is not used for binary-backed pipeline creation.
+``SessionOptions::pipelineCache`` supplies the default application pipeline cache.
+Executables inherit this cache. Before shared pipeline compilation, call
+``Session::setExecutableOptions(executable, options)``
+with ``ExecutableOptions::pipelineCache`` to select a cache for one executable.
+Passing ``{}`` or ``{nullptr}`` explicitly disables its application cache instead
+of inheriting the session default. Each call replaces the previous options.
+The selected cache is forwarded for binary-backed pipeline creation, where
+Vulkan® ignores it.
+
+Cache pointers are borrowed: keep each referenced RAII cache object at a stable
+address and its Vulkan® cache valid until configuration finishes using it.
+Successful compilation fixes pipelines for every session sharing the
+``CompiledExecution``. Later setters are rejected, and a session with pending
+overrides cannot reuse pipelines compiled by another session. Failed pipeline
+compilation retains overrides for retry; a new session must supply its own.
+
+``SessionOptions`` also accepts optional compute-pipeline robustness and neural
+statistics settings. The application must enable the corresponding Vulkan®
+extensions and device features before requesting them. Neural statistics settings
+are applied during graph pipeline and graph session creation.
 
 Ownership and lifetimes
 -----------------------

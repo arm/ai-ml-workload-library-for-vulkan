@@ -334,7 +334,6 @@ TEST_F(StandaloneComputeSessionExecutionTest, SpecializationOverridesReplaceMaps
     const SpecializationInfo original{{vk::SpecializationMapEntry(0, 0, 4)}, bytesOf(int32_t{11})};
     description.specializationInfo = original;
     auto workload = Workload::fromComputeShader(std::move(description));
-    auto foreign = Workload::fromComputeShader(makeAddInt32BuffersDescription());
     auto context = wrappedContext();
     Session session(context, workload);
     const auto step = workload.executable(0);
@@ -348,8 +347,6 @@ TEST_F(StandaloneComputeSessionExecutionTest, SpecializationOverridesReplaceMaps
     EXPECT_EQ(session.specializationInfo(step).data, replacement.data);
     EXPECT_EQ(step.specializationInfo().data, original.data);
     EXPECT_EQ(step.specializationInfo().mapEntries, original.mapEntries);
-    EXPECT_THROW(session.setSpecializationInfo(foreign.executable(0), {}), std::runtime_error);
-    EXPECT_THROW(session.specializationInfo(foreign.executable(0)), std::runtime_error);
     const std::vector<SpecializationInfo> invalid = {
         {{}, bytesOf(int32_t{1})},
         {{vk::SpecializationMapEntry(0, 0, 4)}, {}},
@@ -369,13 +366,10 @@ TEST_F(StandaloneComputeSessionExecutionTest, SpecializationOverridesReplaceMaps
 
 TEST_F(StandaloneComputeSessionExecutionTest, PushConstantSizeOverridesReplaceLayoutAndPreserveOriginal) {
     auto workload = Workload::fromComputeShader(makePushConstantOutputDescription());
-    auto foreign = Workload::fromComputeShader(makePushConstantOutputDescription());
     auto context = wrappedContext();
     Session session(context, workload);
     const auto step = workload.executable(0);
     EXPECT_EQ(session.pushConstantSize(step), 4u);
-    EXPECT_THROW(session.setPushConstantSize(foreign.executable(0), 4), std::runtime_error);
-    EXPECT_THROW(session.pushConstantSize(foreign.executable(0)), std::runtime_error);
 
     const auto limit = physicalDevice.getProperties().limits.maxPushConstantsSize;
     session.setPushConstantSize(step, limit);
@@ -403,6 +397,20 @@ TEST_F(StandaloneComputeSessionExecutionTest, PushConstantSizeOverridesReplaceLa
     bindings.bindPushConstants(step, {payloadBytes.data(), payloadBytes.size()});
     session.prepare(bindings).run();
     EXPECT_EQ(output.read(1), std::vector<int32_t>{23});
+}
+
+TEST_F(StandaloneComputeSessionExecutionTest, RejectsForeignExecutableViews) {
+    auto workload = Workload::fromComputeShader(makePushConstantOutputDescription());
+    auto foreign = Workload::fromComputeShader(makePushConstantOutputDescription());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    const auto executable = foreign.executable(0);
+
+    EXPECT_THROW(session.setExecutableOptions(executable, {}), std::runtime_error);
+    EXPECT_THROW(session.setSpecializationInfo(executable, {}), std::runtime_error);
+    EXPECT_THROW(session.specializationInfo(executable), std::runtime_error);
+    EXPECT_THROW(session.setPushConstantSize(executable, 4), std::runtime_error);
+    EXPECT_THROW(session.pushConstantSize(executable), std::runtime_error);
 }
 
 TEST_F(StandaloneComputeSessionExecutionTest, CopiesPushConstantsOnBindAndInspection) {

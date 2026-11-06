@@ -386,8 +386,8 @@ vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const S
 #ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
 vk::raii::Pipeline createDataGraphBinaryPipeline(const Executable &executable,
                                                  const vk::raii::PipelineLayout &pipelineLayout,
-                                                 const ContextView &contextView, const DataGraphBinaryInput &input,
-                                                 bool enableNeuralStatistics) {
+                                                 const ContextView &contextView, const vk::PipelineCache &pipelineCache,
+                                                 const DataGraphBinaryInput &input, bool enableNeuralStatistics) {
     const auto properties =
         contextView.physicalDevice.get()
             .getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceDataGraphBinariesPropertiesARM>();
@@ -420,7 +420,7 @@ vk::raii::Pipeline createDataGraphBinaryPipeline(const Executable &executable,
 
     const vk::DataGraphPipelineCreateInfoARM pipelineCreateInfo(executable.dataGraphPipelineFlags, *pipelineLayout, 0,
                                                                 nullptr, &binaryInfo);
-    return createDataGraphPipeline(contextView, {}, pipelineCreateInfo);
+    return createDataGraphPipeline(contextView, pipelineCache, pipelineCreateInfo);
 }
 #endif
 
@@ -541,6 +541,10 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
     compiledExecutable.pipelineLayout = createPipelineLayout(compiledExecutable.descriptorSetLayouts,
                                                              compiledExecutable.pushConstantRanges, contextView);
     const auto &options = compiledExecutionState->options;
+    const auto executableIt = executableOptions.find(executableIndex);
+    const auto *cache =
+        executableIt != executableOptions.end() ? executableIt->second.pipelineCache : options.pipelineCache;
+    const vk::PipelineCache pipelineCache = cache ? **cache : vk::PipelineCache{};
 
 #ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
     if (const auto binaryInput = dataGraphBinaryInputs.find(executableIndex);
@@ -550,7 +554,7 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
             throw std::runtime_error("Tensor stride overrides are not supported by data graph binaries");
         }
         compiledExecutable.pipeline =
-            createDataGraphBinaryPipeline(executable, compiledExecutable.pipelineLayout, contextView,
+            createDataGraphBinaryPipeline(executable, compiledExecutable.pipelineLayout, contextView, pipelineCache,
                                           binaryInput->second, options.neuralStatistics.has_value());
         return;
     }
@@ -561,7 +565,6 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
     detail::compileModuleToSpirv(compiledModule, executable.type);
     compiledExecutable.shaderModule = createShaderModule(compiledModule, contextView);
 
-    const vk::PipelineCache pipelineCache = options.pipelineCache ? **options.pipelineCache : vk::PipelineCache{};
     if (executable.type == ExecutableKind::Compute) {
         compiledExecutable.pipeline = createComputePipeline(
             executable, compiledExecutable.specializationInfo, compiledModule, compiledExecutable.shaderModule,
@@ -707,6 +710,7 @@ void Session::Impl::compileOrReuseExecutables() {
     executableModuleImplementations.clear();
     specializationOverrides.clear();
     pushConstantSizeOverrides.clear();
+    executableOptions.clear();
     dataGraphBinaryInputs.clear();
 }
 
@@ -794,7 +798,7 @@ void Session::Impl::validateCompilationInputsMutable() const {
 void Session::Impl::validatePendingCompilationInputs() const {
     if (compiledExecutionState->compiledState.has_value() &&
         (!moduleImplementations.empty() || !executableModuleImplementations.empty() || !dataGraphBinaryInputs.empty() ||
-         !specializationOverrides.empty() || !pushConstantSizeOverrides.empty())) {
+         !specializationOverrides.empty() || !pushConstantSizeOverrides.empty() || !executableOptions.empty())) {
         throw std::runtime_error("Compilation inputs cannot be rebound after compiled execution is configured");
     }
 }
@@ -829,6 +833,13 @@ uint32_t Session::validatedExecutableIndex(ExecutableView executable) const {
         throw std::runtime_error("ExecutableView index is invalid");
     }
     return executable.index_;
+}
+
+void Session::setExecutableOptions(ExecutableView executable, ExecutableOptions options) {
+    auto &sessionState = sessionImpl();
+    sessionState.validateCompilationInputsMutable();
+    const auto index = validatedExecutableIndex(executable);
+    sessionState.executableOptions.insert_or_assign(index, options);
 }
 
 void Session::setSpecializationInfo(ExecutableView executable, SpecializationInfo specialization) {

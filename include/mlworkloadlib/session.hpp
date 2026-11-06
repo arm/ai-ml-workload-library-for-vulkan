@@ -42,6 +42,12 @@ struct DataGraphPipelinePropertyData {
     std::vector<uint8_t> data;
 };
 
+/** @brief Per-executable pipeline creation options. */
+struct ExecutableOptions {
+    /** @brief Borrowed cache; nullptr explicitly disables the application cache. */
+    const vk::raii::PipelineCache *pipelineCache = nullptr;
+};
+
 /*******************************************************************************
  * Data graph binary storage
  *******************************************************************************/
@@ -93,6 +99,15 @@ class Session final {
 
     /** @brief Supplies or replaces code for a placeholder module before configure(). */
     void bindModule(PlaceholderModuleView placeholderModule, ModuleImplementation implementation);
+
+    /**
+     * @brief Replaces one executable's options before shared pipeline compilation.
+     *
+     * Without an override, SessionOptions::pipelineCache applies. A null override disables the application cache.
+     * The cache object must remain at a stable address and its Vulkan cache must remain valid
+     * until configuration finishes using it.
+     */
+    void setExecutableOptions(ExecutableView executable, ExecutableOptions options);
 
     /** @brief Replaces one executable's specialization map before pipeline compilation. */
     void setSpecializationInfo(ExecutableView executable, SpecializationInfo specialization);
