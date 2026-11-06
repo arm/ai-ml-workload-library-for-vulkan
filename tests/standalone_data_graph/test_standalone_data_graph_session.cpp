@@ -603,6 +603,35 @@ constexpr std::array<std::byte, 17> binaryWithValidHeader = {
     std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0xaa}};
 constexpr ArrayView<const std::byte> validBinary(binaryWithValidHeader.data(), binaryWithValidHeader.size());
 
+TEST_F(StandaloneDataGraphSessionExecutionTest, BinaryPipelinePolicyAndFeedback) {
+    auto context = wrappedContext();
+    auto workload = Workload::fromDataGraph(makeMaxpoolDescription());
+    // Supply alignment for the dummy binary and restore the property query on every exit.
+    ScopedDispatcherHook<PFN_vkGetPhysicalDeviceProperties2> properties(
+        physicalDevice, &vk::raii::detail::InstanceDispatcher::vkGetPhysicalDeviceProperties2,
+        +[](VkPhysicalDevice, VkPhysicalDeviceProperties2 *info) {
+            auto *binary = static_cast<VkPhysicalDeviceDataGraphBinariesPropertiesARM *>(info->pNext);
+            binary->dataGraphPipelineBinaryDataAlignment = 1;
+        });
+    for (bool policy : {false, true}) {
+        PipelineCreationHook hook(device);
+        hook.skipDriverCall = true;
+        hook.result = VK_PIPELINE_COMPILE_REQUIRED;
+        SessionOptions options;
+        options.failOnCompileRequired = policy;
+        options.collectPipelineCreationFeedback = true;
+        Session session(context, workload, options);
+        session.bindDataGraphBinary(validBinary);
+        EXPECT_THROW(session.configure(), vk::SystemError);
+        ASSERT_EQ(hook.calls.size(), 1u);
+        const auto &call = hook.calls[0];
+        EXPECT_EQ(call.failOnCompileRequired, policy);
+        EXPECT_TRUE(call.hasBinary);
+        EXPECT_TRUE(call.hasFeedback);
+        EXPECT_EQ(call.stageFeedbackCount, 0u);
+    }
+}
+
 TEST(DataGraphBinary, RejectsComputeWorkload) {
     const NullVulkanContext vulkan;
     auto context = vulkan.wrap();
@@ -713,9 +742,3 @@ TEST(DataGraphBinary, RejectsConflictingCompilationInputs) {
     EXPECT_THROW(bindModule(binaryFirst), std::runtime_error);
 }
 #endif
-
-TEST_F(StandaloneDataGraphSessionExecutionTest, PipelineCreationResultsAndCacheForwarding) {
-    auto context = wrappedContext();
-    auto workload = Workload::fromDataGraph(makeMaxpoolDescription());
-    verifyPipelineCreation(context, workload, device);
-}

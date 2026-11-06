@@ -81,7 +81,8 @@ class RuntimeDeviceConfiguration {
   public:
     RuntimeDeviceConfiguration(const std::vector<vk::ExtensionProperties> &availableExtensions,
                                std::vector<const char *> deviceExtensions,
-                               const RuntimeContextDeviceRequirements &requirements);
+                               const RuntimeContextDeviceRequirements &requirements,
+                               bool pipelineCreationCacheControl = false);
     RuntimeDeviceConfiguration(const RuntimeDeviceConfiguration &) = delete;
     RuntimeDeviceConfiguration &operator=(const RuntimeDeviceConfiguration &) = delete;
     RuntimeDeviceConfiguration(RuntimeDeviceConfiguration &&) = delete;

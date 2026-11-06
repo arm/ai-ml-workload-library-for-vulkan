@@ -198,8 +198,8 @@ class TensorMemoryCalls {
         return active_->bind_.original()(device, count, infos);
     }
 
-    ScopedDeviceDispatcherHook<PFN_vkGetTensorMemoryRequirementsARM> get_;
-    ScopedDeviceDispatcherHook<PFN_vkBindTensorMemoryARM> bind_;
+    ScopedDispatcherHook<PFN_vkGetTensorMemoryRequirementsARM> get_;
+    ScopedDispatcherHook<PFN_vkBindTensorMemoryARM> bind_;
     const TensorMemoryCalls *previous_ = active_;
     inline static thread_local const TensorMemoryCalls *active_ = nullptr;
 };
@@ -228,8 +228,8 @@ class AliasRecordingCalls {
     }
     static void VKAPI_CALL barrier(VkCommandBuffer, const VkDependencyInfo *info) { active_->pipelineBarrier(*info); }
 
-    ScopedDeviceDispatcherHook<PFN_vkCmdDispatchDataGraphARM> dispatch_;
-    ScopedDeviceDispatcherHook<PFN_vkCmdPipelineBarrier2> barrier_;
+    ScopedDispatcherHook<PFN_vkCmdDispatchDataGraphARM> dispatch_;
+    ScopedDispatcherHook<PFN_vkCmdPipelineBarrier2> barrier_;
     AliasRecordingCalls *previous_ = active_;
     inline static thread_local AliasRecordingCalls *active_ = nullptr;
 };

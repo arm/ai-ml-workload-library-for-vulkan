@@ -378,11 +378,13 @@ vk::QueueFlags requiredWorkloadQueueFlags(const RuntimeContextDeviceRequirements
 
 RuntimeDeviceConfiguration::RuntimeDeviceConfiguration(const std::vector<vk::ExtensionProperties> &availableExtensions,
                                                        std::vector<const char *> deviceExtensions,
-                                                       const RuntimeContextDeviceRequirements &requirements)
+                                                       const RuntimeContextDeviceRequirements &requirements,
+                                                       bool pipelineCreationCacheControl)
     : deviceExtensions_(std::move(deviceExtensions)), featureChain_(&vulkan13Features_) {
     const auto capabilities = requirements.capabilities;
     vulkan12Features_.pNext = requirements.deviceFeaturePNext;
 
+    vulkan13Features_.pipelineCreationCacheControl = pipelineCreationCacheControl;
     vulkan13Features_.synchronization2 = true;
     vulkan13Features_.pNext = &vulkan12Features_;
 
@@ -394,7 +396,6 @@ RuntimeDeviceConfiguration::RuntimeDeviceConfiguration(const std::vector<vk::Ext
         vulkan12Features_.shaderInt8 = true;
         vulkan12Features_.shaderFloat16 = true;
         vulkan12Features_.vulkanMemoryModel = true;
-        vulkan13Features_.pipelineCreationCacheControl = true;
     }
 
     if (hasCapabilities(capabilities, RuntimeDeviceCapability::DataGraph)) {

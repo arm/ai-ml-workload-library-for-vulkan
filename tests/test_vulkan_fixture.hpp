@@ -16,21 +16,21 @@
 
 namespace mlsdk::workloadlib::test {
 
-template <typename Function> class ScopedDeviceDispatcherHook {
+template <typename Function> class ScopedDispatcherHook {
   public:
-    ScopedDeviceDispatcherHook(vk::raii::Device &device, Function vk::raii::detail::DeviceDispatcher::*entry,
-                               Function replacement)
-        // Vulkan-Hpp exposes only a const dispatcher, even for a mutable device.
+    template <typename Owner, typename Dispatcher>
+    ScopedDispatcherHook(Owner &owner, Function Dispatcher::*entry, Function replacement)
+        // Vulkan-Hpp exposes only a const dispatcher, even for a mutable owner.
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-        : entry_(const_cast<vk::raii::detail::DeviceDispatcher &>(*device.getDispatcher()).*entry),
+        : entry_(const_cast<Dispatcher &>(*owner.getDispatcher()).*entry),
           original_(std::exchange(entry_, replacement)) {}
 
-    ~ScopedDeviceDispatcherHook() { entry_ = original_; }
+    ~ScopedDispatcherHook() { entry_ = original_; }
 
-    ScopedDeviceDispatcherHook(const ScopedDeviceDispatcherHook &) = delete;
-    ScopedDeviceDispatcherHook &operator=(const ScopedDeviceDispatcherHook &) = delete;
-    ScopedDeviceDispatcherHook(ScopedDeviceDispatcherHook &&) = delete;
-    ScopedDeviceDispatcherHook &operator=(ScopedDeviceDispatcherHook &&) = delete;
+    ScopedDispatcherHook(const ScopedDispatcherHook &) = delete;
+    ScopedDispatcherHook &operator=(const ScopedDispatcherHook &) = delete;
+    ScopedDispatcherHook(ScopedDispatcherHook &&) = delete;
+    ScopedDispatcherHook &operator=(ScopedDispatcherHook &&) = delete;
 
     Function original() const { return original_; }
 
