@@ -1,0 +1,29 @@
+@startuml
+<style>
+root {
+  FontName SansSerif
+  Shadowing 0
+}
+element {
+  Shadowing 0
+}
+</style>
+hide footbox
+participant Application as app
+participant "Workload factories" as factory
+participant "Internal builder" as builder
+alt VGF file or bytes
+  app -> factory : Workload::fromVGF(...)
+  factory -> factory : Decode VGF tables
+  factory -> builder : Resources, modules, constants,\nordered executables and bindings
+else Standalone description
+  app -> factory : Workload::fromComputeShader(...)\nor Workload::fromDataGraph(...)
+  factory -> builder : Module and resource metadata;\none executable and its bindings
+end
+builder -> builder : Finalize indices:\npublic resources,\nplaceholder modules
+builder --> factory : Common workload representation
+factory --> app : Workload
+note over app, factory
+  Configure a Session using the same runtime model.
+end note
+@enduml

@@ -1,0 +1,30 @@
+@startuml
+<style>
+root {
+  FontName SansSerif
+  Shadowing 0
+}
+element {
+  Shadowing 0
+}
+</style>
+rectangle "Application" as app
+rectangle "PreparedExecution" as prepared
+rectangle "Public Vulkan® resource\nRequirement: 1024 bytes" as public
+rectangle "Internal alias peer\nRequirement: 512 bytes" as peer
+rectangle "Caller-owned VkDeviceMemory\nAllocation size >= 1280 bytes" as allocation {
+  rectangle "Finite region: base B = 256; size R = 1024\nAllocation interval [256, 1280)" as region
+}
+app --> public : owns
+app --> allocation : owns
+prepared --> peer : owns
+public ..> allocation : bound at B = 256
+peer ..> allocation : bound at B + P = 512\nPeer offset P = 256
+app -[hidden]right-> prepared
+public -[hidden]right-> peer
+legend bottom
+  Solid arrow: owns object or allocation
+  Dotted arrow: uses backing; ownership stays separate
+  Example alignment for both resources: 256 bytes
+endlegend
+@enduml
