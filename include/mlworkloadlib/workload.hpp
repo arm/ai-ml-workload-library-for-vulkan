@@ -22,6 +22,7 @@ class BindingSet;
 class PreparedExecution;
 class Session;
 class Workload;
+struct VgfImportInfo;
 
 /** @cond */
 namespace detail {
@@ -526,6 +527,9 @@ class Workload final {
     /** @brief Loads a VGF-backed Workload from a file. */
     static Workload fromVGF(const std::filesystem::path &path);
 
+    /** @brief Loads a VGF workload and reports its external-interface resource mapping. */
+    static Workload fromVGF(const std::filesystem::path &path, VgfImportInfo &importInfo);
+
     /**
      * @brief Decodes a VGF-backed Workload from caller-owned memory.
      *
@@ -534,7 +538,20 @@ class Workload final {
      */
     static Workload fromVGF(const void *data, std::size_t size);
 
-    /** @brief Builds a Workload containing one standalone compute executable. */
+    /**
+     * @brief Decodes a VGF workload and reports its external-interface resource mapping.
+     *
+     * Source memory has the same lifetime requirements as the overload without importInfo.
+     * Include mlworkloadlib/vgf_import_info.hpp to construct the output metadata.
+     */
+    static Workload fromVGF(const void *data, std::size_t size, VgfImportInfo &importInfo);
+
+    /**
+     * @brief Builds a Workload containing one standalone compute executable.
+     *
+     * Public resource indices follow description.resources order, with one
+     * distinct resource per entry. Entries are not deduplicated.
+     */
     static Workload fromComputeShader(ComputeShaderDescription description);
 
     /**

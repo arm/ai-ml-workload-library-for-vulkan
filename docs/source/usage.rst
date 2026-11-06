@@ -219,6 +219,43 @@ Resource binding
 The workload exposes its public resources in order through
 ``Workload::resources()`` or by index through ``Workload::resource(...)``.
 
+For standalone compute workloads, public resource indices match the order of
+``ComputeShaderDescription::resources``, with one distinct resource per entry.
+Entries are not deduplicated, including when compatible entries are later bound
+to the same external Vulkan® object. Descriptor set and binding numbers do not
+determine public resource order.
+
+Applications can map VGF model-interface binding IDs directly to public
+workload resources, without inspecting the model resource table:
+
+.. code-block:: cpp
+
+    #include <mlworkloadlib/vgf_import_info.hpp>
+
+    VgfImportInfo info;
+    auto workload = Workload::fromVGF(path, info);
+    for (const auto &input : info.inputs) {
+        auto resource = workload.resource(input.publicResourceIndex);
+        // Bind the application's input identified by input.binding.
+    }
+    // Resolve outputs through info.outputs in the same way.
+
+Inputs and outputs retain model-interface order, including unused entries.
+Their binding IDs are independent of segment descriptor locations. Names need
+not be unique, and multiple entries can refer to one public resource. Separate
+input and output lists preserve direction even when their IDs overlap.
+Callers choose how to handle ambiguous IDs and conflicting bindings.
+
+Internal resources and constants are not exposed. Public resources absent from
+the declared model interface have no mapping; applications must diagnose any
+missing bindings rather than infer interface IDs from resource indices.
+The mapping is scoped to this import; discard it if import fails. Existing
+overloads omit the metadata, and standalone workloads are unaffected.
+
+WL creates intermediate resources during preparation. When they alias external
+memory, the caller still supplies allocation and placement metadata required by
+the alias APIs; interface mapping does not replace that contract.
+
 Choose public tensor or image tiling with ``Session::setTensorTiling()`` or
 ``Session::setImageTiling()`` before ``configure()``. Tensors normally default to
 Linear and images to Optimal; alias groups select a compatible common tiling.
