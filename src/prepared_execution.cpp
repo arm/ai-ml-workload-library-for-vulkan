@@ -935,7 +935,7 @@ PreparedExecution::Impl::SynchronizationState PreparedExecution::Impl::buildSync
     for (const auto &boundImage : boundImages) {
         const auto resourceIndex = boundImage.descBinding.resourceIndex;
         auto &info = state.resources.at(resourceIndex);
-        const auto slotIndex = info.synchronizationSlotIndex;
+        auto slotIndex = info.synchronizationSlotIndex;
         const auto descriptorLayout = requiredImageLayout(sessionImpl.workload, boundImage.descBinding);
         const auto sameImageState = [&boundImage](const SynchronizationState::Image &imageState) {
             return imageState.image == boundImage.image && imageState.subresourceRange == boundImage.subresourceRange;
@@ -947,9 +947,16 @@ PreparedExecution::Impl::SynchronizationState PreparedExecution::Impl::buildSync
             state.images.push_back({boundImage.image, boundImage.subresourceRange, boundImage.layout,
                                     boundImage.layout.value_or(descriptorLayout), descriptorLayout, slotIndex});
         } else {
-            if (existing->descriptorLayout != descriptorLayout || existing->synchronizationSlotIndex != slotIndex) {
+            const auto existingSlotIndex = existing->synchronizationSlotIndex;
+            if (existing->descriptorLayout != descriptorLayout ||
+                (existingSlotIndex != slotIndex &&
+                 (state.slots[existingSlotIndex].isAliasGroup || state.slots[slotIndex].isAliasGroup))) {
                 throw std::runtime_error("The same bound image requires incompatible layout or alias group state");
             }
+            // Distinct public resources may bind the same external image. Track
+            // their accesses together without requiring a declared memory alias.
+            slotIndex = existingSlotIndex;
+            info.synchronizationSlotIndex = slotIndex;
             imageStateIndex = static_cast<uint32_t>(std::distance(state.images.begin(), existing));
             if (!existing->initialLayout.has_value()) {
                 existing->initialLayout = boundImage.layout;

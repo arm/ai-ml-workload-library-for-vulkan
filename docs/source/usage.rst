@@ -359,6 +359,12 @@ type is supported by every alias.
 Image layouts and synchronization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Distinct public resources may bind the same external image and subresource range
+when their required and supplied entry layouts are compatible. Their accesses
+share synchronization state; no memory alias group is needed for repeated
+bindings of the same image. Conflicting required layouts, supplied entry layouts
+or alias-group assignments are rejected.
+
 An optional image layout declares the entry layout. Prepared execution manages
 transitions required by executable accesses and internal alias peers. Optimal
 tensor aliases may transition even an image used only as external backing.
