@@ -293,10 +293,44 @@ vk::raii::ShaderModule createShaderModule(const Module &compiledModule, const Co
     return {contextView.device.get(), shaderCreateInfo};
 }
 
+void checkPipelineCreation(const vk::raii::Pipeline &pipeline, vk::Result result) {
+    if (result == vk::Result::ePipelineCompileRequired) {
+        throw vk::SystemError(vk::make_error_code(result), "Pipeline creation requires compilation");
+    }
+    vk::detail::resultCheck(result, "Pipeline creation failed");
+    if (!*pipeline) {
+        throw std::runtime_error("Pipeline creation returned a null pipeline");
+    }
+}
+
+vk::raii::Pipeline createComputePipeline(const ContextView &contextView, const vk::PipelineCache &pipelineCache,
+                                         const vk::ComputePipelineCreateInfo &pipelineCreateInfo) {
+    const auto &device = contextView.device.get();
+    VkPipeline handle = VK_NULL_HANDLE;
+    const auto result = static_cast<vk::Result>(device.getDispatcher()->vkCreateComputePipelines(
+        static_cast<VkDevice>(*device), static_cast<VkPipelineCache>(pipelineCache), 1,
+        reinterpret_cast<const VkComputePipelineCreateInfo *>(&pipelineCreateInfo), nullptr, &handle));
+    vk::raii::Pipeline pipeline(device, handle);
+    checkPipelineCreation(pipeline, result);
+    return pipeline;
+}
+
+vk::raii::Pipeline createDataGraphPipeline(const ContextView &contextView, const vk::PipelineCache &cache,
+                                           const vk::DataGraphPipelineCreateInfoARM &createInfo) {
+    const auto &device = contextView.device.get();
+    VkPipeline handle = VK_NULL_HANDLE;
+    const auto result = static_cast<vk::Result>(device.getDispatcher()->vkCreateDataGraphPipelinesARM(
+        static_cast<VkDevice>(*device), VK_NULL_HANDLE, static_cast<VkPipelineCache>(cache), 1,
+        reinterpret_cast<const VkDataGraphPipelineCreateInfoARM *>(&createInfo), nullptr, &handle));
+    vk::raii::Pipeline pipeline(device, handle);
+    checkPipelineCreation(pipeline, result);
+    return pipeline;
+}
+
 vk::raii::Pipeline createComputePipeline(const Executable &executable, const SpecializationInfo &specialization,
                                          const Module &compiledModule, const vk::raii::ShaderModule &shaderModule,
                                          const vk::raii::PipelineLayout &pipelineLayout, const ContextView &contextView,
-                                         const vk::raii::PipelineCache *pipelineCache,
+                                         const vk::PipelineCache &pipelineCache,
                                          const std::optional<PipelineRobustnessOptions> &pipelineRobustness) {
     const auto &dispatchShape = executable.dispatchShape;
     if (dispatchShape[0] == 0 || dispatchShape[1] == 0 || dispatchShape[2] == 0) {
@@ -316,13 +350,13 @@ vk::raii::Pipeline createComputePipeline(const Executable &executable, const Spe
         pipelineRobustnessInfo.images = pipelineRobustness->images;
         detail::insertPNextAfter(pipelineCreateInfo, pipelineRobustnessInfo);
     }
-    return {contextView.device.get(), pipelineCache, pipelineCreateInfo};
+    return createComputePipeline(contextView, pipelineCache, pipelineCreateInfo);
 }
 
 vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const SpecializationInfo &specialization,
                                            const Module &compiledModule, const vk::raii::ShaderModule &shaderModule,
                                            const vk::raii::PipelineLayout &pipelineLayout, const Workload &workload,
-                                           const ContextView &contextView, const vk::raii::PipelineCache *pipelineCache,
+                                           const ContextView &contextView, const vk::PipelineCache &pipelineCache,
                                            bool enableNeuralStatistics,
                                            const std::vector<detail::ResourceTiling> &resourceTilings,
                                            const std::map<uint32_t, std::vector<int64_t>> &tensorStrideOverrides) {
@@ -346,8 +380,7 @@ vk::raii::Pipeline createDataGraphPipeline(const Executable &executable, const S
     if (enableNeuralStatistics) {
         detail::insertPNextAfter(shaderModuleInfo, neuralStatisticsInfo);
     }
-    const vk::raii::DeferredOperationKHR deferredOperation(nullptr);
-    return {contextView.device.get(), deferredOperation, pipelineCache, pipelineCreateInfo};
+    return createDataGraphPipeline(contextView, pipelineCache, pipelineCreateInfo);
 }
 
 #ifdef VK_ARM_DATA_GRAPH_BINARIES_EXTENSION_NAME
@@ -387,16 +420,7 @@ vk::raii::Pipeline createDataGraphBinaryPipeline(const Executable &executable,
 
     const vk::DataGraphPipelineCreateInfoARM pipelineCreateInfo(executable.dataGraphPipelineFlags, *pipelineLayout, 0,
                                                                 nullptr, &binaryInfo);
-    const vk::raii::DeferredOperationKHR deferredOperation(nullptr);
-    vk::raii::Pipeline pipeline(contextView.device.get(), deferredOperation, nullptr, pipelineCreateInfo);
-    const auto creationResult = pipeline.getConstructorSuccessCode();
-    if (creationResult != vk::Result::eSuccess) {
-        throw std::runtime_error("Data graph binary pipeline creation returned " + vk::to_string(creationResult));
-    }
-    if (!*pipeline) {
-        throw std::runtime_error("Data graph binary pipeline creation returned a null pipeline");
-    }
-    return pipeline;
+    return createDataGraphPipeline(contextView, {}, pipelineCreateInfo);
 }
 #endif
 
@@ -537,14 +561,15 @@ void Session::Impl::createPipeline(detail::CompiledExecutable &compiledExecutabl
     detail::compileModuleToSpirv(compiledModule, executable.type);
     compiledExecutable.shaderModule = createShaderModule(compiledModule, contextView);
 
+    const vk::PipelineCache pipelineCache = options.pipelineCache ? **options.pipelineCache : vk::PipelineCache{};
     if (executable.type == ExecutableKind::Compute) {
         compiledExecutable.pipeline = createComputePipeline(
             executable, compiledExecutable.specializationInfo, compiledModule, compiledExecutable.shaderModule,
-            compiledExecutable.pipelineLayout, contextView, options.pipelineCache, options.pipelineRobustness);
+            compiledExecutable.pipelineLayout, contextView, pipelineCache, options.pipelineRobustness);
     } else {
         compiledExecutable.pipeline = createDataGraphPipeline(
             executable, compiledExecutable.specializationInfo, compiledModule, compiledExecutable.shaderModule,
-            compiledExecutable.pipelineLayout, workload, contextView, options.pipelineCache,
+            compiledExecutable.pipelineLayout, workload, contextView, pipelineCache,
             options.neuralStatistics.has_value(), resourceTilings, tensorStrideOverrides);
     }
 }
