@@ -3,27 +3,13 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-# Both the native project and docs/CMakeLists.txt use this implementation.
 get_filename_component(ML_WORKLOAD_LIB_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 set(ML_WORKLOAD_LIB_DOCS_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 set(ML_WORKLOAD_LIB_DOCS_DIR "${ML_WORKLOAD_LIB_DOCS_BINARY_DIR}/docs")
 list(APPEND CMAKE_MODULE_PATH "${ML_WORKLOAD_LIB_REPO_ROOT}/cmake")
 
-if(ML_WORKLOAD_LIB_DOCS_STANDALONE)
-    find_package(Doxygen 1.9.1 REQUIRED)
-    find_package(Sphinx REQUIRED)
-else()
-    find_package(Doxygen)
-    find_package(Sphinx)
-    if(NOT DOXYGEN_FOUND OR NOT SPHINX_FOUND)
-        message(STATUS "Doxygen or Sphinx is not available. Cannot generate documentation.")
-        return()
-    endif()
-    if(CMAKE_CROSSCOMPILING)
-        message(WARNING "Cannot build the documentation when cross-compiling. Skipping.")
-        return()
-    endif()
-endif()
+find_package(Doxygen 1.9.1 REQUIRED)
+find_package(Sphinx REQUIRED)
 
 set(SPHINX_SRC_DIR_IN "${ML_WORKLOAD_LIB_REPO_ROOT}/docs/source")
 set(SPHINX_SRC_DIR "${ML_WORKLOAD_LIB_DOCS_DIR}/in")
@@ -46,8 +32,9 @@ foreach(SRC_IN IN LISTS DOC_SRC_FILES)
     list(APPEND DOC_STAGED_FILES "${DOC_SOURCE_FILE}")
 endforeach()
 
-file(GLOB_RECURSE DOC_CODE_FILES_INCLUDE CONFIGURE_DEPENDS LIST_DIRECTORIES false
-    RELATIVE "${ML_WORKLOAD_LIB_REPO_ROOT}" "${ML_WORKLOAD_LIB_REPO_ROOT}/include/*")
+file(GLOB DOC_CODE_FILES_INCLUDE CONFIGURE_DEPENDS LIST_DIRECTORIES false
+    RELATIVE "${ML_WORKLOAD_LIB_REPO_ROOT}"
+    "${ML_WORKLOAD_LIB_REPO_ROOT}/include/mlworkloadlib/*.hpp")
 file(GLOB_RECURSE DOC_CODE_FILES_SAMPLES CONFIGURE_DEPENDS LIST_DIRECTORIES false
     RELATIVE "${ML_WORKLOAD_LIB_REPO_ROOT}"
     "${ML_WORKLOAD_LIB_REPO_ROOT}/samples/*.cpp"

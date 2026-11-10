@@ -56,7 +56,6 @@ configure_file(
     @ONLY)
 
 option(ML_WORKLOAD_LIB_BUILD_TESTS "Build ML Workload Library unit tests" OFF)
-option(ML_WORKLOAD_LIB_BUILD_DOCS "Build ML Workload Library documentation" OFF)
 option(ML_WORKLOAD_LIB_BUILD_SHARED "Build ML Workload Library as a shared library" OFF)
 option(ML_WORKLOAD_LIB_ENABLE_COVERAGE "Enable GCC code coverage instrumentation" OFF)
 option(ML_WORKLOAD_LIB_ENABLE_FUZZER "Enable mlworkloadlib_fuzzer, it requires clang/LLVM libFuzzer." OFF)
@@ -294,11 +293,6 @@ if(ML_WORKLOAD_LIB_BUILD_TESTS)
     include(CTest)
     add_subdirectory(tests)
 endif()
-
-if(ML_SDK_BUILD_DOCS OR ML_WORKLOAD_LIB_BUILD_DOCS)
-    include(docs/docs.cmake)
-endif()
-unset(ML_WORKLOAD_LIB_BUILD_DOCS CACHE)
 
 if(ML_WORKLOAD_LIB_ENABLE_FUZZER)
     add_subdirectory(fuzz)

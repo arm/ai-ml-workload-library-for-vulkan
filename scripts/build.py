@@ -48,8 +48,6 @@ class Builder:
         self.run_tests = args.test or self.coverage
         self.lint = args.lint
         self.build_type = args.build_type
-        self.doc_only = args.doc_only
-        self.doc = args.doc or self.doc_only
         self.enable_sanitizers = args.enable_sanitizers
         self.target_platform = args.target_platform
         self.fuzzer = args.fuzzer
@@ -271,9 +269,6 @@ class Builder:
         if self.lint:
             cmake_setup_cmd.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
 
-        if self.doc:
-            cmake_setup_cmd.append("-DML_WORKLOAD_LIB_BUILD_DOCS=ON")
-
         if self.enable_glsl_support:
             cmake_setup_cmd.append("-DML_WORKLOAD_LIB_ENABLE_GLSL_SUPPORT=ON")
             cmake_setup_cmd.append(f"-DGLSLANG_PATH={self.glslang_path}")
@@ -328,9 +323,6 @@ class Builder:
             "--config",
             self.build_type,
         ]
-        if self.doc_only:
-            cmake_build_cmd.extend(["--target", "mlworkloadlib_doc"])
-
         if self.fuzzer and not self.run_tests:
             cmake_build_cmd.extend(["--target", "mlworkloadlib_fuzzer"])
 
@@ -570,19 +562,6 @@ def parse_arguments(argv=None):
         "--build-type",
         help="Type of build to perform. Default: %(default)s",
         default="Release",
-    )
-    doc_group = parser.add_mutually_exclusive_group()
-    doc_group.add_argument(
-        "--doc",
-        help="Build documentation. Default: %(default)s",
-        action="store_true",
-        default=False,
-    )
-    doc_group.add_argument(
-        "--doc-only",
-        help="Only build documentation. Default: %(default)s",
-        action="store_true",
-        default=False,
     )
     parser.add_argument(
         "--enable-sanitizers",

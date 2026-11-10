@@ -140,12 +140,9 @@ in the build command. Documentation inputs are staged under that directory's
 `docs/in`, `docs/generated`, and `docs/sources`; Doxygen XML is written to
 `docs/doxygen/xml`.
 
-During migration, `scripts/build.py --doc` continues to build both the native
-library and documentation using the existing path, with HTML at
-`build/docs/out/index.html`. The native CMake option
-`ML_WORKLOAD_LIB_BUILD_DOCS=ON` and the `mlworkloadlib_doc` target remain available.
 Use separate build directories for native and standalone documentation projects;
-their CMake caches cannot be shared.
+their CMake caches cannot be shared. The native build wrapper no longer builds
+documentation; `mlworkloadlib_doc` remains a target in the standalone project.
 
 ## Code coverage
 
