@@ -80,8 +80,10 @@ execution, and application-owned Vulkan® context wrapping are available in the
 Workload sources
 ----------------
 
-``Workload::fromVGF(...)`` loads a VGF file or decodes a caller-owned memory
-buffer. ``Workload::fromComputeShader(...)`` constructs a standalone compute
+``Workload::fromVGF(path)`` loads a VGF file, while
+``Workload::fromVGF(ArrayView<const std::byte>)`` decodes a caller-owned memory
+buffer.
+``Workload::fromComputeShader(...)`` constructs a standalone compute
 workload. ``Workload::fromDataGraph(...)`` constructs a standalone Vulkan®
 data-graph workload.
 
@@ -521,7 +523,7 @@ Ownership and lifetimes
   creation. Sessions keep its compiled state alive if the ``CompiledExecution``
   object is destroyed; the context and workload must still outlive those
   sessions.
-- VGF memory passed to ``Workload::fromVGF(data, size)`` must remain valid for
+- VGF memory passed to ``Workload::fromVGF(bytes)`` must remain valid for
   the workload lifetime. The same applies to caller-owned constant payloads in
   a standalone data-graph description.
 - The library borrows data-graph binary bytes when they are bound to a

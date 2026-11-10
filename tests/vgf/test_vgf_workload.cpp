@@ -48,7 +48,7 @@ TEST(VgfWorkload, DecodesPublicExecutablesBindingsResourcesAndDispatch) {
                                {1, 2, 3});
     });
 
-    auto workload = Workload::fromVGF(data.data(), data.size());
+    auto workload = Workload::fromVGF(asVgfBytes(data));
 
     ASSERT_EQ(workload.executableCount(), 1);
     ASSERT_EQ(workload.resourceCount(), 2);
@@ -124,7 +124,7 @@ TEST(VgfWorkload, ReportsExternalInterfaceIncludingUnusedAndRepeatedResources) {
     VgfImportInfo importInfo;
     importInfo.inputs.push_back({999, 999});
     importInfo.outputs.push_back({999, 999});
-    auto workload = Workload::fromVGF(data.data(), data.size(), importInfo);
+    auto workload = Workload::fromVGF(asVgfBytes(data), importInfo);
     ASSERT_EQ(workload.resourceCount(), 3);
     ASSERT_EQ(importInfo.inputs.size(), 3);
     ASSERT_EQ(importInfo.outputs.size(), 1);
@@ -161,7 +161,7 @@ TEST(VgfWorkload, DoesNotInventAnInterfaceForUndeclaredPublicResources) {
     VgfImportInfo importInfo;
     importInfo.inputs.push_back({999, 999});
     importInfo.outputs.push_back({999, 999});
-    auto workload = Workload::fromVGF(data.data(), data.size(), importInfo);
+    auto workload = Workload::fromVGF(asVgfBytes(data), importInfo);
     EXPECT_EQ(workload.resourceCount(), 1);
     EXPECT_TRUE(importInfo.inputs.empty());
     EXPECT_TRUE(importInfo.outputs.empty());
@@ -174,7 +174,7 @@ TEST(VgfWorkload, RejectsImportInterfaceReferencingAnInternalResource) {
         encoder.AddModelSequenceInputsOutputs({encoder.AddBindingSlot(17, internal)}, {"invalid"}, {}, {});
     });
     VgfImportInfo importInfo;
-    EXPECT_THROW(Workload::fromVGF(data.data(), data.size(), importInfo), std::runtime_error);
+    EXPECT_THROW(Workload::fromVGF(asVgfBytes(data), importInfo), std::runtime_error);
 }
 
 TEST(VgfWorkload, RejectsImportInputReferencingAnOutputResource) {
@@ -183,7 +183,7 @@ TEST(VgfWorkload, RejectsImportInputReferencingAnOutputResource) {
         encoder.AddModelSequenceInputsOutputs({encoder.AddBindingSlot(17, output)}, {"invalid_input"}, {}, {});
     });
     VgfImportInfo importInfo;
-    EXPECT_THROW(Workload::fromVGF(data.data(), data.size(), importInfo), std::runtime_error);
+    EXPECT_THROW(Workload::fromVGF(asVgfBytes(data), importInfo), std::runtime_error);
 }
 
 TEST(VgfWorkload, RejectsImportOutputReferencingAnInputResource) {
@@ -192,12 +192,12 @@ TEST(VgfWorkload, RejectsImportOutputReferencingAnInputResource) {
         encoder.AddModelSequenceInputsOutputs({}, {}, {encoder.AddBindingSlot(29, input)}, {"invalid_output"});
     });
     VgfImportInfo importInfo;
-    EXPECT_THROW(Workload::fromVGF(data.data(), data.size(), importInfo), std::runtime_error);
+    EXPECT_THROW(Workload::fromVGF(asVgfBytes(data), importInfo), std::runtime_error);
 }
 
 TEST(VgfWorkload, ExposesOriginalPushConstantRangeEndsPerExecutable) {
     const auto data = makeTwoSegmentPushConstantVgf();
-    auto workload = Workload::fromVGF(data.data(), data.size());
+    auto workload = Workload::fromVGF(asVgfBytes(data));
 
     ASSERT_EQ(workload.executableCount(), 2);
     // Ranges start at offset 4 and have sizes 4 and 8, respectively.
@@ -211,7 +211,7 @@ TEST(VgfWorkload, DecodesExternalDataGraphBinaryModule) {
         encoder.AddSegmentInfo(module, "binary_segment", {}, {}, {}, noGraphConstants);
     });
 
-    const auto workload = Workload::fromVGF(data.data(), data.size());
+    const auto workload = Workload::fromVGF(asVgfBytes(data));
     ASSERT_EQ(workload.executableCount(), 1);
     EXPECT_EQ(workload.executable(0).type(), ExecutableKind::Graph);
     EXPECT_EQ(workload.executable(0).module().codeKind(), ModuleCodeKind::ExternalDataGraphBinary);
@@ -284,7 +284,7 @@ TEST(VgfWorkload, DecodesHwcImageExtent) {
         encoder.AddSegmentInfo(module, "executable", {descriptorSet}, {imageBinding}, {}, noGraphConstants, {1, 1, 1});
     });
 
-    const auto workload = Workload::fromVGF(data.data(), data.size());
+    const auto workload = Workload::fromVGF(asVgfBytes(data));
 
     EXPECT_EQ(workload.resource(0).requirements().byteSize(), 60);
     EXPECT_EQ(workload.resource(0).requirements().asImage().extent(), vk::Extent3D(5, 3, 1));
@@ -304,7 +304,7 @@ TEST(VgfWorkload, ReportsAliasedImageUsageForSelectedTiling) {
         encoder.AddSegmentInfo(module, "alias", {descriptorSet}, {imageBinding}, {tensorBinding}, noGraphConstants);
     });
 
-    const auto workload = Workload::fromVGF(data.data(), data.size());
+    const auto workload = Workload::fromVGF(asVgfBytes(data));
     const auto requirements = workload.resource(0).requirements().asImage();
     const auto aliasedUsage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage;
     EXPECT_EQ(requirements.usage(vk::ImageTiling::eLinear), aliasedUsage);
@@ -322,7 +322,7 @@ TEST(VgfWorkload, DecodesImageWithoutSamplerConfigRequiresSamplerBinding) {
         encoder.AddSegmentInfo(module, "executable", {descriptorSet}, {imageBinding}, {}, noGraphConstants, {1, 1, 1});
     });
 
-    auto workload = Workload::fromVGF(data.data(), data.size());
+    auto workload = Workload::fromVGF(asVgfBytes(data));
 
     ASSERT_EQ(workload.resourceCount(), 1);
     const auto image = workload.resource(0);
@@ -349,7 +349,7 @@ TEST(VgfWorkload, DecodesImagesWithUnresolvedDimensions) {
                                    {1, 1, 1});
         });
 
-        const auto workload = Workload::fromVGF(data.data(), data.size());
+        const auto workload = Workload::fromVGF(asVgfBytes(data));
         const auto requirements = workload.resource(0).requirements();
         EXPECT_EQ(requirements.elementCount(), 0);
         EXPECT_EQ(requirements.byteSize(), 0);
@@ -372,7 +372,7 @@ TEST(VgfWorkload, DecodesPublicResourceAliasRequirements) {
                                {1, 1, 1});
     });
 
-    auto workload = Workload::fromVGF(data.data(), data.size());
+    auto workload = Workload::fromVGF(asVgfBytes(data));
 
     ASSERT_EQ(workload.resourceCount(), 2);
     EXPECT_FALSE(workload.resource(0).requirements().participatesInAliasing());
@@ -393,7 +393,7 @@ TEST(VgfWorkload, RejectsNegativeResourceStridesDuringImport) {
             const auto data = writeVgf(
                 [&](Encoder &encoder) { encoder.AddInputResource(descriptorType, VK_FORMAT_R32_SINT, {4}, {stride}); });
 
-            EXPECT_THROW((void)Workload::fromVGF(data.data(), data.size()), std::runtime_error);
+            EXPECT_THROW((void)Workload::fromVGF(asVgfBytes(data)), std::runtime_error);
         }
     }
 }
@@ -419,7 +419,7 @@ TEST(VgfWorkload, RejectsResourceByteSizeOverflowDuringImport) {
                 encoder.AddInputResource(descriptorType, VK_FORMAT_R32_SINT, layout.shape, layout.stride);
             });
 
-            EXPECT_THROW((void)Workload::fromVGF(data.data(), data.size()), std::runtime_error);
+            EXPECT_THROW((void)Workload::fromVGF(asVgfBytes(data)), std::runtime_error);
         }
     }
 }
@@ -430,7 +430,7 @@ TEST(VgfWorkload, AcceptsResourceByteSizeNearDeviceSizeLimit) {
         const auto data = writeVgf(
             [&](Encoder &encoder) { encoder.AddInputResource(descriptorType, VK_FORMAT_R32_SINT, {2}, {max}); });
 
-        const auto workload = Workload::fromVGF(data.data(), data.size());
+        const auto workload = Workload::fromVGF(asVgfBytes(data));
         EXPECT_EQ(workload.resource(0).requirements().byteSize(), static_cast<vk::DeviceSize>(max) + 4);
     }
 }
@@ -462,6 +462,6 @@ TEST(VgfWorkload, RejectsInvalidImageMetadata) {
                                    {1, 1, 1});
         });
 
-        EXPECT_THROW((void)Workload::fromVGF(data.data(), data.size()), std::runtime_error);
+        EXPECT_THROW((void)Workload::fromVGF(asVgfBytes(data)), std::runtime_error);
     }
 }

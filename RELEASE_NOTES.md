@@ -6,6 +6,8 @@
 
 ### Breaking API Changes
 
+- Changed memory-based `Workload::fromVGF()` to take
+  `ArrayView<const std::byte>` instead of a pointer and byte count.
 - Replaced workload-wide `BindingSet::bindPushConstants(data, size)` with
   `bindPushConstants(executable, ArrayView<const std::byte>)`.
 - Changed rank-3 VGF image shapes from width/height/depth to HWC.

@@ -533,10 +533,9 @@ class Workload final {
     /**
      * @brief Decodes a VGF-backed Workload from caller-owned memory.
      *
-     * The memory range `[data, data + size)` must remain valid and unchanged for
-     * the lifetime of the returned Workload.
+     * The bytes must remain valid and unchanged for the lifetime of the returned Workload.
      */
-    static Workload fromVGF(const void *data, std::size_t size);
+    static Workload fromVGF(ArrayView<const std::byte> bytes);
 
     /**
      * @brief Decodes a VGF workload and reports its external-interface resource mapping.
@@ -544,7 +543,7 @@ class Workload final {
      * Source memory has the same lifetime requirements as the overload without importInfo.
      * Include mlworkloadlib/vgf_import_info.hpp to construct the output metadata.
      */
-    static Workload fromVGF(const void *data, std::size_t size, VgfImportInfo &importInfo);
+    static Workload fromVGF(ArrayView<const std::byte> bytes, VgfImportInfo &importInfo);
 
     /**
      * @brief Builds a Workload containing one standalone compute executable.

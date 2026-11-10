@@ -121,7 +121,7 @@ int main() {
 
         // [in-memory-vgf-loading-begin]
         const auto vgf = addBuffersVgf(lhs.size());
-        const auto workload = Workload::fromVGF(vgf.data(), vgf.size());
+        const auto workload = Workload::fromVGF({reinterpret_cast<const std::byte *>(vgf.data()), vgf.size()});
         // [in-memory-vgf-loading-end]
         if (workload.placeholderModuleCount() != 1) {
             throw std::runtime_error("The sample expects one placeholder VGF module");

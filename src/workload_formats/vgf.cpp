@@ -448,9 +448,9 @@ Workload decodeVgfMemory(std::unique_ptr<VgfFileStorage> sourceStorage, VgfImpor
     return builder.finish();
 }
 
-Workload decodeVgfMemory(const void *data, std::size_t size, VgfImportInfo *importInfo = nullptr) {
+Workload decodeVgfMemory(ArrayView<const std::byte> bytes, VgfImportInfo *importInfo = nullptr) {
     WorkloadBuilder builder;
-    populateVgfWorkload(builder, data, size, importInfo);
+    populateVgfWorkload(builder, bytes.data(), bytes.size(), importInfo);
     return builder.finish();
 }
 
@@ -464,14 +464,14 @@ Workload Workload::fromVGF(const std::filesystem::path &path) {
     return decodeVgfMemory(std::make_unique<VgfFileStorage>(path));
 }
 
-Workload Workload::fromVGF(const void *data, std::size_t size) { return decodeVgfMemory(data, size); }
+Workload Workload::fromVGF(ArrayView<const std::byte> bytes) { return decodeVgfMemory(bytes); }
 
 Workload Workload::fromVGF(const std::filesystem::path &path, VgfImportInfo &importInfo) {
     return decodeVgfMemory(std::make_unique<VgfFileStorage>(path), &importInfo);
 }
 
-Workload Workload::fromVGF(const void *data, std::size_t size, VgfImportInfo &importInfo) {
-    return decodeVgfMemory(data, size, &importInfo);
+Workload Workload::fromVGF(ArrayView<const std::byte> bytes, VgfImportInfo &importInfo) {
+    return decodeVgfMemory(bytes, &importInfo);
 }
 
 #else
@@ -486,11 +486,11 @@ namespace {
 
 Workload Workload::fromVGF(const std::filesystem::path &) { throwVgfSupportUnavailable(); }
 
-Workload Workload::fromVGF(const void *, std::size_t) { throwVgfSupportUnavailable(); }
+Workload Workload::fromVGF(ArrayView<const std::byte>) { throwVgfSupportUnavailable(); }
 
 Workload Workload::fromVGF(const std::filesystem::path &, VgfImportInfo &) { throwVgfSupportUnavailable(); }
 
-Workload Workload::fromVGF(const void *, std::size_t, VgfImportInfo &) { throwVgfSupportUnavailable(); }
+Workload Workload::fromVGF(ArrayView<const std::byte>, VgfImportInfo &) { throwVgfSupportUnavailable(); }
 
 #endif // ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
 
