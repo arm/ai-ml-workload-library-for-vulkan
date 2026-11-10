@@ -7,17 +7,24 @@
 
 #include "test_spirv_utils.hpp"
 
+#include "mlworkloadlib/array_view.hpp"
 #include "vgf/encoder.hpp"
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace mlsdk::workloadlib::test {
 
 inline const std::vector<mlsdk::vgflib::GraphConstantBindingRef> noGraphConstants;
+
+inline ArrayView<const std::byte> asVgfBytes(std::string_view data) {
+    return {reinterpret_cast<const std::byte *>(data.data()), data.size()};
+}
 
 template <typename Populate> std::string writeVgf(Populate populate) {
     auto encoder = mlsdk::vgflib::CreateEncoder(VK_HEADER_VERSION);

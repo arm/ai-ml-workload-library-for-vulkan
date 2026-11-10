@@ -624,13 +624,13 @@ class VgfAliasExecutionTest : public AliasExecutionTestBase, public testing::Wit
 
 TEST_P(VgfAliasExecutionTest, Run) {
     const auto bytes = makeAliasVgf(GetParam().scenario);
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     runAliasCase(workload, GetParam(), true);
 }
 
 TEST_F(VgfAliasExecutionTest, RunOptimalTensorAliasWithSessionSelection) {
     const auto bytes = makeOutputTensorAliasedToIntermediateTensorVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     const ResourceCreationRecorder recorder(device);
 
     runAliasCase(workload, aliasCases[3], true, vk::TensorTilingARM::eOptimal);
@@ -644,7 +644,7 @@ TEST_F(VgfAliasExecutionTest, RunOptimalTensorAliasWithSessionSelection) {
 
 TEST_F(VgfAliasExecutionTest, RunLinearImageAliasWithSessionSelection) {
     const auto bytes = makeOutputImageAliasedToIntermediateImageVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     const ResourceCreationRecorder recorder(device);
 
     runAliasCase(workload, aliasCases[4], true, std::nullopt, vk::ImageTiling::eLinear);
@@ -660,7 +660,7 @@ TEST_F(VgfSessionExecutionTest, RunComputeShaderSegment) {
     constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
 
     const auto bytes = makeAddInt32BuffersVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
 
     const Buffer firstInputBuffer(physicalDevice, device, bufferSize);
@@ -698,7 +698,7 @@ TEST_F(VgfSessionExecutionTest, RunGlslComputeShaderSegment) {
     constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
 
     const auto bytes = makeGlslAddInt32BuffersVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
 
     const Buffer firstInputBuffer(physicalDevice, device, bufferSize);
@@ -736,7 +736,7 @@ TEST_F(VgfSessionExecutionTest, RunHlslComputeShaderSegment) {
     constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
 
     const auto bytes = makeHlslAddInt32BuffersVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
 
     const Buffer firstInputBuffer(physicalDevice, device, bufferSize);
@@ -770,7 +770,7 @@ TEST_F(VgfSessionExecutionTest, RunComputeShaderSegmentWithBoundPlaceholderModul
     constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
 
     const auto bytes = makePlaceholderAddInt32BuffersVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
 
     const Buffer firstInputBuffer(physicalDevice, device, bufferSize);
@@ -812,7 +812,7 @@ TEST_F(VgfSessionExecutionTest, ExecutableModuleReplacementKeepsSharedModuleStep
         addInt32BuffersSegment(encoder, module, "first");
         addInt32BuffersSegment(encoder, module, "second");
     });
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     Session session(context, workload);
     const auto makeImplementation = [](bool subtract) {
@@ -865,7 +865,7 @@ TEST_F(VgfSessionExecutionTest, SpecializationOverridesKeepSharedModuleStepsInde
         addInt32BuffersSegment(encoder, module, "first");
         addInt32BuffersSegment(encoder, module, "second");
     });
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     EXPECT_EQ(workload.executable(0).module().index(), workload.executable(1).module().index());
     // An explicit empty map must restore the shader default after a previous override.
@@ -900,8 +900,8 @@ TEST_F(VgfSessionExecutionTest, SpecializationOverridesKeepSharedModuleStepsInde
 
 TEST_F(VgfSessionExecutionTest, ExecutableModuleReplacementRejectsInvalidInputs) {
     const auto bytes = makePlaceholderAddInt32BuffersVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
-    auto otherWorkload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
+    auto otherWorkload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     Session session(context, workload);
     ModuleImplementation implementation;
@@ -919,7 +919,7 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRetriesAfterFailedConfigu
     constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
 
     const auto bytes = makePlaceholderAddInt32BuffersVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     CompiledExecution compiledExecution(context, workload);
 
@@ -968,7 +968,7 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRejectsPendingModuleBindi
     for (const bool executableBinding : {false, true}) {
         SCOPED_TRACE(executableBinding);
         const auto bytes = makePlaceholderAddInt32BuffersVgf();
-        auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+        auto workload = Workload::fromVGF(asVgfBytes(bytes));
         auto context = wrappedContext();
         CompiledExecution compiledExecution(context, workload);
         const auto spirv = assembleAddInt32BuffersSpirv();
@@ -1028,7 +1028,7 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRejectsPendingSpecializat
           TestCase{"different", intSpecialization(7), intSpecialization(42)}}) {
         SCOPED_TRACE(testCase.name);
         const auto bytes = makePlaceholderAddInt32BuffersVgf();
-        auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+        auto workload = Workload::fromVGF(asVgfBytes(bytes));
         const auto step = workload.executable(0);
         auto context = wrappedContext();
         CompiledExecution compiledExecution(context, workload);
@@ -1082,7 +1082,7 @@ TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionRejectsPendingPushConstan
     for (const auto &sizes : {std::pair{8u, 8u}, std::pair{0u, 0u}, std::pair{4u, 8u}}) {
         SCOPED_TRACE(sizes.first);
         const auto bytes = makePlaceholderAddInt32BuffersVgf();
-        auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+        auto workload = Workload::fromVGF(asVgfBytes(bytes));
         const auto step = workload.executable(0);
         auto context = wrappedContext();
         CompiledExecution compiled(context, workload);
@@ -1120,7 +1120,7 @@ TEST_F(VgfSessionExecutionTest, SuppliesMissingPushConstantLayout) {
         encoder.AddSegmentInfo(module, "write_push_constant", {descriptors}, {}, {binding}, noGraphConstants,
                                {1, 1, 1});
     });
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     Session session(context, workload);
     const auto step = workload.executable(0);
@@ -1154,7 +1154,7 @@ TEST_F(VgfSessionExecutionTest, RunGlslComputeShaderSegmentWithPushConstants) {
     constexpr int32_t pushAdd = 13;
 
     const auto bytes = makeGlslPushConstantAddInt32BuffersVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = Context::wrap({instance, physicalDevice, device, queueFamilyIndex, queue});
 
     const Buffer firstInputBuffer(physicalDevice, device, bufferSize);
@@ -1191,7 +1191,7 @@ TEST_F(VgfSessionExecutionTest, RunGlslComputeShaderSegmentWithPushConstants) {
 TEST_F(VgfSessionExecutionTest, ExecutablePipelineCachesRemainIndependent) {
     auto context = wrappedContext();
     const auto bytes = makeTwoSegmentPushConstantVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     const vk::raii::PipelineCache cache(device, vk::PipelineCacheCreateInfo{});
     Session session(context, workload);
     session.setExecutableOptions(workload.executable(0), {&cache});
@@ -1208,7 +1208,7 @@ TEST_F(VgfSessionExecutionTest, ExecutablePipelineCachesRemainIndependent) {
 TEST_F(VgfSessionExecutionTest, IndependentPushConstantsRetainOffsets) {
     auto context = wrappedContext();
     const auto bytes = makeTwoSegmentPushConstantVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     const auto firstStep = workload.executable(0);
     const auto secondStep = workload.executable(1);
     ASSERT_EQ(firstStep.module().index(), secondStep.module().index());
@@ -1253,7 +1253,7 @@ TEST_F(VgfSessionExecutionTest, IndependentPushConstantsRetainOffsets) {
 TEST_F(VgfSessionExecutionTest, PartialPushConstantsRetainExecutableOffsets) {
     auto context = wrappedContext();
     const auto bytes = makeTwoSegmentPushConstantVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     const Buffer firstOutput(physicalDevice, device, sizeof(int32_t));
     const Buffer secondOutput(physicalDevice, device, sizeof(int32_t));
     Session session(context, workload);
@@ -1276,7 +1276,7 @@ TEST_F(VgfSessionExecutionTest, PartialPushConstantsRetainExecutableOffsets) {
 TEST_F(VgfSessionExecutionTest, PreparedExecutionsRetainPushConstantSnapshots) {
     auto context = wrappedContext();
     const auto bytes = makeTwoSegmentPushConstantVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     const Buffer firstOutput(physicalDevice, device, sizeof(int32_t));
     const Buffer secondOutput(physicalDevice, device, sizeof(int32_t));
     std::array<int32_t, 2> firstPayload = {-100, 23};
@@ -1310,7 +1310,7 @@ TEST_F(VgfSessionExecutionTest, PreparedExecutionsRetainPushConstantSnapshots) {
 TEST_F(VgfSessionExecutionTest, SharedCompiledExecutionKeepsPushConstantsIndependent) {
     auto context = wrappedContext();
     const auto bytes = makeTwoSegmentPushConstantVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     const Buffer firstOutput(physicalDevice, device, sizeof(int32_t));
     const Buffer secondOutput(physicalDevice, device, sizeof(int32_t));
     std::array<int32_t, 2> firstPayload = {-100, 23};
@@ -1359,7 +1359,7 @@ TEST_F(VgfSessionExecutionTest, RecordComputeShaderSegment) {
     constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
 
     const auto bytes = makeAddInt32BuffersVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
 
     const Buffer firstInputBuffer(physicalDevice, device, bufferSize);
@@ -1394,7 +1394,7 @@ TEST_F(VgfSessionExecutionTest, RunComputeShaderSegmentWithExternalImageBinding)
     constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
 
     const auto bytes = makeAddInt32BuffersWithExternalImageVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
 
     const Buffer firstInputBuffer(physicalDevice, device, bufferSize);
@@ -1445,7 +1445,7 @@ TEST_F(VgfSessionExecutionTest, RunDisjointAliasedIntermediateBuffers) {
     constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
 
     const auto bytes = makeDisjointAliasedIntermediateBuffersVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     ASSERT_EQ(workload.executableCount(), 4);
 
@@ -1495,7 +1495,7 @@ TEST_F(VgfSessionExecutionTest, RunIndependentIntermediateAliasGroups) {
     constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
 
     const auto bytes = makeIndependentAliasGroupsVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     ASSERT_EQ(workload.executableCount(), 3);
 
@@ -1546,7 +1546,7 @@ TEST_F(VgfSessionExecutionTest, RunIndependentIntermediateAliasGroups) {
 
 TEST_F(VgfSessionExecutionTest, RunMaxpoolDataVgf) {
     const auto bytes = makeMaxpool16x16To8x8Vgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
 
     const Tensor inputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 16, 16, 16});
@@ -1570,7 +1570,7 @@ TEST_F(VgfSessionExecutionTest, RunMaxpoolDataVgf) {
 
 TEST_F(VgfSessionExecutionTest, SelectsTensorTilingPerSession) {
     const auto bytes = makeMaxpool16x16To8x8Vgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     const auto input = workload.resource(0);
 
@@ -1585,7 +1585,7 @@ TEST_F(VgfSessionExecutionTest, SelectsTensorTilingPerSession) {
 
 TEST_F(VgfSessionExecutionTest, KeepsSharedSessionTilingSelectionsIndependent) {
     const auto bytes = makeOutputTensorAliasedToIntermediateTensorVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     const auto input = workload.resource(0);
     const auto output = workload.resource(1);
@@ -1618,7 +1618,7 @@ TEST_F(VgfSessionExecutionTest, KeepsSharedSessionTilingSelectionsIndependent) {
 
 TEST_F(VgfSessionExecutionTest, KeepsInternalAliasSelectionSeparateAcrossCompiledExecutions) {
     const auto bytes = makeOutputTensorAliasedToIntermediateTensorVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     Session first(context, workload);
     Session second(context, workload);
@@ -1635,7 +1635,7 @@ TEST_F(VgfSessionExecutionTest, KeepsInternalAliasSelectionSeparateAcrossCompile
 
 TEST_F(VgfSessionExecutionTest, RejectsConflictingPublicAliasTilings) {
     const auto bytes = makeOutputTensorAliasedToIntermediateTensorVgf(false, true);
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     Session session(context, workload);
     session.setTensorTiling(workload.resource(1), vk::TensorTilingARM::eOptimal);
@@ -1649,7 +1649,7 @@ TEST_F(VgfSessionExecutionTest, RejectsConflictingPublicAliasTilings) {
 
 TEST_F(VgfSessionExecutionTest, RejectsOptimalTilingWithIntermediateBufferAlias) {
     const auto bytes = makeOutputTensorAliasedToIntermediateBufferVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     Session session(context, workload);
     EXPECT_THROW(session.setTensorTiling(workload.resource(2), vk::TensorTilingARM::eOptimal), std::runtime_error);
@@ -1659,7 +1659,7 @@ TEST_F(VgfSessionExecutionTest, RejectsOptimalTilingWithIntermediateBufferAlias)
 
 TEST_F(VgfSessionExecutionTest, RejectsStridedAliasPeerWithoutChangingSelectedTilings) {
     const auto bytes = makeOutputTensorAliasedToIntermediateTensorVgf(true);
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     Session session(context, workload);
     EXPECT_THROW(session.setTensorTiling(workload.resource(1), vk::TensorTilingARM::eOptimal), std::runtime_error);
@@ -1672,7 +1672,7 @@ TEST_F(VgfSessionExecutionTest, RejectsStridedAliasPeerWithoutChangingSelectedTi
 
 TEST_F(VgfSessionExecutionTest, SelectsImageTilingPerSession) {
     const auto bytes = makeAddInt32BuffersWithExternalImageVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     const auto image = workload.resource(2);
 
@@ -1742,7 +1742,7 @@ TEST_F(VgfSessionExecutionTest, SuppliesOnlyImageLayoutMetadataForGraphImages) {
                         encoder.AddSegmentInfo(module, "image_metadata", {descriptorSet}, {inputBinding},
                                                {outputBinding}, noGraphConstants);
                     });
-                    return Workload::fromVGF(bytes.data(), bytes.size());
+                    return Workload::fromVGF(asVgfBytes(bytes));
                 }
                 auto imageRequirements = makeStorageImageRequirements();
                 imageRequirements.descriptorType = descriptorType;
@@ -1807,7 +1807,7 @@ TEST_F(VgfSessionExecutionTest, RejectsOptimalTilingForStridedTensor) {
         encoder.AddSegmentInfo(module, "graph_segment", {inputSet, outputSet}, {inputBinding}, {outputBinding},
                                noGraphConstants);
     });
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     const auto input = workload.resource(0);
     Session session(context, workload);
@@ -1819,7 +1819,7 @@ TEST_F(VgfSessionExecutionTest, RejectsOptimalTilingForStridedTensor) {
 
 TEST_F(VgfSessionExecutionTest, SelectsLinearTilingForAliasedImage) {
     const auto bytes = makeOutputImageAliasedToIntermediateImageVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     const auto image = workload.resource(3);
     Session session(context, workload);
@@ -1833,7 +1833,7 @@ TEST_F(VgfSessionExecutionTest, SelectsLinearTilingForAliasedImage) {
 
 TEST_F(VgfSessionExecutionTest, RejectsGraphTensorTilingChangeAfterSharedCompilation) {
     const auto bytes = makeMaxpool16x16To8x8Vgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     CompiledExecution compiled(context, workload);
 
@@ -1849,7 +1849,7 @@ TEST_F(VgfSessionExecutionTest, RejectsGraphTensorTilingChangeAfterSharedCompila
 TEST_F(VgfSessionExecutionTest, AllowsImageTilingChangeWithSharedComputePipeline) {
     constexpr vk::DeviceSize bufferSize = 10 * sizeof(int32_t);
     const auto bytes = makeOutputImageAliasedToIntermediateImageVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     const auto image = workload.resource(3);
     CompiledExecution compiled(context, workload);
@@ -1882,7 +1882,7 @@ TEST_F(VgfSessionExecutionTest, AllowsImageTilingChangeWithSharedComputePipeline
 TEST_F(VgfSessionExecutionTest, ConfigureAcceptsMissingLinearTensorAndConstantStrides) {
     const std::vector<int8_t> weights(16UL * 2 * 2 * 16, 1);
     const auto bytes = makeConv2dRescaleConstantVgf(weights);
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
 
     ASSERT_EQ(workload.resourceCount(), 2);
@@ -1901,8 +1901,8 @@ TEST_F(VgfSessionExecutionTest, RunGraphWithConstant) {
     const std::vector<int8_t> oneWeights(16UL * 2 * 2 * 16, 1);
     const auto zeroWeightVgf = makeConv2dRescaleConstantVgf(zeroWeights);
     const auto oneWeightVgf = makeConv2dRescaleConstantVgf(oneWeights);
-    auto zeroWeightWorkload = Workload::fromVGF(zeroWeightVgf.data(), zeroWeightVgf.size());
-    auto oneWeightWorkload = Workload::fromVGF(oneWeightVgf.data(), oneWeightVgf.size());
+    auto zeroWeightWorkload = Workload::fromVGF(asVgfBytes(zeroWeightVgf));
+    auto oneWeightWorkload = Workload::fromVGF(asVgfBytes(oneWeightVgf));
     auto context = wrappedContext();
 
     Tensor inputTensor(physicalDevice, device, vk::Format::eR8Sint, inputShape);
@@ -1942,9 +1942,9 @@ TEST_F(VgfSessionExecutionTest, RunMemoryVgfBorrowsConstantPayload) {
     const auto zeroWeightVgf = makeConv2dRescaleConstantVgf(zeroWeights);
     const auto oneWeightVgf = makeConv2dRescaleConstantVgf(oneWeights);
     auto borrowedVgf = makeConv2dRescaleConstantVgf(zeroWeights);
-    auto zeroWeightWorkload = Workload::fromVGF(zeroWeightVgf.data(), zeroWeightVgf.size());
-    auto oneWeightWorkload = Workload::fromVGF(oneWeightVgf.data(), oneWeightVgf.size());
-    auto borrowedWorkload = Workload::fromVGF(borrowedVgf.data(), borrowedVgf.size());
+    auto zeroWeightWorkload = Workload::fromVGF(asVgfBytes(zeroWeightVgf));
+    auto oneWeightWorkload = Workload::fromVGF(asVgfBytes(oneWeightVgf));
+    auto borrowedWorkload = Workload::fromVGF(asVgfBytes(borrowedVgf));
     fillFirstVgfConstantPayload(borrowedVgf, 1);
 
     auto context = wrappedContext();
@@ -2007,7 +2007,7 @@ TEST_F(VgfSessionExecutionTest, RunMaxpoolFileVgf) {
 
 TEST_F(VgfSessionExecutionTest, RunMaxpoolRepeatedDifferentInput) {
     const auto bytes = makeMaxpool16x16To8x8Vgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     const Tensor inputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 16, 16, 16});
     const Tensor outputTensor(physicalDevice, device, vk::Format::eR8Sint, {1, 8, 8, 16});
@@ -2031,7 +2031,7 @@ TEST_F(VgfSessionExecutionTest, RunMaxpoolRepeatedDifferentInput) {
 
 TEST_F(VgfSessionExecutionTest, RunTwoSessionsWithSharedCompiledExecution) {
     const auto bytes = makeMaxpool16x16To8x8Vgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = Context::wrap({instance, physicalDevice, device, queueFamilyIndex, queue});
     CompiledExecution compiledExecution(context, workload);
 
@@ -2072,7 +2072,7 @@ TEST_F(VgfSessionExecutionTest, RunTwoSessionsWithSharedCompiledExecution) {
 
 TEST_F(VgfSessionExecutionTest, ExposesGraphDiagnostics) {
     const auto graphBytes = makeMaxpool16x16To8x8Vgf();
-    auto graphWorkload = Workload::fromVGF(graphBytes.data(), graphBytes.size());
+    auto graphWorkload = Workload::fromVGF(asVgfBytes(graphBytes));
     auto context = wrappedContext();
 
     Session graphSession(context, graphWorkload);
@@ -2102,7 +2102,7 @@ TEST_F(VgfSessionExecutionTest, ExposesGraphDiagnostics) {
     EXPECT_THROW(graphSession.dataGraphSessionMemory(0, sessionMemoryCount), std::runtime_error);
 
     const auto computeBytes = makeAddInt32BuffersVgf();
-    auto computeWorkload = Workload::fromVGF(computeBytes.data(), computeBytes.size());
+    auto computeWorkload = Workload::fromVGF(asVgfBytes(computeBytes));
     Session computeSession(context, computeWorkload);
     computeSession.configure();
     EXPECT_THROW(computeSession.dataGraphPipelineProperties(0), std::runtime_error);
@@ -2110,7 +2110,7 @@ TEST_F(VgfSessionExecutionTest, ExposesGraphDiagnostics) {
 
 TEST_F(VgfSessionExecutionTest, RunTwoMaxpoolGraphSegments) {
     const auto bytes = makeTwoSegmentMaxpoolVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = wrappedContext();
     ASSERT_EQ(workload.executableCount(), 2);
 
@@ -2154,7 +2154,7 @@ TEST_F(VgfSessionExecutionTest, RunTwoMaxpoolGraphSegments) {
 
 TEST_F(VgfSessionExecutionTest, ConfigureFailsWhenPlaceholderModuleIsUnbound) {
     const auto bytes = makePlaceholderAddInt32BuffersVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     auto context = Context::wrap({instance, physicalDevice, device, queueFamilyIndex, queue});
 
     ASSERT_EQ(workload.placeholderModuleCount(), 1);
@@ -2187,7 +2187,7 @@ Workload makeImageTensorAliasWorkload() {
         encoder.AddSegmentInfo(module, "linear_alias", {set}, {inputBinding}, {outputBinding},
                                std::vector<mlsdk::vgflib::GraphConstantBindingRef>{});
     });
-    return Workload::fromVGF(bytes.data(), bytes.size());
+    return Workload::fromVGF(asVgfBytes(bytes));
 }
 
 } // namespace
@@ -2312,25 +2312,25 @@ TEST_F(VgfSessionExecutionTest, RunIntermediateTensorOnExternalLinearImage) {
 
 TEST_P(VgfAliasExecutionTest, PrepareRequiresBoundMemoryInfo) {
     const auto bytes = makeAliasVgf(GetParam().scenario);
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     runAliasCase(workload, GetParam(), false);
 }
 
 TEST_P(VgfAliasExecutionTest, PrepareRejectsUndersizedAliasMemory) {
     const auto bytes = makeAliasVgf(GetParam().scenario);
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     expectInvalidAliasMemory(workload, GetParam(), AliasMemoryFailure::Undersized);
 }
 
 TEST_P(VgfAliasExecutionTest, PrepareRejectsMisalignedAliasMemory) {
     const auto bytes = makeAliasVgf(GetParam().scenario);
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     expectInvalidAliasMemory(workload, GetParam(), AliasMemoryFailure::Misaligned);
 }
 
 TEST_P(VgfAliasExecutionTest, PrepareRejectsOverflowingAliasMemory) {
     const auto bytes = makeAliasVgf(GetParam().scenario);
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     expectInvalidAliasMemory(workload, GetParam(), AliasMemoryFailure::Overflowing);
 }
 
@@ -2371,7 +2371,7 @@ constexpr ArrayView<const std::byte> validBinary(binaryWithValidHeader.data(), b
 
 TEST(VgfDataGraphBinary, SelectsPipelinesFromSharedBinary) {
     const auto bytes = makeTwoSegmentMaxpoolVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     const NullVulkanContext vulkan;
     auto context = vulkan.wrap();
     Session session(context, workload);
@@ -2386,7 +2386,7 @@ TEST(VgfDataGraphBinary, SelectsPipelinesFromSharedBinary) {
 
 TEST(VgfDataGraphBinary, RejectsComputeAndInvalidIndices) {
     const auto bytes = makeOutputBufferAliasedToIntermediateTensorVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     const NullVulkanContext vulkan;
     auto context = vulkan.wrap();
     Session session(context, workload);
@@ -2400,7 +2400,7 @@ TEST(VgfDataGraphBinary, RejectsComputeAndInvalidIndices) {
 
 TEST(VgfDataGraphBinary, PreservesPlaceholderComputeBinding) {
     const auto bytes = makePlaceholderGraphAndComputeVgf();
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     const NullVulkanContext vulkan;
     auto context = vulkan.wrap();
     ASSERT_EQ(workload.placeholderModuleCount(), 2);
@@ -2424,7 +2424,7 @@ TEST(VgfDataGraphBinary, PreservesPlaceholderComputeBinding) {
 TEST(VgfDataGraphBinary, RejectsGraphConstantsForSelectedSegment) {
     const std::vector<int8_t> weights(16 * 2 * 2 * 16, 0);
     const auto bytes = makeConv2dRescaleConstantVgf(weights);
-    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
     const NullVulkanContext vulkan;
     auto context = vulkan.wrap();
     Session session(context, workload);

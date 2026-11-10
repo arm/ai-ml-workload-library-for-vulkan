@@ -192,7 +192,7 @@ void fuzzWorkloadBytes(const uint8_t *data, std::size_t size) {
 
     bool imported = false;
     try {
-        auto workload = Workload::fromVGF(data, size);
+        auto workload = Workload::fromVGF({reinterpret_cast<const std::byte *>(data), size});
         imported = true;
         verifyWorkload(workload);
     } catch (const std::out_of_range &error) {

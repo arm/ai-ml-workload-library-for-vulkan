@@ -814,7 +814,7 @@ TEST_F(ComposedSessionExecutionTest, RecordSacVgfSacSequenceWithoutLibraryCompos
 
     auto sacAdd = Workload::fromComputeShader(makeTensorAddDescription({1, 16, 16, 16}));
     const auto vgfBytes = makeMaxpool16x16To8x8Vgf();
-    auto vgfMaxpool = Workload::fromVGF(vgfBytes.data(), vgfBytes.size());
+    auto vgfMaxpool = Workload::fromVGF(asVgfBytes(vgfBytes));
     auto sacSubtract = Workload::fromComputeShader(makeTensorSubtractDescription({1, 8, 8, 16}));
     auto context = wrappedContext();
 
@@ -902,7 +902,7 @@ TEST_F(ComposedSessionExecutionTest, RecordSacMultiSegmentVgfSacSequenceWithoutL
 
     auto sacAdd = Workload::fromComputeShader(makeTensorAddDescription({1, 16, 16, 16}));
     const auto vgfBytes = makeTwoSegmentMaxpoolVgf();
-    auto vgfMaxpool = Workload::fromVGF(vgfBytes.data(), vgfBytes.size());
+    auto vgfMaxpool = Workload::fromVGF(asVgfBytes(vgfBytes));
     auto sacSubtract = Workload::fromComputeShader(makeTensorSubtractDescription({1, 4, 4, 16}));
     auto context = wrappedContext();
 
@@ -991,7 +991,7 @@ TEST_F(ComposedSessionExecutionTest, RecordSacVgfSagSacSequenceWithoutLibraryCom
 
     auto sacAdd = Workload::fromComputeShader(makeTensorAddDescription({1, 16, 16, 16}));
     const auto vgfBytes = makeMaxpool16x16To8x8Vgf();
-    auto vgfMaxpool = Workload::fromVGF(vgfBytes.data(), vgfBytes.size());
+    auto vgfMaxpool = Workload::fromVGF(asVgfBytes(vgfBytes));
     auto sagMaxpool = Workload::fromDataGraph(makeMaxpool8x8To4x4Description());
     auto sacSubtract = Workload::fromComputeShader(makeTensorSubtractDescription({1, 4, 4, 16}));
     auto context = wrappedContext();
@@ -1091,7 +1091,7 @@ TEST_F(ComposedSessionExecutionTest, RecordSagVgfSequenceWithoutLibraryCompositi
 
     auto sagMaxpool = Workload::fromDataGraph(makeMaxpoolDescription());
     const auto vgfBytes = makeMaxpool8x8To4x4Vgf();
-    auto vgfMaxpool = Workload::fromVGF(vgfBytes.data(), vgfBytes.size());
+    auto vgfMaxpool = Workload::fromVGF(asVgfBytes(vgfBytes));
     auto context = wrappedContext();
 
     /***************************************************************************
@@ -1154,7 +1154,7 @@ TEST_F(ComposedSessionExecutionTest, RecordSacVgfSacBufferSequenceWithoutLibrary
 
     auto firstSac = Workload::fromComputeShader(makeAddInt32BuffersDescription());
     const auto vgfBytes = makeAddInt32BuffersVgf();
-    auto vgfAdd = Workload::fromVGF(vgfBytes.data(), vgfBytes.size());
+    auto vgfAdd = Workload::fromVGF(asVgfBytes(vgfBytes));
     auto secondSac = Workload::fromComputeShader(makeAddInt32BuffersDescription());
     auto context = wrappedContext();
 
