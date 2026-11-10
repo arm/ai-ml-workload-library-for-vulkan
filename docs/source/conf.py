@@ -28,7 +28,6 @@ rst_epilog = """
 extensions = [
     "breathe",
     "sphinx_rtd_theme",
-    "sphinx.ext.autodoc",
     "sphinx.ext.autosectionlabel",
     "myst_parser",
 ]
