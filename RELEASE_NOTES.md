@@ -25,6 +25,8 @@
 
 ### Resource Binding and Execution
 
+- Added executable pipeline cache overrides through `Session::setExecutableOptions()`,
+  including explicit disabling of the session default cache.
 - Fixed preparation of repeated bindings to the same external image and
   subresource range without requiring an alias group, while retaining checks
   for conflicting layouts and alias groups.

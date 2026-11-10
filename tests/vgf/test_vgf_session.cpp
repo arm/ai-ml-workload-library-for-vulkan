@@ -9,6 +9,7 @@
 #include "standalone_compute/test_standalone_compute_utils.hpp"
 #include "test_alias_execution.hpp"
 #include "test_expected_results.hpp"
+#include "test_pipeline_creation.hpp"
 #include "test_resource_requirements.hpp"
 #include "test_spirv_utils.hpp"
 #include "test_vgf_utils.hpp"
@@ -1185,6 +1186,23 @@ TEST_F(VgfSessionExecutionTest, RunGlslComputeShaderSegmentWithPushConstants) {
     execution.run();
 
     EXPECT_EQ(outputBuffer.read(elements), expected);
+}
+
+TEST_F(VgfSessionExecutionTest, ExecutablePipelineCachesRemainIndependent) {
+    auto context = wrappedContext();
+    const auto bytes = makeTwoSegmentPushConstantVgf();
+    auto workload = Workload::fromVGF(bytes.data(), bytes.size());
+    const vk::raii::PipelineCache cache(device, vk::PipelineCacheCreateInfo{});
+    Session session(context, workload);
+    session.setExecutableOptions(workload.executable(0), {&cache});
+    session.setExecutableOptions(workload.executable(1), {});
+
+    // Vulkan callbacks mutate this hook through the pointer registered by its constructor.
+    // NOLINTNEXTLINE(misc-const-correctness)
+    PipelineCreationHook hook(device);
+    session.configure();
+    EXPECT_EQ(hook.creations, 2u);
+    EXPECT_EQ(hook.caches, (std::vector<VkPipelineCache>{static_cast<VkPipelineCache>(*cache), VK_NULL_HANDLE}));
 }
 
 TEST_F(VgfSessionExecutionTest, IndependentPushConstantsRetainOffsets) {

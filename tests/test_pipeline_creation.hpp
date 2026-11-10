@@ -31,6 +31,7 @@ class PipelineCreationHook {
     unsigned creations = 0;
     unsigned destructions = 0;
     VkPipelineCache cache = VK_NULL_HANDLE;
+    std::vector<VkPipelineCache> caches;
 
   private:
     static VKAPI_ATTR VkResult VKAPI_CALL createCompute(VkDevice device, VkPipelineCache cache, uint32_t count,
@@ -38,6 +39,7 @@ class PipelineCreationHook {
                                                         const VkAllocationCallbacks *allocator, VkPipeline *pipelines) {
         ++active_->creations;
         active_->cache = cache;
+        active_->caches.push_back(cache);
         const auto result = active_->compute_.original()(device, cache, count, infos, allocator, pipelines);
         return result == VK_SUCCESS ? active_->result : result;
     }
@@ -47,6 +49,7 @@ class PipelineCreationHook {
                                                       const VkAllocationCallbacks *allocator, VkPipeline *pipelines) {
         ++active_->creations;
         active_->cache = cache;
+        active_->caches.push_back(cache);
         const auto result =
             active_->graph_.original()(device, deferredOperation, cache, count, infos, allocator, pipelines);
         return result == VK_SUCCESS ? active_->result : result;
@@ -110,6 +113,30 @@ inline void verifyPipelineCreation(Context &context, const Workload &workload, v
             EXPECT_NO_THROW(reuse.configure());
         }
         EXPECT_EQ(hook.creations, createdBefore + 2);
+    }
+    const vk::raii::PipelineCache overrideCache(device, vk::PipelineCacheCreateInfo{});
+    for (const auto *selected : {&overrideCache, static_cast<const vk::raii::PipelineCache *>(nullptr)}) {
+        SCOPED_TRACE(selected ? "override cache" : "explicitly disabled cache");
+        CompiledExecution compiled(context, workload, options);
+        Session session(context, workload, compiled);
+        const auto executable = workload.executable(0);
+        session.setExecutableOptions(executable, {selected});
+        ASSERT_NO_THROW(session.configure());
+        EXPECT_EQ(hook.cache, selected ? static_cast<VkPipelineCache>(**selected) : VK_NULL_HANDLE);
+        EXPECT_THROW(session.setExecutableOptions(executable, {}), std::runtime_error);
+        Session reuse(context, workload, compiled);
+        EXPECT_THROW(reuse.setExecutableOptions(executable, {}), std::runtime_error);
+    }
+    {
+        CompiledExecution compiled(context, workload, options);
+        Session pending(context, workload, compiled);
+        pending.setExecutableOptions(workload.executable(0), {});
+        Session first(context, workload, compiled);
+        ASSERT_NO_THROW(first.configure());
+        const auto createdBefore = hook.creations;
+        EXPECT_THROW(pending.configure(), std::runtime_error);
+        EXPECT_THROW(pending.setExecutableOptions(workload.executable(0), {}), std::runtime_error);
+        EXPECT_EQ(hook.creations, createdBefore);
     }
     // The default session options must still forward a null application cache.
     Session session(context, workload);
