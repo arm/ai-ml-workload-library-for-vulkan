@@ -131,9 +131,9 @@ class ResourceCreationRecorder {
                                                     createInfos, allocator, pipelines);
     }
 
-    ScopedDeviceDispatcherHook<PFN_vkCreateTensorARM> createTensor_;
-    ScopedDeviceDispatcherHook<PFN_vkCreateImage> createImage_;
-    ScopedDeviceDispatcherHook<PFN_vkCreateDataGraphPipelinesARM> createPipelines_;
+    ScopedDispatcherHook<PFN_vkCreateTensorARM> createTensor_;
+    ScopedDispatcherHook<PFN_vkCreateImage> createImage_;
+    ScopedDispatcherHook<PFN_vkCreateDataGraphPipelinesARM> createPipelines_;
     const ResourceCreationRecorder *previous_;
     inline static thread_local const ResourceCreationRecorder *active_ = nullptr;
 };
@@ -1201,8 +1201,30 @@ TEST_F(VgfSessionExecutionTest, ExecutablePipelineCachesRemainIndependent) {
     // NOLINTNEXTLINE(misc-const-correctness)
     PipelineCreationHook hook(device);
     session.configure();
-    EXPECT_EQ(hook.creations, 2u);
-    EXPECT_EQ(hook.caches, (std::vector<VkPipelineCache>{static_cast<VkPipelineCache>(*cache), VK_NULL_HANDLE}));
+    ASSERT_EQ(hook.calls.size(), 2u);
+    EXPECT_EQ(hook.calls[0].cache, static_cast<VkPipelineCache>(*cache));
+    EXPECT_EQ(hook.calls[1].cache, VK_NULL_HANDLE);
+}
+
+TEST_F(VgfSessionExecutionTest, MultiExecutablePipelineFailurePublishesNoPartialReports) {
+    auto context = wrappedContext();
+    const auto bytes = makeTwoSegmentPushConstantVgf();
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
+    SessionOptions options;
+    options.collectPipelineCreationFeedback = true;
+    Session session(context, workload, options);
+
+    PipelineCreationHook hook(device);
+    hook.failAt = 2;
+    hook.result = VK_PIPELINE_COMPILE_REQUIRED;
+    EXPECT_THROW(session.configure(), vk::SystemError);
+    ASSERT_EQ(hook.calls.size(), 2u);
+    EXPECT_EQ(hook.destructions, 2u);
+    for (uint32_t i = 0; i < 2; ++i) {
+        EXPECT_TRUE(hook.calls[i].hasFeedback);
+        EXPECT_EQ(hook.calls[i].stageFeedbackCount, workload.executable(i).type() == ExecutableKind::Compute ? 1u : 0u);
+        EXPECT_FALSE(session.pipelineCreationReport(workload.executable(i)));
+    }
 }
 
 TEST_F(VgfSessionExecutionTest, IndependentPushConstantsRetainOffsets) {

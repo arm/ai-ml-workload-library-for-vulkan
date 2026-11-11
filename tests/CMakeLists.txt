@@ -22,6 +22,7 @@ set(ML_WORKLOAD_LIB_TEST_SOURCES
     test_context.cpp
     test_expected_results.hpp
     test_image_requirements.cpp
+    test_pipeline_creation.cpp
     test_pipeline_creation.hpp
     test_internal_utils.cpp
     test_resource_requirements.hpp

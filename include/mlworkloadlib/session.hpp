@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace mlsdk::workloadlib {
@@ -46,6 +47,12 @@ struct DataGraphPipelinePropertyData {
 struct ExecutableOptions {
     /** @brief Borrowed cache; nullptr explicitly disables the application cache. */
     const vk::raii::PipelineCache *pipelineCache = nullptr;
+};
+
+/** @brief Original creation feedback; check validity independently for pipeline and stages. */
+struct PipelineCreationReport {
+    vk::PipelineCreationFeedback pipelineFeedback;
+    std::vector<vk::PipelineCreationFeedback> stageFeedbacks;
 };
 
 /*******************************************************************************
@@ -108,6 +115,9 @@ class Session final {
      * until configuration finishes using it.
      */
     void setExecutableOptions(ExecutableView executable, ExecutableOptions options);
+
+    /** @brief Copies the shared creation report, or returns nullopt before publication or when disabled. */
+    std::optional<PipelineCreationReport> pipelineCreationReport(ExecutableView executable) const;
 
     /** @brief Replaces one executable's specialization map before pipeline compilation. */
     void setSpecializationInfo(ExecutableView executable, SpecializationInfo specialization);

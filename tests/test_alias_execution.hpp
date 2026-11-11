@@ -266,14 +266,14 @@ class AliasMemoryValidationHooks {
 
     DeviceAccess deviceAccess_;
     Registration registration_;
-    ScopedDeviceDispatcherHook<PFN_vkGetBufferMemoryRequirements> getBufferRequirements_;
-    ScopedDeviceDispatcherHook<PFN_vkGetBufferMemoryRequirements2> getBufferRequirements2_;
-    ScopedDeviceDispatcherHook<PFN_vkGetTensorMemoryRequirementsARM> getTensorRequirements_;
-    ScopedDeviceDispatcherHook<PFN_vkGetImageMemoryRequirements> getImageRequirements_;
-    ScopedDeviceDispatcherHook<PFN_vkGetImageMemoryRequirements2> getImageRequirements2_;
-    ScopedDeviceDispatcherHook<PFN_vkBindBufferMemory> bindBufferMemory_;
-    ScopedDeviceDispatcherHook<PFN_vkBindTensorMemoryARM> bindTensorMemory_;
-    ScopedDeviceDispatcherHook<PFN_vkBindImageMemory> bindImageMemory_;
+    ScopedDispatcherHook<PFN_vkGetBufferMemoryRequirements> getBufferRequirements_;
+    ScopedDispatcherHook<PFN_vkGetBufferMemoryRequirements2> getBufferRequirements2_;
+    ScopedDispatcherHook<PFN_vkGetTensorMemoryRequirementsARM> getTensorRequirements_;
+    ScopedDispatcherHook<PFN_vkGetImageMemoryRequirements> getImageRequirements_;
+    ScopedDispatcherHook<PFN_vkGetImageMemoryRequirements2> getImageRequirements2_;
+    ScopedDispatcherHook<PFN_vkBindBufferMemory> bindBufferMemory_;
+    ScopedDispatcherHook<PFN_vkBindTensorMemoryARM> bindTensorMemory_;
+    ScopedDispatcherHook<PFN_vkBindImageMemory> bindImageMemory_;
     inline static std::unordered_map<VkDevice, std::shared_ptr<AliasMemoryValidationMock>> active_;
 };
 

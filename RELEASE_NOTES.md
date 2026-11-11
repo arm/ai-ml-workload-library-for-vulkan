@@ -27,6 +27,7 @@
 
 ### Resource Binding and Execution
 
+- Added session-wide compilation policy and shared per-executable pipeline creation reports.
 - Added executable pipeline cache overrides through `Session::setExecutableOptions()`,
   including explicit disabling of the session default cache.
 - Fixed preparation of repeated bindings to the same external image and

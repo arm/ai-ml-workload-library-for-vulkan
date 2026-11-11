@@ -188,8 +188,12 @@ Context Context::create(const RuntimeContextDeviceRequirements &deviceRequiremen
         const vk::DeviceQueueCreateInfo queueCreateInfo({}, *queueFamilyIndex, 1, &queuePriority);
 
         try {
-            const detail::RuntimeDeviceConfiguration deviceConfiguration(extensions, requiredDeviceExtensions,
-                                                                         deviceRequirements);
+            const auto pipelineCreationCacheControl =
+                candidate.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features>()
+                    .get<vk::PhysicalDeviceVulkan13Features>()
+                    .pipelineCreationCacheControl;
+            const detail::RuntimeDeviceConfiguration deviceConfiguration(
+                extensions, requiredDeviceExtensions, deviceRequirements, pipelineCreationCacheControl);
             owned->physicalDevice = candidate;
             owned->queueFamilyIndex = *queueFamilyIndex;
             owned->device = vk::raii::Device(candidate, {vk::DeviceCreateFlags(),

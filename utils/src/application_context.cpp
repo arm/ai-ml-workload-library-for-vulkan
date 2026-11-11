@@ -39,8 +39,12 @@ bool ApplicationContext::initialize(const RuntimeContextDeviceRequirements &requ
         const float queuePriority = 1.0F;
         const vk::DeviceQueueCreateInfo queueCreateInfo({}, *candidateQueueFamilyIndex, 1, &queuePriority);
         try {
+            const auto pipelineCreationCacheControl =
+                candidate.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features>()
+                    .get<vk::PhysicalDeviceVulkan13Features>()
+                    .pipelineCreationCacheControl;
             const detail::RuntimeDeviceConfiguration deviceConfiguration(extensions, requiredDeviceExtensions,
-                                                                         requirements);
+                                                                         requirements, pipelineCreationCacheControl);
             auto candidateDevice = vk::raii::Device(candidate, {vk::DeviceCreateFlags(),
                                                                 queueCreateInfo,
                                                                 {},

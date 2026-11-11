@@ -7,7 +7,7 @@
 
 #include "session_tiling.hpp"
 
-#include "mlworkloadlib/compiled_execution.hpp"
+#include "mlworkloadlib/session.hpp"
 
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
@@ -33,6 +33,7 @@ struct CompiledExecutable {
         return size;
     }
 
+    std::optional<PipelineCreationReport> creationReport;
     SpecializationInfo specializationInfo;
     std::vector<vk::PushConstantRange> pushConstantRanges;
     vk::raii::ShaderModule shaderModule{nullptr};

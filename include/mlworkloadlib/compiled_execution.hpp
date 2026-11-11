@@ -54,6 +54,12 @@ struct SessionOptions {
      */
     std::optional<vk::MemoryPropertyFlags> requiredSessionMemoryProperties;
 
+    /** @brief Prevents pipeline compilation; requires pipelineCreationCacheControl support and enablement. */
+    bool failOnCompileRequired = false;
+
+    /** @brief Collects shared reports for the original pipeline creations. */
+    bool collectPipelineCreationFeedback = false;
+
     /** @brief Requires host-visible, host-coherent graph-session memory. */
     void requireHostVisibleSessionMemory() noexcept {
         requiredSessionMemoryProperties =

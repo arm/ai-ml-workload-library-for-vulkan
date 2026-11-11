@@ -501,6 +501,26 @@ Successful compilation fixes pipelines for every session sharing the
 overrides cannot reuse pipelines compiled by another session. Failed pipeline
 compilation retains overrides for retry; a new session must supply its own.
 
+Set ``SessionOptions::failOnCompileRequired`` to prevent compilation for all
+pipeline creations. The device must support ``pipelineCreationCacheControl`` and
+have it enabled. A compile-required result throws
+``vk::SystemError`` with ``ePipelineCompileRequired``, even without this policy.
+Preventing compilation does not guarantee an application-cache hit.
+
+Set ``SessionOptions::collectPipelineCreationFeedback`` to collect original
+creation reports. ``Session::pipelineCreationReport(executable)`` returns a copy,
+or ``std::nullopt`` when collection is disabled or compilation has not published
+all pipelines successfully. Compute reports have one stage; graph reports have
+none, including binary-backed graphs. Check the ``eValid`` flag independently
+for the pipeline and each stage before interpreting feedback. An application-cache
+hit requires both ``eValid`` and ``eApplicationPipelineCacheHit``.
+
+Failed compilation discards all reports and pipelines. Reports are shared with
+the compiled state and remain available after the creating session is destroyed.
+Access does not require the querying session to configure. Reuse and rejected
+repeated configuration preserve the original reports. Binary-backed creation
+accepts the same policy and feedback options.
+
 ``SessionOptions`` also accepts optional compute-pipeline robustness and neural
 statistics settings. The application must enable the corresponding Vulkan®
 extensions and device features before requesting them. Neural statistics settings
