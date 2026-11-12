@@ -1,0 +1,38 @@
+@startuml
+!option svgTitle "Prepared execution recording with Vulkan® commands"
+<style>
+root {
+  FontName SansSerif
+  Shadowing 0
+}
+element {
+  Shadowing 0
+}
+</style>
+hide footbox
+participant Application as app
+participant PreparedExecution as prepared
+participant "Command API\nVulkan®" as vk
+app -> prepared : record(commandBuffer, options)
+loop Ordered executables
+  prepared -> vk : Planned barriers (if needed)
+  prepared -> vk : Bind descriptors and pipeline
+  prepared -> vk : Update supplied push ranges
+  opt Hook supplied
+    prepared -> app : hook(Before, executable)
+    app --> prepared
+  end
+  alt Graph
+    prepared -> vk : vkCmdDispatchDataGraphARM()
+  else Compute
+    prepared -> vk : vkCmdDispatch()
+  end
+  opt Hook supplied
+    prepared -> app : hook(After, executable)
+    app --> prepared
+  end
+end
+prepared -> vk : Final image barriers (if needed)
+prepared --> app : Recording complete
+app -> vk : End/submit; track completion
+@enduml

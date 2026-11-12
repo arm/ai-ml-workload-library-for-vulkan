@@ -1,14 +1,15 @@
 Using the ML Workload Library for Vulkan®
 ==========================================
 
+See :doc:`architecture` for execution responsibilities, internal phases, and
+resource ownership. This guide provides the corresponding integration examples.
+
 Execution model
 ---------------
 
-The library can create a runtime-owned Vulkan® context, or it can wrap Vulkan®
-objects supplied by the application without taking ownership. When wrapping
-objects, the application must enable the Vulkan® extensions and features required
-by the workload. Similarly, the application can supply resources, or the context
-can allocate them based on the workload resource requirements.
+Create a Vulkan® context through the library or wrap application-owned objects.
+When wrapping, enable the extensions and features required by the workload.
+Both approaches are illustrated below.
 
 A workload is executed through the following sequence:
 
@@ -30,29 +31,17 @@ A workload is executed through the following sequence:
      Multiple executables can share one binary with different selectors or use
      separate binaries.
 
-   A data-graph binary cannot target an executable that has an
-   executable-specific module binding or uses a bound placeholder module.
-   Unselected graph and compute executables continue to use their workload
-   modules. A VGF graph marked ``ExternalDataGraphBinary`` needs a binary for
-   initial compilation; an unmarked VGF graph may also use one. A graph selected
-   for binary execution may omit its shader module.
+   See :ref:`wl-architecture-binaries` for binary/module compatibility and
+   :ref:`wl-usage-lifetimes` for the required binary-storage lifetime.
 
 4. Create a ``BindingSet`` and bind each public resource using caller-owned or
    runtime-owned allocations.
 5. Prepare a binding snapshot and either run it or record it into an
    application command buffer.
 
-By default, each ``Session`` owns its compiled pipelines and layouts. To share
-them across sessions for the same context and workload, pass a
-``CompiledExecution`` to each session. Each session still has its own binding
-sets and command state.
-Sessions sharing a ``CompiledExecution`` must use matching graph tensor strides.
-
-Each session also has its own tiling selection. Building shared pipelines fixes
-graph tensor tiling and the tiling of its alias peers. Sessions created
-afterward start with those choices; other tiling choices remain independent. A
-session created earlier must select compatible graph tensor tiling before it
-can reuse the pipelines.
+To reuse compiled pipelines across sessions for the same context and workload,
+pass a ``CompiledExecution`` to each session. Follow the tiling, stride, and
+serialization requirements in :ref:`wl-architecture-compilation`.
 
 The following excerpt from the standalone compute sample shows the common flow
 with a runtime-owned context and buffers. The sample defines the GLSL workload
@@ -181,9 +170,8 @@ Replacement code must use the workload's entry point and descriptor interface
 and be compatible with the effective push-constant layout. An executable cannot
 have both a module replacement and a data-graph binary.
 
-Successful pipeline compilation fixes the code for all sessions sharing a
-``CompiledExecution``. Later bindings are rejected, and other sessions must have
-no pending bindings when configured.
+Supply replacements before the first successful shared compilation; see
+:ref:`wl-architecture-compilation` for binding and reuse restrictions.
 
 Executable specialization overrides
 -----------------------------------
@@ -208,12 +196,11 @@ workload map. ``Session::specializationInfo(executable)`` returns an independent
 copy of the pending map, or the specialization overrides used to compile the
 pipelines once pipelines exist; it does not inspect shader defaults.
 
-Successful compilation fixes specialization for every session sharing the
-``CompiledExecution``. Later setters are rejected. Another session with pending
-compilation inputs cannot configure or query effective specialization, even when
-its pending values match. A session without pending inputs can inspect and reuse
-the compiled values. Failed pipeline compilation retains overrides for retry.
+Set overrides before the first successful shared compilation and follow
+:ref:`wl-architecture-compilation` when reusing compiled state or retrying.
 Data-graph binaries require an empty effective specialization map.
+
+.. _wl-usage-interface-mapping:
 
 Resource binding
 ----------------
@@ -242,17 +229,11 @@ workload resources, without inspecting the model resource table:
     }
     // Resolve outputs through info.outputs in the same way.
 
-Inputs and outputs retain model-interface order, including unused entries.
-Their binding IDs are independent of segment descriptor locations. Names need
-not be unique, and multiple entries can refer to one public resource. Separate
-input and output lists preserve direction even when their IDs overlap.
-Callers choose how to handle ambiguous IDs and conflicting bindings.
-
-Internal resources and constants are not exposed. Public resources absent from
-the declared model interface have no mapping; applications must diagnose any
-missing bindings rather than infer interface IDs from resource indices.
-The mapping is scoped to this import; discard it if import fails. Existing
-overloads omit the metadata, and standalone workloads are unaffected.
+Use the returned IDs to select application inputs and outputs; resolve ambiguous
+IDs, conflicting bindings, and missing mappings explicitly. Do not infer interface
+IDs from resource indices or descriptor locations. See
+:ref:`wl-architecture-interfaces` for mapping identity, ordering, and lifetime
+rules. Existing overloads omit the metadata, and standalone workloads are unaffected.
 
 WL creates intermediate resources during preparation. When they alias external
 memory, the caller still supplies allocation and placement metadata required by
@@ -299,6 +280,8 @@ aspect mask from the image format. Sampled depth/stencil images default to the
 depth aspect; an explicit range can select depth or stencil individually.
 Workload construction rejects aspect masks that do not match the format and
 sampled depth/stencil ranges that select both aspects.
+
+.. _wl-usage-external-aliases:
 
 External image/tensor aliases
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -358,6 +341,8 @@ offsets are relative to it and default to zero. ``Context::create*()`` allocates
 for one resource only. The caller guarantees that the allocation's actual memory
 type is supported by every alias.
 
+.. _wl-usage-image-layouts:
+
 Image layouts and synchronization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -367,34 +352,23 @@ share synchronization state; no memory alias group is needed for repeated
 bindings of the same image. Conflicting required layouts, supplied entry layouts
 or alias-group assignments are rejected.
 
-An optional image layout declares the entry layout. Prepared execution manages
-transitions required by executable accesses and internal alias peers. Optimal
-tensor aliases may transition even an image used only as external backing.
-For entry layouts other than ``eUndefined`` and ``ePreinitialized``, images return
-to their supplied entry layouts, including images accessed directly by an
-executable. This lets the same prepared commands be recorded and executed
-repeatedly without caller layout transitions between calls.
+Supply the image's actual entry layout in ``ImageBindingInfo::layout``, or
+establish its workload-required layout before execution when omitting that field.
+Choose the entry layout with reuse in mind:
 
-An ``eUndefined`` entry discards prior image contents on each execution and
-finishes in the workload-required layout. These commands can be repeated when
-discarding the prior contents is appropriate.
+- A concrete layout other than ``eUndefined`` or ``ePreinitialized`` is restored
+  after execution and can be used for replay.
+- ``eUndefined`` discards prior contents on every execution.
+- ``ePreinitialized`` preserves initial contents but permits only one execution
+  of the prepared commands, as in the external-alias example above.
 
-An ``ePreinitialized`` entry preserves initial image contents but permits only
-one execution of the prepared commands since Vulkan® does not permit transitioning them
-back to ``ePreinitialized``.
+Keep ``implicitBarrier`` enabled when a later layout transition or restoration
+is required. Memory sharing must follow workload-declared alias groups; repeated
+bindings of the same image do not require such a group. See
+:ref:`wl-architecture-image-replay` for transition and replay behavior and
+:ref:`wl-architecture-dependencies` for supported simultaneous alias accesses.
 
-Without a supplied layout, the caller establishes the workload-required image
-layout before execution; internal alias transitions still return to that layout.
-Linear tensor peers do not require tensor-alias image layout transitions.
-
-Alias groups share one memory dependency scope, independent of peer placement
-offsets. One executable may access multiple tensor/buffer peers when they require
-the same image layout state. Simultaneous accesses to distinct image peers, or to
-both an optimal tensor and an image peer in the same group, are rejected.
-
-Resources may share memory only within a workload-declared alias group.
-Keep ``implicitBarrier`` enabled when a later image layout transition is
-required, including restoration of the entry layout.
+.. _wl-usage-push-constants:
 
 Push constants
 --------------
@@ -415,8 +389,8 @@ This allows replacement code to use push constants absent from the VGF:
 
 ``Session::pushConstantSize(executable)`` returns the effective largest range end;
 ``ExecutableView::pushConstantSize()`` retains the original workload value.
-Layout overrides follow the shared compilation rules described above, including
-rejection of pending overrides whose values match the compiled layout.
+Layout overrides follow :ref:`wl-architecture-compilation`, including rejection
+of pending overrides whose values match the compiled layout.
 
 Call ``BindingSet::bindPushConstants(executable, data)`` before preparing an
 execution to supply push constants for an executable from the same workload.
@@ -461,12 +435,11 @@ Running and recording
 ``PreparedExecution::run()`` records, submits, and waits for completion using
 library-managed command and fence state.
 
-``PreparedExecution::record()`` records into a caller-owned command buffer and
-manages dependencies between workload executables according to their
-``implicitBarrier`` settings. VGF workloads retain library-managed internal
-dependencies. Image layout restoration may also record barriers after the final
-executable. The application is responsible for the command-buffer
-lifecycle, submission, and synchronization with work outside the call.
+Call ``PreparedExecution::record()`` with an already recording, queue-compatible
+command buffer. The application ends and submits it, supplies synchronization
+with surrounding work, and keeps the prepared execution and its resources alive
+through completion. See :ref:`wl-architecture-submission` for synchronization
+and reuse requirements.
 
 .. literalinclude:: ../sources/samples/4_record_glsl_compute_with_wrapped_context.cpp
    :language: cpp
@@ -496,10 +469,8 @@ Vulkan® ignores it.
 
 Cache pointers are borrowed: keep each referenced RAII cache object at a stable
 address and its Vulkan® cache valid until configuration finishes using it.
-Successful compilation fixes pipelines for every session sharing the
-``CompiledExecution``. Later setters are rejected, and a session with pending
-overrides cannot reuse pipelines compiled by another session. Failed pipeline
-compilation retains overrides for retry; a new session must supply its own.
+See :ref:`wl-architecture-compilation` for shared compilation, pending-input
+compatibility, and retry rules.
 
 Set ``SessionOptions::failOnCompileRequired`` to prevent compilation for all
 pipeline creations. The device must support ``pipelineCreationCacheControl`` and
@@ -526,35 +497,26 @@ statistics settings. The application must enable the corresponding Vulkan®
 extensions and device features before requesting them. Neural statistics settings
 are applied during graph pipeline and graph session creation.
 
+.. _wl-usage-lifetimes:
+
 Ownership and lifetimes
 -----------------------
 
-- The application retains ownership of Vulkan® objects and resources it supplies.
-  Runtime allocations own the Vulkan® resource and backing memory they expose.
-- All bound resources, whether caller-owned or runtime-owned, must remain valid
-  until submitted work has completed.
-- A runtime-owned ``Context`` must outlive its sessions, allocations, and any
-  submitted work that uses them.
-- The Vulkan® objects wrapped by ``Context`` must outlive the context, its
-  sessions, allocations created through it, and submitted work that uses them.
-- A ``Workload`` must outlive its non-owning views and every ``Session`` created
-  from it. A ``Session`` must outlive its binding sets and prepared executions.
-- ``CompiledExecution`` is tied to the ``Context`` and ``Workload`` supplied at
-  creation. Sessions keep its compiled state alive if the ``CompiledExecution``
-  object is destroyed; the context and workload must still outlive those
-  sessions.
-- VGF memory passed to ``Workload::fromVGF(bytes)`` must remain valid for
-  the workload lifetime. The same applies to caller-owned constant payloads in
-  a standalone data-graph description.
-- The library borrows data-graph binary bytes when they are bound to a
-  ``Session``. The pointer must meet the device's
-  ``dataGraphPipelineBinaryDataAlignment`` requirement. With the
-  default ``DataGraphBinaryStorageMode::ImplementationManaged`` mode, keep the
-  bytes valid until ``Session::configure()`` returns. If pipeline creation fails
-  and is retried, keep them alive or bind a replacement binary before retrying.
-  The optional identifier is copied when bound.
-- With ``DataGraphBinaryStorageMode::ApplicationBacked``, Vulkan® may use the
-  supplied bytes directly. Keep them accessible and unchanged until every
-  pipeline created from them is destroyed, including compiled state shared by Sessions.
-- ``Session::prepare()`` snapshots a binding set. Later changes to that binding
-  set do not change the prepared execution.
+Keep the workload, context, session, prepared execution, and bound resources
+alive for their dependent use, including submitted GPU work. Supplied Vulkan®
+objects remain application-owned. See :ref:`wl-architecture-lifetimes` for the
+complete ownership and destruction order.
+
+Caller-owned VGF bytes and standalone graph constant payloads must remain valid
+for the workload lifetime. Bound binary bytes must meet the device's
+``dataGraphPipelineBinaryDataAlignment`` requirement:
+
+- With default ``ImplementationManaged`` storage, retain the bytes through
+  successful ``configure()``; keep them alive or bind a replacement before retrying
+  failed compilation.
+- With ``ApplicationBacked`` storage, retain accessible, unchanged bytes until
+  every derived pipeline is destroyed, including pipelines shared by sessions.
+
+The binary identifier is copied when bound. See :ref:`wl-architecture-binaries`
+for the binary compilation path and :ref:`wl-architecture-preparation` for
+binding-snapshot behavior.

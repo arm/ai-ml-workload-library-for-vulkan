@@ -1,0 +1,40 @@
+@startuml
+!option svgTitle "Workload preparation and Vulkan® execution lifecycle"
+<style>
+root {
+  FontName SansSerif
+  Shadowing 0
+}
+element {
+  Shadowing 0
+}
+</style>
+hide footbox
+participant Application as app
+participant "Workload Library" as lib
+participant "Queue\nVulkan®" as queue
+note over app, lib
+  Construct Workload and Context;
+  create Session(context, workload).
+end note
+app -> lib : session.configure()
+lib -> lib : Compile or reuse pipelines;\ncreate graph-session and command state
+lib --> app : Configuration complete
+app -> lib : session.createBindingSet()
+lib --> app : bindings
+app -> lib : bindings.bindBuffer(resource, info)\n(or bindTensor / bindImage)
+app -> lib : session.prepare(bindings)
+lib -> lib : Snapshot bindings; create descriptors,\nintermediates and barrier plan
+lib --> app : execution
+alt Synchronous run
+  app -> lib : execution.run()
+  lib -> lib : Record workload commands
+  lib -> queue : Submit and wait
+  queue --> lib : Completion
+  lib --> app : Return after completion
+else Application command buffer
+  app -> lib : execution.record(commandBuffer)
+  lib --> app : Workload commands recorded
+  app -> queue : Submit; observe completion
+end
+@enduml

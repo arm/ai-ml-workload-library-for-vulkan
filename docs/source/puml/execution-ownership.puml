@@ -1,0 +1,30 @@
+@startuml
+<style>
+root {
+  FontName SansSerif
+  Shadowing 0
+}
+element {
+  Shadowing 0
+}
+</style>
+top to bottom direction
+rectangle "Workload and Context\nborrowed dependencies" as inputs
+rectangle "Shared compiled state\npipelines and layouts" as compiled
+rectangle "Optional\nCompiledExecution wrapper" as wrapper
+rectangle "Session A\ngraph sessions, memory,\ncommand state" as a
+rectangle "Session B\nseparate session state" as b
+rectangle "PreparedExecution A\ndescriptors and intermediates" as prep
+rectangle "External resources\nand allocation owners" as external
+compiled .up.> inputs : borrows
+wrapper -down-> compiled : retains
+a -up-> compiled : retains
+b -up-> compiled : retains
+prep .up.> a : borrows
+prep .down.> external : borrows handles
+legend bottom
+  Solid arrow: retains shared state
+  Dotted arrow: borrows; owner must outlive use
+  Objects own the state listed inside their boxes
+endlegend
+@enduml

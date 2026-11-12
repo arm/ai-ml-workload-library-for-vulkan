@@ -121,10 +121,10 @@ Applications can query the source backends available in the linked library with
 
 ## Documentation
 
-Build the HTML documentation independently of the native library. This requires
-CMake 3.25 or later, Ninja, Doxygen 1.9.1 or later, and the locked Python tooling
-dependencies (including Sphinx, Breathe, MyST, and the Read the Docs theme).
-No C/C++ compiler or native dependencies are required.
+To build only the documentation without configuring or compiling Workload Library,
+use a separate CMake build directory. This requires CMake 3.25 or later,
+Ninja, Doxygen 1.9.1 or later, the locked Python tooling, PlantUML, Java,
+and Graphviz.
 
 Run these commands from the component root:
 
