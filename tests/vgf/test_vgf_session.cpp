@@ -788,7 +788,10 @@ TEST_F(VgfSessionExecutionTest, RunComputeShaderSegmentWithBoundPlaceholderModul
     ASSERT_EQ(workload.placeholderModuleCount(), 1);
     ModuleImplementation implementation;
     implementation.codeKind = ModuleCodeKind::Spirv;
-    implementation.spirv = assembleAddInt32BuffersSpirv();
+    auto assembly = readSpvasmFile(ML_WORKLOAD_LIB_ADD_INT32_BUFFERS_SPVASM);
+    replace(assembly, "\"main\"", "\"add_values\"");
+    implementation.spirv = assembleSpirv(assembly);
+    implementation.entryPoint = "add_values";
 
     Session session(context, workload);
     session.bindModule(workload.placeholderModule(0), std::move(implementation));
@@ -819,10 +822,14 @@ TEST_F(VgfSessionExecutionTest, ExecutableModuleReplacementKeepsSharedModuleStep
         auto assembly = readSpvasmFile(ML_WORKLOAD_LIB_ADD_INT32_BUFFERS_SPVASM);
         if (subtract) {
             replace(assembly, "OpIAdd", "OpISub");
+            replace(assembly, "\"main\"", "\"subtract\"");
         }
         ModuleImplementation implementation;
         implementation.codeKind = ModuleCodeKind::Spirv;
         implementation.spirv = assembleSpirv(assembly);
+        if (subtract) {
+            implementation.entryPoint = "subtract";
+        }
         return implementation;
     };
     // Rebinding changes only the selected executable; the later fallback must not override it.
@@ -831,6 +838,7 @@ TEST_F(VgfSessionExecutionTest, ExecutableModuleReplacementKeepsSharedModuleStep
     session.bindModule(workload.placeholderModule(0), makeImplementation(false));
     EXPECT_EQ(workload.executable(0).module().index(), workload.executable(1).module().index());
     EXPECT_TRUE(workload.executable(0).module().requiresImplementation());
+    EXPECT_EQ(workload.executable(0).module().entryPoint(), "main");
     session.configure();
     EXPECT_THROW(session.bindModule(workload.executable(0), makeImplementation(true)), std::runtime_error);
 

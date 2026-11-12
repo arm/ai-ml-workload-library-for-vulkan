@@ -39,6 +39,17 @@ TEST(InternalUtils, RejectsElementCountOverflow) {
     EXPECT_THROW((void)elementCount(shape), std::runtime_error);
 }
 
+TEST(InternalUtils, ModuleImplementationSelectsEntryPoint) {
+    ModuleImplementation implementation;
+    implementation.codeKind = ModuleCodeKind::Spirv;
+    implementation.spirv = {0x07230203};
+    EXPECT_EQ(moduleFromImplementation(implementation, "module", "original").entryPoint, "original");
+    implementation.entryPoint = "replacement";
+    EXPECT_EQ(moduleFromImplementation(implementation, "module", "original").entryPoint, "replacement");
+    implementation.entryPoint = "";
+    EXPECT_THROW((void)moduleFromImplementation(implementation, "module", "original"), std::runtime_error);
+}
+
 TEST(InternalUtils, ComputesStridedResourceByteSizeWithCheckedArithmetic) {
     const auto resource = makeStridedBufferResource({4}, {static_cast<int64_t>(sizeof(int32_t))});
 

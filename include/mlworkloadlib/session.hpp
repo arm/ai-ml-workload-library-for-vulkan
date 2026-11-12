@@ -101,10 +101,10 @@ class Session final {
      * Configuration
      **************************************************************************/
 
-    /** @brief Supplies or replaces code for one executable before shared pipelines are compiled. */
+    /** @brief Supplies or replaces code and an optional entry point before shared pipelines are compiled. */
     void bindModule(ExecutableView executable, ModuleImplementation implementation);
 
-    /** @brief Supplies or replaces code for a placeholder module before configure(). */
+    /** @brief Supplies or replaces code and an optional entry point for a placeholder before configure(). */
     void bindModule(PlaceholderModuleView placeholderModule, ModuleImplementation implementation);
 
     /**

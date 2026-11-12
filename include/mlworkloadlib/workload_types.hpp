@@ -80,6 +80,9 @@ struct ModuleImplementation {
     std::string source;
     std::string buildOptions;
     std::vector<std::filesystem::path> includeDirs;
+
+    /** @brief Overrides the supplied or imported entry point; omitted preserves it. Must not be empty. */
+    std::optional<std::string> entryPoint;
 };
 
 /** @brief Compute dispatch dimensions in workgroups. */

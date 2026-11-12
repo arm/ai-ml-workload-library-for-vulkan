@@ -92,6 +92,10 @@ std::vector<uint32_t> compileGlslComputeToSpirv(const Module &module) {
         throw std::runtime_error("GLSL module preprocessing failed: " + compilerLog(shader));
     }
 
+    // Preprocessing resets the name. Export GLSL main under the selected entry point.
+    shader.setSourceEntryPoint("main");
+    shader.setEntryPoint(module.entryPoint.c_str());
+
     if (!shader.parse(GetDefaultResources(), 460, false, messages, includer)) {
         throw std::runtime_error("GLSL module compilation failed: " + compilerLog(shader));
     }

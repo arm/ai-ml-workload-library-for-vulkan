@@ -177,9 +177,20 @@ pipeline compilation. This overrides embedded code and placeholder bindings for
 that executable, allowing steps sharing a module to use different
 implementations. The original workload remains unchanged.
 
-Replacement code must use the workload's entry point and descriptor interface
-and be compatible with the effective push-constant layout. An executable cannot
-have both a module replacement and a data-graph binary.
+Set ``implementation.entryPoint`` when the replacement uses a different entry
+point. Omitting it preserves the workload's entry point; an explicit empty name
+is rejected. This applies to executable and placeholder module bindings, and
+selects the entry point for source compilation as well as pipeline creation.
+GLSL source retains its required ``main`` function, which is exported under
+the selected name in SPIR-V™. HLSL source defines the selected function name.
+Workload module views continue to describe the original imported module.
+When constructing a standalone workload, a supplied
+``ModuleImplementation::entryPoint`` also takes precedence over the enclosing
+description's ``entryPoint``.
+
+Replacement code must retain the descriptor interface and be compatible with
+the effective push-constant layout. An executable cannot have both a module
+replacement and a data-graph binary.
 
 Successful pipeline compilation fixes the code for all sessions sharing a
 ``CompiledExecution``. Later bindings are rejected, and other sessions must have
