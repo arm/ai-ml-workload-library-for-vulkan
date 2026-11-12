@@ -121,6 +121,47 @@ TEST_F(StandaloneComputeSessionExecutionTest, ExecutableModuleReplacementRunsRep
     EXPECT_EQ(workload.executable(0).module().codeKind(), ModuleCodeKind::Spirv);
 }
 
+TEST_F(StandaloneComputeSessionExecutionTest, SourceModuleReplacementSelectsEntryPoint) {
+    bool testedSourceModule = false;
+    for (const auto feature : {Feature::GlslModules, Feature::HlslModules}) {
+        if (!supports(feature)) {
+            continue;
+        }
+        testedSourceModule = true;
+        SCOPED_TRACE(feature == Feature::GlslModules ? "GLSL" : "HLSL");
+        auto workload = Workload::fromComputeShader(makeAddInt32BuffersDescription());
+        auto context = wrappedContext();
+        Session session(context, workload);
+        auto implementation = feature == Feature::GlslModules ? makeGlslAddInt32BuffersDescription().module
+                                                              : makeHlslAddInt32BuffersDescription().module;
+        if (feature == Feature::HlslModules) {
+            replace(implementation.source, "void main(", "void replacement(");
+        }
+        implementation.entryPoint = "replacement";
+        session.bindModule(workload.executable(0), std::move(implementation));
+        session.configure();
+        EXPECT_EQ(workload.executable(0).module().entryPoint(), "main");
+
+        constexpr size_t elements = 10;
+        constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
+        const Buffer lhs(physicalDevice, device, bufferSize);
+        const Buffer rhs(physicalDevice, device, bufferSize);
+        const Buffer output(physicalDevice, device, bufferSize);
+        lhs.write(std::vector<int32_t>(elements, 9));
+        rhs.write(std::vector<int32_t>(elements, 4));
+        output.write(std::vector<int32_t>(elements, 0));
+        auto bindings = session.createBindingSet();
+        bindings.bindBuffer(workload.resource(0), {*lhs.buffer});
+        bindings.bindBuffer(workload.resource(1), {*rhs.buffer});
+        bindings.bindBuffer(workload.resource(2), {*output.buffer});
+        session.prepare(bindings).run();
+        EXPECT_EQ(output.read(elements), std::vector<int32_t>(elements, 13));
+    }
+    if (!testedSourceModule) {
+        GTEST_SKIP() << "GLSL and HLSL source module support are disabled";
+    }
+}
+
 TEST_F(StandaloneComputeSessionExecutionTest, WrapUsesCallerOwnedVulkanObjects) {
     auto context = Context::wrap({instance, physicalDevice, device, queueFamilyIndex, queue});
     const auto contextView = context.contextView();

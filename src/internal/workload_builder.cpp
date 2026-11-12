@@ -101,6 +101,12 @@ bool isPublicRole(Resource::Role role) { return role == Resource::Role::Input ||
  *******************************************************************************/
 
 Module moduleFromImplementation(ModuleImplementation implementation, std::string name, std::string entryPoint) {
+    if (implementation.entryPoint) {
+        if (implementation.entryPoint->empty()) {
+            throw std::runtime_error("Workload module '" + name + "' entry point must not be empty");
+        }
+        entryPoint = std::move(*implementation.entryPoint);
+    }
     switch (implementation.codeKind) {
     case ModuleCodeKind::Spirv:
         if (implementation.spirv.empty()) {

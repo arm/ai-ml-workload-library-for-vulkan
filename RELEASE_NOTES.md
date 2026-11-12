@@ -43,6 +43,8 @@
   through `Session::setSpecializationInfo()` and `Session::specializationInfo()`.
 - Added `Session::bindModule(ExecutableView, ModuleImplementation)` to supply or
   replace code independently for each executable.
+- Added optional replacement entry points through `ModuleImplementation::entryPoint`
+  for executable and placeholder module bindings.
 - Added original workload access through `Session::workload()` and
   `BindingSet::workload()`, and original specialization and push-constant size
   inspection through `ExecutableView`.
