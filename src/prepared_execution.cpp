@@ -250,6 +250,28 @@ vk::AccessFlags2 resourceAccessMask(ResourceAccess access, vk::AccessFlags2 read
     return {};
 }
 
+bool validateAndMatchImageState(vk::Image image, const vk::ImageSubresourceRange &range, vk::Image boundImage,
+                                const vk::ImageSubresourceRange &boundRange) {
+    if (image != boundImage) {
+        return false;
+    }
+    if (range == boundRange) {
+        return true;
+    }
+    const auto overlaps = [](uint32_t base, uint32_t count, uint32_t otherBase, uint32_t otherCount) {
+        return uint64_t{base} < uint64_t{otherBase} + otherCount && uint64_t{otherBase} < uint64_t{base} + count;
+    };
+    // Color includes all planes of a multi-planar image.
+    const bool aspectsOverlap = (range.aspectMask & boundRange.aspectMask) ||
+                                ((range.aspectMask | boundRange.aspectMask) & vk::ImageAspectFlagBits::eColor);
+    if (aspectsOverlap &&
+        overlaps(range.baseMipLevel, range.levelCount, boundRange.baseMipLevel, boundRange.levelCount) &&
+        overlaps(range.baseArrayLayer, range.layerCount, boundRange.baseArrayLayer, boundRange.layerCount)) {
+        throw std::runtime_error("Overlapping bindings of the same image must use identical subresource ranges");
+    }
+    return false;
+}
+
 void recordPipelineBarrier(const vk::raii::Device &device, vk::CommandBuffer commandBuffer,
                            const vk::DependencyInfo &dependencyInfo) {
     const auto *const dispatcher = device.getDispatcher();
@@ -938,7 +960,8 @@ PreparedExecution::Impl::SynchronizationState PreparedExecution::Impl::buildSync
         auto slotIndex = info.synchronizationSlotIndex;
         const auto descriptorLayout = requiredImageLayout(sessionImpl.workload, boundImage.descBinding);
         const auto sameImageState = [&boundImage](const SynchronizationState::Image &imageState) {
-            return imageState.image == boundImage.image && imageState.subresourceRange == boundImage.subresourceRange;
+            return validateAndMatchImageState(imageState.image, imageState.subresourceRange, boundImage.image,
+                                              boundImage.subresourceRange);
         };
         const auto existing = std::find_if(state.images.begin(), state.images.end(), sameImageState);
         uint32_t imageStateIndex = 0;

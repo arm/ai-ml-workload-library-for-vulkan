@@ -93,6 +93,66 @@ TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderWorkload) {
     EXPECT_EQ(outputBuffer.read(elements), expected);
 }
 
+TEST_F(StandaloneComputeSessionExecutionTest, ImageBindingRangesAreValidated) {
+    auto workload = Workload::fromComputeShader(makeAddInt32BuffersWithSampledImagesDescription());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.configure();
+    auto bindings = session.createBindingSet();
+    const auto imageResource = workload.resource(3);
+    const auto defaultRange = imageResource.requirements().asImage().requiredSubresourceRange();
+    const Image image(physicalDevice, device);
+    ImageBindingInfo input{*image.image, {}, *image.imageView, {}, std::nullopt, defaultRange};
+    EXPECT_NO_THROW(bindings.bindImage(imageResource, input));
+    for (const auto invalid : {
+             vk::ImageSubresourceRange({}, 0, 1, 0, 1),
+             vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1),
+             vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 0, 0, 1),
+             vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 0),
+             vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, VK_REMAINING_MIP_LEVELS, 0, 1),
+             vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, VK_REMAINING_ARRAY_LAYERS),
+             vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, UINT32_MAX, 2, 0, 1),
+             vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, UINT32_MAX, 2),
+         }) {
+        input.subresourceRange = invalid;
+        EXPECT_THROW(bindings.bindImage(imageResource, input), std::runtime_error);
+    }
+    input.subresourceRange = defaultRange;
+    EXPECT_NO_THROW(bindings.bindImage(imageResource, input));
+    EXPECT_EQ(imageResource.requirements().asImage().requiredSubresourceRange(), defaultRange);
+}
+
+TEST_F(StandaloneComputeSessionExecutionTest, PrepareRejectsOverlappingImageBindingRanges) {
+    auto workload = Workload::fromComputeShader(makeAddInt32BuffersWithSampledImagesDescription());
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.configure();
+    auto bindings = session.createBindingSet();
+    const Buffer buffer(physicalDevice, device, 10 * sizeof(int32_t));
+    for (uint32_t index = 0; index < 3; ++index) {
+        bindings.bindBuffer(workload.resource(index), {*buffer.buffer});
+    }
+    const Image image(physicalDevice, device, vk::ImageUsageFlagBits::eSampled, {4, 4, 1}, vk::Format::eR8G8B8A8Snorm,
+                      3);
+    const vk::ImageSubresourceRange firstRange(vk::ImageAspectFlagBits::eColor, 0, 2, 0, 1);
+    const vk::raii::ImageView firstView(
+        device, {{}, *image.image, vk::ImageViewType::e2D, vk::Format::eR8G8B8A8Snorm, {}, firstRange});
+    bindings.bindImage(workload.resource(3), {*image.image, {}, *firstView, {}, vk::ImageLayout::eGeneral, firstRange});
+    const auto sampler = makeNearestSampler(device);
+    for (const auto range : {firstRange, vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 1, 2, 0, 1),
+                             vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 2, 1, 0, 1)}) {
+        SCOPED_TRACE(range.baseMipLevel);
+        const vk::raii::ImageView view(
+            device, {{}, *image.image, vk::ImageViewType::e2D, vk::Format::eR8G8B8A8Snorm, {}, range});
+        bindings.bindImage(workload.resource(4), {*image.image, {}, *view, *sampler, vk::ImageLayout::eGeneral, range});
+        if (range.baseMipLevel == 1) {
+            EXPECT_THROW((void)session.prepare(bindings), std::runtime_error);
+        } else {
+            EXPECT_NO_THROW((void)session.prepare(bindings));
+        }
+    }
+}
+
 TEST_F(StandaloneComputeSessionExecutionTest, ExecutableModuleReplacementRunsReplacementCode) {
     auto workload = Workload::fromComputeShader(makeAddInt32BuffersDescription());
     auto context = wrappedContext();

@@ -1,0 +1,52 @@
+;
+; SPDX-FileCopyrightText: Copyright 2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
+; SPDX-License-Identifier: Apache-2.0
+;
+; Sample view-relative mip levels into a storage buffer.
+OpCapability Shader
+OpCapability ImageQuery
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main" %invocation %sampled %values
+OpExecutionMode %main LocalSize 1 1 1
+OpDecorate %invocation BuiltIn GlobalInvocationId
+OpDecorate %sampled DescriptorSet 0
+OpDecorate %sampled Binding 0
+OpDecorate %values DescriptorSet 0
+OpDecorate %values Binding 1
+OpDecorate %array ArrayStride 4
+OpMemberDecorate %block 0 Offset 0
+OpDecorate %block Block
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%int = OpTypeInt 32 1
+%uint = OpTypeInt 32 0
+%u3 = OpTypeVector %uint 3
+%i2 = OpTypeVector %int 2
+%i4 = OpTypeVector %int 4
+%zero = OpConstant %int 0
+%coord = OpConstantComposite %i2 %zero %zero
+%image = OpTypeImage %int 2D 0 0 0 1 Unknown
+%sampler = OpTypeSampledImage %image
+%sampled_ptr = OpTypePointer UniformConstant %sampler
+%sampled = OpVariable %sampled_ptr UniformConstant
+%array = OpTypeRuntimeArray %int
+%block = OpTypeStruct %array
+%block_ptr = OpTypePointer StorageBuffer %block
+%values = OpVariable %block_ptr StorageBuffer
+%int_ptr = OpTypePointer StorageBuffer %int
+%input_ptr = OpTypePointer Input %u3
+%invocation = OpVariable %input_ptr Input
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%id = OpLoad %u3 %invocation
+%index = OpCompositeExtract %uint %id 0
+%combined = OpLoad %sampler %sampled
+%texture = OpImage %image %combined
+%levels = OpImageQueryLevels %uint %texture
+%lod = OpUMod %uint %index %levels
+%texel = OpImageFetch %i4 %texture %coord Lod %lod
+%value = OpCompositeExtract %int %texel 0
+%out = OpAccessChain %int_ptr %values %zero %index
+OpStore %out %value
+OpReturn
+OpFunctionEnd

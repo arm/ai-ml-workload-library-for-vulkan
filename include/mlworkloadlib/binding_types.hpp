@@ -42,10 +42,15 @@ struct BufferBindingInfo {
 /**
  * @brief Image descriptor and optional memory information for image binding.
  *
- * The subresource range must match
- * ImageRequirementsView::requiredSubresourceRange(). If @ref layout has a
- * value, it declares the entry layout. Otherwise, the caller establishes
- * ImageRequirementsView::requiredLayout() before execution. PreparedExecution
+ * The subresource range describes the supplied image view and may differ from
+ * ImageRequirementsView::requiredSubresourceRange(). Aspects must be compatible
+ * with the workload format and descriptor type; counts must be explicit, finite
+ * and nonzero. The caller guarantees that the range exactly describes the view,
+ * fits the image, and satisfies the remaining resource and alias requirements.
+ * Within one prepared execution, overlapping views of the same image must use
+ * identical subresource ranges. Preparation rejects non-identical overlapping ranges.
+ * If @ref layout has a value, it declares the entry layout. Otherwise, the caller
+ * establishes ImageRequirementsView::requiredLayout() before execution. PreparedExecution
  * manages transitions for workload accesses and internal alias peers, including
  * images used only as external backing. Images return to the supplied entry
  * layout after execution so the same prepared commands can be recorded again,

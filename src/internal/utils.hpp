@@ -122,6 +122,8 @@ void validateTensorTiling(vk::TensorTilingARM tiling, vk::TensorUsageFlagsARM us
                           bool hasExplicitStrides);
 void validateTensorMetadata(vk::Format format, const std::vector<int64_t> &shape, const std::vector<int64_t> &stride);
 vk::ImageAspectFlags imageAspectMask(vk::Format format);
+void validateImageSubresourceAspects(vk::Format format, vk::DescriptorType descriptorType,
+                                     vk::ImageAspectFlags aspects);
 vk::ImageViewType imageViewType(vk::ImageType imageType);
 void validateImageTiling(vk::ImageTiling tiling, vk::ImageUsageFlags usage);
 

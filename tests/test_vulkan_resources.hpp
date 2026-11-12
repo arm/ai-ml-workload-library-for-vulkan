@@ -112,10 +112,11 @@ struct Buffer {
 
 struct Image {
     Image(const vk::raii::PhysicalDevice &physicalDevice, const vk::raii::Device &device,
-          vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, vk::Extent3D extent = {2, 2, 1})
-        : image(device, vk::ImageCreateInfo({}, vk::ImageType::e2D, vk::Format::eR8G8B8A8Snorm, extent, 1, 1,
-                                            vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal, usage,
-                                            vk::SharingMode::eExclusive)) {
+          vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled, vk::Extent3D extent = {2, 2, 1},
+          vk::Format format = vk::Format::eR8G8B8A8Snorm, uint32_t mipLevels = 1)
+        : image(device,
+                vk::ImageCreateInfo({}, vk::ImageType::e2D, format, extent, mipLevels, 1, vk::SampleCountFlagBits::e1,
+                                    vk::ImageTiling::eOptimal, usage, vk::SharingMode::eExclusive)) {
         const auto memoryRequirements = image.getMemoryRequirements();
         memorySize = memoryRequirements.size;
         const auto memoryType = detail::findMemoryType(physicalDevice, memoryRequirements.memoryTypeBits,
@@ -123,9 +124,9 @@ struct Image {
         memory = vk::raii::DeviceMemory(device, {memorySize, memoryType});
         image.bindMemory(*memory, 0);
 
-        const vk::ImageSubresourceRange range(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
-        imageView = vk::raii::ImageView(
-            device, vk::ImageViewCreateInfo({}, *image, vk::ImageViewType::e2D, vk::Format::eR8G8B8A8Snorm, {}, range));
+        const vk::ImageSubresourceRange range(vk::ImageAspectFlagBits::eColor, 0, mipLevels, 0, 1);
+        imageView =
+            vk::raii::ImageView(device, vk::ImageViewCreateInfo({}, *image, vk::ImageViewType::e2D, format, {}, range));
     }
 
     vk::raii::DeviceMemory memory{nullptr};

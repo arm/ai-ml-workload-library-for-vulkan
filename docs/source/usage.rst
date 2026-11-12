@@ -157,6 +157,37 @@ specialization entries and bytes, excluding shader defaults.
 ``pushConstantSize()`` returns the largest original range end (``offset + size``),
 or zero when no ranges are declared.
 
+External image view ranges
+--------------------------
+
+Imported images may describe a single mip while the application supplies a
+view covering several mips. Supply the view's actual range through
+``ImageBindingInfo::subresourceRange`` when calling ``BindingSet::bindImage()``.
+The range may differ from ``ImageRequirementsView::requiredSubresourceRange()``.
+For example:
+
+.. code-block:: cpp
+
+   ImageBindingInfo binding;
+   binding.image = image;
+   binding.imageView = view;
+   binding.sampler = sampler;
+   binding.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 3, 0, 1};
+   bindings.bindImage(imageResource, binding);
+
+Counts must be explicit, nonzero and finite; remaining-mip/layer sentinels are
+not supported. Aspects must be compatible with the workload format and
+descriptor type. The application guarantees that the range fits the actual
+image, exactly describes the supplied view and satisfies the remaining resource
+requirements, including alias compatibility.
+
+Bindings may select different compatible ranges within one configured session.
+Each prepared execution retains its bound range for image layout transitions
+and restoration. Workload metadata and library-created alias peers retain their
+original ranges. Within one prepared execution, views of the same image must
+have identical or non-overlapping subresource ranges. Preparation rejects
+non-identical overlapping ranges.
+
 Executable module replacement
 -----------------------------
 

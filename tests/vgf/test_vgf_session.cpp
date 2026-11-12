@@ -808,6 +808,70 @@ TEST_F(VgfSessionExecutionTest, RunComputeShaderSegmentWithBoundPlaceholderModul
     EXPECT_EQ(outputBuffer.read(elements), expected);
 }
 
+TEST_F(VgfSessionExecutionTest, ImageBindingRangesCanChangeWithinConfiguredSession) {
+    const auto code = assembleSpirv(readSpvasmFile(ML_WORKLOAD_LIB_SAMPLE_IMAGE_MIPS_SPVASM));
+    const auto bytes = writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
+        const auto module = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "sample_mips", "main", code);
+        const auto image =
+            encoder.AddInputResource(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_FORMAT_R32_SINT, {4, 4, 1}, {});
+        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {3}, {4});
+        const auto inputBinding = encoder.AddBindingSlot(0, image);
+        const auto outputBinding = encoder.AddBindingSlot(1, output);
+        const auto descriptors = encoder.AddDescriptorSetInfo({inputBinding, outputBinding}, 0);
+        encoder.AddSegmentInfo(module, "sample_mips", {descriptors}, {inputBinding}, {outputBinding}, noGraphConstants,
+                               {3, 1, 1});
+    });
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
+    auto context = wrappedContext();
+    Session session(context, workload);
+    const auto imageResource = workload.resource(0);
+    const vk::ImageSubresourceRange range(vk::ImageAspectFlagBits::eColor, 0, 3, 0, 1);
+    ASSERT_EQ(imageResource.requirements().asImage().requiredSubresourceRange().levelCount, 1u);
+    session.configure();
+
+    const Image inputImage(physicalDevice, device,
+                           vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst, {4, 4, 1},
+                           vk::Format::eR32Sint, 3);
+    const auto image = *inputImage.image;
+    const vk::raii::Sampler sampler(device,
+                                    {{}, vk::Filter::eNearest, vk::Filter::eNearest, vk::SamplerMipmapMode::eNearest});
+    const Buffer output(physicalDevice, device, 3 * sizeof(int32_t));
+    const std::vector<int32_t> expected{17, 31, 59};
+    recordAndSubmitCommands(device, queue, queueFamilyIndex, [&](vk::CommandBuffer commandBuffer) {
+        const vk::ImageMemoryBarrier initial({}, vk::AccessFlagBits::eTransferWrite, vk::ImageLayout::eUndefined,
+                                             vk::ImageLayout::eGeneral, VK_QUEUE_FAMILY_IGNORED,
+                                             VK_QUEUE_FAMILY_IGNORED, image, range);
+        commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer, {},
+                                      {}, {}, initial, *device.getDispatcher());
+        for (uint32_t mip = 0; mip < 3; ++mip) {
+            const vk::ClearColorValue color(std::array<int32_t, 4>{expected[mip], 0, 0, 0});
+            commandBuffer.clearColorImage(image, vk::ImageLayout::eGeneral, color,
+                                          vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, mip, 1, 0, 1),
+                                          *device.getDispatcher());
+        }
+    });
+    auto bindings = session.createBindingSet();
+    ImageBindingInfo input{image, {}, *inputImage.imageView, *sampler, vk::ImageLayout::eGeneral, range};
+    bindings.bindImage(imageResource, input);
+    bindings.bindBuffer(workload.resource(1), {*output.buffer});
+    const vk::ImageSubresourceRange shorterRange(vk::ImageAspectFlagBits::eColor, 0, 2, 0, 1);
+    const vk::raii::ImageView shorterView(device,
+                                          {{}, image, vk::ImageViewType::e2D, vk::Format::eR32Sint, {}, shorterRange});
+    auto execution = session.prepare(bindings);
+    input.imageView = *shorterView;
+    input.subresourceRange = shorterRange;
+    bindings.bindImage(imageResource, input);
+    auto shorterExecution = session.prepare(bindings);
+    for (int repeat = 0; repeat < 2; ++repeat) {
+        output.write(std::vector<int32_t>(3, 0));
+        shorterExecution.run();
+        EXPECT_EQ(output.read(3), (std::vector<int32_t>{17, 31, 17}));
+        output.write(std::vector<int32_t>(3, 0));
+        execution.run();
+        EXPECT_EQ(output.read(3), expected);
+    }
+}
+
 // Different arithmetic makes wrong module selection visible in the output.
 TEST_F(VgfSessionExecutionTest, ExecutableModuleReplacementKeepsSharedModuleStepsIndependent) {
     const auto bytes = writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
