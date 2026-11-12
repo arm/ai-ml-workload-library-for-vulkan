@@ -211,8 +211,6 @@ Set overrides before the first successful shared compilation and follow
 :ref:`wl-architecture-compilation` when reusing compiled state or retrying.
 Data-graph binaries require an empty effective specialization map.
 
-.. _wl-usage-interface-mapping:
-
 Resource binding
 ----------------
 
@@ -225,30 +223,30 @@ Entries are not deduplicated, including when compatible entries are later bound
 to the same external Vulkan® object. Descriptor set and binding numbers do not
 determine public resource order.
 
-Applications can map VGF model-interface binding IDs directly to public
-workload resources, without inspecting the model resource table:
+For VGF, public resource indices follow input/output entries in model-resource-
+table order. Applications using VGF model-interface IDs can parse them with
+``vgfutils::parseModelInterface()`` using the sequence and resource-table
+decoders for the same VGF:
 
 .. code-block:: cpp
 
-    #include <mlworkloadlib/vgf_import_info.hpp>
+    #include <vgf-utils/model_interface.hpp>
 
-    VgfImportInfo info;
-    auto workload = Workload::fromVGF(path, info);
-    for (const auto &input : info.inputs) {
-        auto resource = workload.resource(input.publicResourceIndex);
-        // Bind the application's input identified by input.binding.
+    auto modelInterface = mlsdk::vgfutils::parseModelInterface(*sequenceDecoder, *resourceDecoder);
+    auto workload = Workload::fromVGF(path);
+    for (const auto &input : modelInterface.inputs) {
+        auto resource = workload.resource(input.inputOutputIndex);
+        // Select the application's input by input.bindingSlot.mBinding and bind resource.
     }
-    // Resolve outputs through info.outputs in the same way.
 
-Use the returned IDs to select application inputs and outputs; resolve ambiguous
-IDs, conflicting bindings, and missing mappings explicitly. Do not infer interface
-IDs from resource indices or descriptor locations. See
-:ref:`wl-architecture-interfaces` for mapping identity, ordering, and lifetime
-rules. Existing overloads omit the metadata, and standalone workloads are unaffected.
+``inputOutputIndex`` skips intermediates and constants in the model resource
+table. Input and output lists retain interface order, including repeated and
+unused entries. The application resolves its own binding IDs; they are not
+descriptor locations.
 
 WL creates intermediate resources during preparation. When they alias external
 memory, the caller still supplies allocation and placement metadata required by
-the alias APIs; interface mapping does not replace that contract.
+the alias APIs.
 
 Choose public tensor or image tiling with ``Session::setTensorTiling()`` or
 ``Session::setImageTiling()`` before ``configure()``. Tensors normally default to

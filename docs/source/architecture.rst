@@ -85,8 +85,7 @@ A VGF sequence segment becomes an executable; several executables can refer to
 one module. Standalone compute and data-graph descriptions each construct one
 executable. Resource metadata is separate from descriptor locations, and constant
 payloads are separate from their references in graph executables. The public
-binding identities are explained in :ref:`wl-architecture-interfaces`; see
-:ref:`wl-usage-interface-mapping` for the VGF interface-mapping example.
+binding identities are explained in :ref:`wl-architecture-interfaces`.
 
 The resulting execution flow is:
 
@@ -180,43 +179,14 @@ module implementation unspecified defers supplying code to the session.
 Public bindings and descriptor locations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-VGF model-interface IDs, public workload indices, internal resource indices,
-and descriptor set/binding locations describe different relationships. For
-example, consider a VGF resource table containing an intermediate at index 0,
-an input at index 1, and an output at index 2. Filtering to public resources
-makes that input public resource 0. Two model-input entries, IDs 17 and 18,
-may both refer to it, while executable 0 accesses it at set 2, binding 7:
-
-.. list-table:: One input across the four identity spaces
-   :header-rows: 1
-   :class: workload-architecture-table
-   :widths: 45 55
-
-   * - Identity
-     - Value in this example
-   * - VGF model input binding IDs
-     - 17 and 18, both referring to the same input
-   * - Public workload resource index
-     - 0; bind through ``workload.resource(0)``
-   * - Internal resource-table index
-     - 1; the intermediate preceding it is not public
-   * - Executable descriptor location
-     - Executable 0, set 2, binding 7
-
-The ``fromVGF()`` overload taking ``VgfImportInfo`` reports the first mapping:
-``inputs`` contains entries ``{17, 0}`` and ``{18, 0}``. Descriptor-interface
-inspection describes the executable's use of the same public resource instead.
-Applications bind the public resource once; they must resolve conflicting
-application bindings themselves if their input-ID policy would assign different
-objects to these two entries.
-
-``VgfImportInfo`` owns its input/output mapping entries and preserves interface
-order, duplicate references, and unused entries. Input and output ID lists remain
-separate, so an input and an output may use the same ID. Names need not be unique.
-Public resources absent from the declared model interface have no mapping;
-applications must not infer interface IDs from their public indices. The mapping
-is scoped to the workload returned by that import; discard it if import fails.
-Resource and executable views, in contrast, borrow the workload itself.
+Public resource indices identify input/output resources; executable descriptor
+locations identify how a segment uses them. VGF import assigns public indices
+in model-resource-table order, skipping constants and intermediates. An input
+at table index 1 after an intermediate is therefore ``workload.resource(0)``,
+even if an executable uses it at set 2, binding 7. VGF model-interface IDs
+are another identity: ``vgfutils::parseModelInterface()`` returns their
+resource-table indices and input/output-only public indices. The application
+uses the latter to choose the objects to bind.
 
 Context and session configuration
 ---------------------------------
