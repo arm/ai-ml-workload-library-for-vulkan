@@ -22,7 +22,6 @@ class BindingSet;
 class PreparedExecution;
 class Session;
 class Workload;
-struct VgfImportInfo;
 
 /** @cond */
 namespace detail {
@@ -527,23 +526,12 @@ class Workload final {
     /** @brief Loads a VGF-backed Workload from a file. */
     static Workload fromVGF(const std::filesystem::path &path);
 
-    /** @brief Loads a VGF workload and reports its external-interface resource mapping. */
-    static Workload fromVGF(const std::filesystem::path &path, VgfImportInfo &importInfo);
-
     /**
      * @brief Decodes a VGF-backed Workload from caller-owned memory.
      *
      * The bytes must remain valid and unchanged for the lifetime of the returned Workload.
      */
     static Workload fromVGF(ArrayView<const std::byte> bytes);
-
-    /**
-     * @brief Decodes a VGF workload and reports its external-interface resource mapping.
-     *
-     * Source memory has the same lifetime requirements as the overload without importInfo.
-     * Include mlworkloadlib/vgf_import_info.hpp to construct the output metadata.
-     */
-    static Workload fromVGF(ArrayView<const std::byte> bytes, VgfImportInfo &importInfo);
 
     /**
      * @brief Builds a Workload containing one standalone compute executable.

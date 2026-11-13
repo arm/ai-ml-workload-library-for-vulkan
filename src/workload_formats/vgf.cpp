@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "mlworkloadlib/vgf_import_info.hpp"
 #include "mlworkloadlib/workload.hpp"
 
 #ifdef ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
@@ -297,7 +296,7 @@ void addDecodedDescriptorBinding(const vgflib::ModelSequenceTableDecoder &sequen
         bindingAccess(sequenceDecoder, executableIndex, resourceIndex, binding, resource.role));
 }
 
-void populateVgfWorkload(WorkloadBuilder &builder, const void *data, std::size_t size, VgfImportInfo *importInfo) {
+void populateVgfWorkload(WorkloadBuilder &builder, const void *data, std::size_t size) {
     // Header and tables
     auto header = vgflib::CreateHeaderDecoder(data, vgflib::HeaderSize(), size);
     if (!header) {
@@ -319,19 +318,9 @@ void populateVgfWorkload(WorkloadBuilder &builder, const void *data, std::size_t
 
     // Resources
     builder.reserveResources(modelResourceTable->size());
-    std::vector<std::optional<uint32_t>> publicResourceIndices;
-    uint32_t publicResourceCount = 0;
-    if (importInfo) {
-        *importInfo = {};
-        publicResourceIndices.resize(modelResourceTable->size());
-    }
     for (uint32_t resourceIndex = 0; resourceIndex < modelResourceTable->size(); ++resourceIndex) {
         if (addDecodedResource(builder, *modelResourceTable, resourceIndex) != resourceIndex) {
             throw std::logic_error("VGF resource index does not match builder insertion order");
-        }
-        const auto role = builder.resource(resourceIndex).role;
-        if (importInfo && (role == Resource::Role::Input || role == Resource::Role::Output)) {
-            publicResourceIndices[resourceIndex] = publicResourceCount++;
         }
     }
 
@@ -395,28 +384,6 @@ void populateVgfWorkload(WorkloadBuilder &builder, const void *data, std::size_t
         }
     }
 
-    // Resolve the external interface here so callers never need model resource table indices.
-    if (importInfo) {
-        const auto addInterface = [&](vgflib::BindingSlotArrayHandle bindings, Resource::Role expectedRole,
-                                      std::vector<VgfInterfaceBinding> &interfaceBindings) {
-            for (uint32_t slot = 0; slot < modelSequenceTable->getBindingsSize(bindings); ++slot) {
-                const auto resourceIndex = modelSequenceTable->getBindingSlotMrtIndex(bindings, slot);
-                if (resourceIndex >= publicResourceIndices.size() || !publicResourceIndices[resourceIndex]) {
-                    throw std::runtime_error("VGF interface binding does not reference a public workload resource");
-                }
-                if (builder.resource(resourceIndex).role != expectedRole) {
-                    throw std::runtime_error("VGF interface binding has a mismatched resource category");
-                }
-                interfaceBindings.push_back(
-                    {modelSequenceTable->getBindingSlotBinding(bindings, slot), *publicResourceIndices[resourceIndex]});
-            }
-        };
-        addInterface(modelSequenceTable->getModelSequenceInputBindingSlotsHandle(), Resource::Role::Input,
-                     importInfo->inputs);
-        addInterface(modelSequenceTable->getModelSequenceOutputBindingSlotsHandle(), Resource::Role::Output,
-                     importInfo->outputs);
-    }
-
     // Public resource names
     auto addNames = [&](vgflib::BindingSlotArrayHandle bindings, vgflib::NameArrayHandle names) {
         if (bindings == nullptr || names == nullptr) {
@@ -435,7 +402,7 @@ void populateVgfWorkload(WorkloadBuilder &builder, const void *data, std::size_t
              modelSequenceTable->getModelSequenceOutputNamesHandle());
 }
 
-Workload decodeVgfMemory(std::unique_ptr<VgfFileStorage> sourceStorage, VgfImportInfo *importInfo = nullptr) {
+Workload decodeVgfMemory(std::unique_ptr<VgfFileStorage> sourceStorage) {
     if (sourceStorage == nullptr) {
         throw std::logic_error("File-backed VGF decode requires a memory map");
     }
@@ -444,13 +411,13 @@ Workload decodeVgfMemory(std::unique_ptr<VgfFileStorage> sourceStorage, VgfImpor
     const auto size = sourceStorage->size();
 
     WorkloadBuilder builder(std::move(sourceStorage));
-    populateVgfWorkload(builder, data, size, importInfo);
+    populateVgfWorkload(builder, data, size);
     return builder.finish();
 }
 
-Workload decodeVgfMemory(ArrayView<const std::byte> bytes, VgfImportInfo *importInfo = nullptr) {
+Workload decodeVgfMemory(ArrayView<const std::byte> bytes) {
     WorkloadBuilder builder;
-    populateVgfWorkload(builder, bytes.data(), bytes.size(), importInfo);
+    populateVgfWorkload(builder, bytes.data(), bytes.size());
     return builder.finish();
 }
 
@@ -466,14 +433,6 @@ Workload Workload::fromVGF(const std::filesystem::path &path) {
 
 Workload Workload::fromVGF(ArrayView<const std::byte> bytes) { return decodeVgfMemory(bytes); }
 
-Workload Workload::fromVGF(const std::filesystem::path &path, VgfImportInfo &importInfo) {
-    return decodeVgfMemory(std::make_unique<VgfFileStorage>(path), &importInfo);
-}
-
-Workload Workload::fromVGF(ArrayView<const std::byte> bytes, VgfImportInfo &importInfo) {
-    return decodeVgfMemory(bytes, &importInfo);
-}
-
 #else
 
 namespace {
@@ -487,10 +446,6 @@ namespace {
 Workload Workload::fromVGF(const std::filesystem::path &) { throwVgfSupportUnavailable(); }
 
 Workload Workload::fromVGF(ArrayView<const std::byte>) { throwVgfSupportUnavailable(); }
-
-Workload Workload::fromVGF(const std::filesystem::path &, VgfImportInfo &) { throwVgfSupportUnavailable(); }
-
-Workload Workload::fromVGF(ArrayView<const std::byte>, VgfImportInfo &) { throwVgfSupportUnavailable(); }
 
 #endif // ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT
 

@@ -2,12 +2,13 @@
  * SPDX-FileCopyrightText: Copyright 2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "mlworkloadlib/vgf_import_info.hpp"
 #include "mlworkloadlib/workload.hpp"
 #include "test_spirv_utils.hpp"
 #include "test_vgf_utils.hpp"
 
+#include "vgf-utils/model_interface.hpp"
 #include "vgf-utils/temp_folder.hpp"
+#include "vgf/decoder.hpp"
 
 #include <gtest/gtest.h>
 #include <vulkan/vulkan_core.h>
@@ -36,10 +37,10 @@ TEST(VgfWorkload, DecodesPublicExecutablesBindingsResourcesAndDispatch) {
     const auto &code = assembleMaxpool16x16To8x8Spirv("maxpool_set0", {0, 0, 0, 1});
     const auto data = writeVgf([&](Encoder &encoder) {
         const auto module = encoder.AddModule(ModuleType::COMPUTE, "shader", "main", code);
-        const auto input = encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SFLOAT, {4}, {4});
-        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {8}, {});
         const auto intermediate =
             encoder.AddIntermediateResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {8}, {});
+        const auto input = encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SFLOAT, {4}, {4});
+        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {8}, {});
         const auto inputBinding = encoder.AddBindingSlot(3, input);
         const auto outputBinding = encoder.AddBindingSlot(5, output);
         const auto intermediateBinding = encoder.AddBindingSlot(7, intermediate);
@@ -105,94 +106,57 @@ TEST(VgfWorkload, DecodesPublicExecutablesBindingsResourcesAndDispatch) {
     EXPECT_EQ(output.requirements().elementCount(), 8);
 }
 
-TEST(VgfWorkload, ReportsExternalInterfaceIncludingUnusedAndRepeatedResources) {
-    const auto &code = assembleMaxpool16x16To8x8Spirv("maxpool_set0", {0, 0, 0, 1});
-    const auto data = writeVgf([&](Encoder &encoder) {
-        const auto module = encoder.AddModule(ModuleType::COMPUTE, "shader", "main", code);
+TEST(VgfWorkload, VgfInterfaceResourceOrderMatchesPublicResources) {
+    const auto data = writeVgf([](Encoder &encoder) {
         encoder.AddIntermediateResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {4}, {});
         const auto input = encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {4}, {});
-        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {4}, {});
-        const auto unused = encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {4}, {});
-        const auto inputBinding = encoder.AddBindingSlot(7, input);
-        const auto descriptorSet = encoder.AddDescriptorSetInfo({inputBinding}, 2);
-        encoder.AddSegmentInfo(module, "segment", {descriptorSet}, {inputBinding}, {}, noGraphConstants);
-        encoder.AddModelSequenceInputsOutputs(
-            {encoder.AddBindingSlot(99, unused), encoder.AddBindingSlot(17, input), encoder.AddBindingSlot(18, input)},
-            {"same_name", "same_name", ""}, {encoder.AddBindingSlot(17, output)}, {"same_name"});
+        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {16}, {});
+        const auto unused = encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {8}, {});
+        const auto unusedInputSlot = encoder.AddBindingSlot(99, unused);
+        const auto firstInputSlot = encoder.AddBindingSlot(17, input);
+        const auto secondInputSlot = encoder.AddBindingSlot(18, input);
+        const auto outputSlot = encoder.AddBindingSlot(17, output);
+        encoder.AddModelSequenceInputsOutputs({unusedInputSlot, firstInputSlot, secondInputSlot},
+                                              {"unused", "first", "second"}, {outputSlot}, {"result"});
     });
 
-    VgfImportInfo importInfo;
-    importInfo.inputs.push_back({999, 999});
-    importInfo.outputs.push_back({999, 999});
-    auto workload = Workload::fromVGF(asVgfBytes(data), importInfo);
-    ASSERT_EQ(workload.resourceCount(), 3);
-    ASSERT_EQ(importInfo.inputs.size(), 3);
-    ASSERT_EQ(importInfo.outputs.size(), 1);
-    EXPECT_EQ(importInfo.inputs[0].binding, 99);
-    EXPECT_EQ(importInfo.inputs[0].publicResourceIndex, 2);
-    EXPECT_EQ(importInfo.inputs[1].binding, 17);
-    EXPECT_EQ(importInfo.inputs[1].publicResourceIndex, 0);
-    EXPECT_EQ(importInfo.inputs[2].binding, 18);
-    EXPECT_EQ(importInfo.inputs[2].publicResourceIndex, 0);
-    EXPECT_EQ(importInfo.outputs[0].binding, 17);
-    EXPECT_EQ(importInfo.outputs[0].publicResourceIndex, 1);
-    EXPECT_EQ(workload.executable(0).interfaceDescriptorBinding(0).resourceIndex,
-              importInfo.inputs[1].publicResourceIndex);
+    const auto header = CreateHeaderDecoder(data.data(), HeaderSize(), data.size());
+    ASSERT_NE(header, nullptr);
+    const auto sequence = CreateModelSequenceTableDecoder(data.data() + header->GetModelSequenceTableOffset(),
+                                                          header->GetModelSequenceTableSize());
+    const auto resources = CreateModelResourceTableDecoder(data.data() + header->GetModelResourceTableOffset(),
+                                                           header->GetModelResourceTableSize());
+    ASSERT_NE(sequence, nullptr);
+    ASSERT_NE(resources, nullptr);
+    const auto modelInterface = mlsdk::vgfutils::parseModelInterface(*sequence, *resources);
+    auto workload = Workload::fromVGF(asVgfBytes(data));
 
-    const TempFolder tempFolder("mlworkloadlib_vgf_import_info");
+    ASSERT_EQ(workload.resourceCount(), 3);
+    ASSERT_EQ(modelInterface.inputs.size(), 3);
+    ASSERT_EQ(modelInterface.outputs.size(), 1);
+    const auto unusedInputIndex = modelInterface.inputs[0].inputOutputIndex;
+    const auto inputIndex = modelInterface.inputs[1].inputOutputIndex;
+    const auto outputIndex = modelInterface.outputs[0].inputOutputIndex;
+    EXPECT_EQ(modelInterface.inputs[0].bindingSlot.mBinding, 99);
+    EXPECT_EQ(unusedInputIndex, 2);
+    EXPECT_EQ(workload.resource(unusedInputIndex).requirements().elementCount(), 8);
+    EXPECT_EQ(modelInterface.inputs[1].bindingSlot.mBinding, 17);
+    EXPECT_EQ(inputIndex, 0);
+    EXPECT_EQ(workload.resource(inputIndex).requirements().elementCount(), 4);
+    EXPECT_EQ(modelInterface.inputs[2].bindingSlot.mBinding, 18);
+    EXPECT_EQ(modelInterface.inputs[2].inputOutputIndex, inputIndex);
+    EXPECT_EQ(modelInterface.outputs[0].bindingSlot.mBinding, 17);
+    EXPECT_EQ(outputIndex, 1);
+    EXPECT_EQ(workload.resource(outputIndex).requirements().elementCount(), 16);
+
+    const TempFolder tempFolder("mlworkloadlib_vgf_model_interface");
     const auto path = tempFolder.relative("mapping.vgf");
     {
         std::ofstream file(path, std::ios::binary);
         file.write(data.data(), static_cast<std::streamsize>(data.size()));
     }
-    auto fileWorkload = Workload::fromVGF(path, importInfo);
-    ASSERT_EQ(importInfo.inputs.size(), 3);
-    ASSERT_EQ(importInfo.outputs.size(), 1);
-    EXPECT_EQ(importInfo.inputs[0].binding, 99);
-    EXPECT_EQ(importInfo.inputs[0].publicResourceIndex, 2);
-    EXPECT_EQ(importInfo.outputs[0].binding, 17);
-    EXPECT_EQ(fileWorkload.resource(importInfo.outputs[0].publicResourceIndex).index(), 1);
-}
-
-TEST(VgfWorkload, DoesNotInventAnInterfaceForUndeclaredPublicResources) {
-    const auto data = writeVgf([](Encoder &encoder) {
-        encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {4}, {});
-    });
-    VgfImportInfo importInfo;
-    importInfo.inputs.push_back({999, 999});
-    importInfo.outputs.push_back({999, 999});
-    auto workload = Workload::fromVGF(asVgfBytes(data), importInfo);
-    EXPECT_EQ(workload.resourceCount(), 1);
-    EXPECT_TRUE(importInfo.inputs.empty());
-    EXPECT_TRUE(importInfo.outputs.empty());
-}
-
-TEST(VgfWorkload, RejectsImportInterfaceReferencingAnInternalResource) {
-    const auto data = writeVgf([](Encoder &encoder) {
-        const auto internal =
-            encoder.AddIntermediateResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {4}, {});
-        encoder.AddModelSequenceInputsOutputs({encoder.AddBindingSlot(17, internal)}, {"invalid"}, {}, {});
-    });
-    VgfImportInfo importInfo;
-    EXPECT_THROW(Workload::fromVGF(asVgfBytes(data), importInfo), std::runtime_error);
-}
-
-TEST(VgfWorkload, RejectsImportInputReferencingAnOutputResource) {
-    const auto data = writeVgf([](Encoder &encoder) {
-        const auto output = encoder.AddOutputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {4}, {});
-        encoder.AddModelSequenceInputsOutputs({encoder.AddBindingSlot(17, output)}, {"invalid_input"}, {}, {});
-    });
-    VgfImportInfo importInfo;
-    EXPECT_THROW(Workload::fromVGF(asVgfBytes(data), importInfo), std::runtime_error);
-}
-
-TEST(VgfWorkload, RejectsImportOutputReferencingAnInputResource) {
-    const auto data = writeVgf([](Encoder &encoder) {
-        const auto input = encoder.AddInputResource(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_FORMAT_R32_SINT, {4}, {});
-        encoder.AddModelSequenceInputsOutputs({}, {}, {encoder.AddBindingSlot(29, input)}, {"invalid_output"});
-    });
-    VgfImportInfo importInfo;
-    EXPECT_THROW(Workload::fromVGF(asVgfBytes(data), importInfo), std::runtime_error);
+    auto fileWorkload = Workload::fromVGF(path);
+    EXPECT_EQ(fileWorkload.resource(outputIndex).requirements().elementCount(), 16);
 }
 
 TEST(VgfWorkload, ExposesOriginalPushConstantRangeEndsPerExecutable) {
