@@ -161,17 +161,6 @@ samplerConfigFromVgfResource(const vgflib::ModelResourceTableDecoder &decoder, u
  * VGF workload metadata
  *******************************************************************************/
 
-uint32_t addDecodedConstantResource(WorkloadBuilder &builder, vk::Format format, std::vector<int64_t> shape,
-                                    std::vector<int64_t> stride, vk::DeviceSize elementCount,
-                                    std::optional<uint32_t> aliasGroupId, bool requiresBoundMemoryInfo) {
-    // VGF constants are graph pipeline constants, not descriptor-bound
-    // resources. They still need tensor metadata for
-    // vk::DataGraphPipelineConstantARM creation.
-    return builder.addTensorResource({}, Resource::Role::Constant, std::nullopt, format, std::move(shape),
-                                     std::move(stride), elementCount, aliasGroupId, requiresBoundMemoryInfo,
-                                     vk::TensorUsageFlagBitsARM::eDataGraph);
-}
-
 uint32_t addDecodedResource(WorkloadBuilder &builder, const vgflib::ModelResourceTableDecoder &decoder,
                             uint32_t resourceIndex) {
     const auto role = roleForResource(decoder.getCategory(resourceIndex));
@@ -184,13 +173,9 @@ uint32_t addDecodedResource(WorkloadBuilder &builder, const vgflib::ModelResourc
     const auto aliasGroupId = decoder.getAliasGroupId(resourceIndex);
     const bool requiresBoundMemoryInfo = aliasGroupId.has_value();
 
-    if (!descriptorType.has_value()) {
-        return addDecodedConstantResource(builder, format, std::move(shape), std::move(stride), elementCount,
-                                          aliasGroupId, requiresBoundMemoryInfo);
-    }
-
     switch (kind) {
     case ResourceKind::Tensor:
+        // Constants retain tensor metadata without adding a descriptor binding.
         return builder.addTensorResource({}, role, descriptorType, format, std::move(shape), std::move(stride),
                                          elementCount, aliasGroupId, requiresBoundMemoryInfo,
                                          vk::TensorUsageFlagBitsARM::eDataGraph);
