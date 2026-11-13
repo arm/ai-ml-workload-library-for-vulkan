@@ -4,6 +4,7 @@
  */
 #include "test_standalone_compute_utils.hpp"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <cstddef>
@@ -201,4 +202,20 @@ TEST(StandaloneComputeWorkload, RejectsMissingModuleCode) {
     description.module.spirv.clear();
 
     EXPECT_THROW((void)Workload::fromComputeShader(std::move(description)), std::runtime_error);
+}
+
+TEST(StandaloneComputeWorkload, RejectsUnsupportedScaledValueFormats) {
+    for (const auto format : {vk::Format::eR8Sint, vk::Format::eR32Sfloat, vk::Format::eUndefined}) {
+        SCOPED_TRACE(static_cast<uint32_t>(format));
+        auto description = makeAddInt32BuffersDescription();
+        auto &requirements = description.resources[0].resource;
+        requirements = {};
+        requirements.kind = ResourceKind::Tensor;
+        requirements.format = format;
+        requirements.tensor.shape = {32};
+        requirements.tensor.scaledTensorConfig = ScaledTensorConfig{{32}, TensorScaleFormat::E8M0};
+        EXPECT_THAT(
+            [&] { Workload::fromComputeShader(description); },
+            testing::ThrowsMessage<std::runtime_error>(testing::HasSubstr("Unsupported scaled tensor value format")));
+    }
 }

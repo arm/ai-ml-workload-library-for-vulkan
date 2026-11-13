@@ -354,6 +354,24 @@ A public resource describes the Vulkan® object an application must supply:
 These declarations guide object creation, while the resulting Vulkan® memory
 requirements determine allocation size, alignment, and compatible memory types.
 
+A scaled tensor remains one logical resource and, for public resources, one
+binding. Standalone descriptions supply its block shape and scale format through
+``TensorRequirements::scaledTensorConfig``; VGF import retains the same metadata.
+The resource format describes the values. Graph constants retain scaling metadata
+internally without becoming public bindings.
+
+``TensorRequirementsView::blockShape()`` and ``scaleFormat()`` expose the scaling
+configuration. ``scaleShape()`` reports the tensor shape with its innermost
+dimensions divided by the corresponding block dimensions; outer dimensions are
+unchanged. Unresolved dimensions remain ``-1`` in the scale shape. Block dimensions
+must be positive and divide known tensor dimensions, and block rank must not
+exceed tensor rank. Ordinary tensors return empty block and scale shapes and no
+scale format.
+
+Scaling metadata can be inspected without a ``Context`` or ``Session``.
+Scaled tensor allocation and scaled graph-constant execution are unsupported;
+those paths report an error.
+
 ``ResourceRequirementsView::byteSize()`` reports a logical span, not a Vulkan®
 allocation size or a general transfer size. For buffers it is the requested
 buffer size. For images it describes tightly packed texels for one mip level

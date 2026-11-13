@@ -50,7 +50,8 @@ class WorkloadBuilder {
     uint32_t addTensorResource(std::string name, Resource::Role role, std::optional<vk::DescriptorType> descriptorType,
                                vk::Format format, std::vector<int64_t> shape, std::vector<int64_t> stride,
                                vk::DeviceSize elementCount, std::optional<uint32_t> aliasGroupId,
-                               bool requiresBoundMemoryInfo, vk::TensorUsageFlagsARM usage);
+                               bool requiresBoundMemoryInfo, vk::TensorUsageFlagsARM usage,
+                               std::optional<ScaledTensorConfig> scaledTensorConfig = std::nullopt);
     uint32_t addBufferResource(std::string name, Resource::Role role, vk::DescriptorType descriptorType,
                                vk::Format format, std::vector<int64_t> shape, std::vector<int64_t> stride,
                                vk::DeviceSize elementCount, std::optional<uint32_t> aliasGroupId,

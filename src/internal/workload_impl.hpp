@@ -54,6 +54,8 @@ struct Resource {
 
     struct TensorMetadata {
         vk::TensorUsageFlagsARM usage;
+        std::optional<ScaledTensorConfig> scaledTensorConfig;
+        std::vector<int64_t> scaleShape;
     };
 
     struct BufferMetadata {

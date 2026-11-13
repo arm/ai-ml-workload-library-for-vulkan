@@ -105,11 +105,23 @@ struct SpecializationInfo {
     bool empty() const noexcept { return mapEntries.empty(); }
 };
 
+/** @brief Symbolic scale format, independent of Vulkan extension availability. */
+enum class TensorScaleFormat { E8M0 };
+
+/** @brief Block scaling configuration for a tensor. */
+struct ScaledTensorConfig {
+    /** @brief Positive divisors of the corresponding innermost tensor dimensions. */
+    std::vector<uint32_t> blockShape;
+    TensorScaleFormat scaleFormat = TensorScaleFormat::E8M0;
+};
+
 /** @brief Tensor-specific resource creation requirements. */
 struct TensorRequirements {
     vk::TensorUsageFlagsARM usage;
     std::vector<int64_t> shape;
     std::vector<int64_t> stride;
+    /** @brief Absent for ordinary tensors. */
+    std::optional<ScaledTensorConfig> scaledTensorConfig;
 };
 
 /** @brief Storage-buffer-specific resource creation requirements. */

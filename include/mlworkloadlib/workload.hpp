@@ -48,6 +48,15 @@ class TensorRequirementsView {
     /** @brief Returns a borrowed view of optional Vulkan tensor stride metadata. */
     ArrayView<const int64_t> stride() const;
 
+    /** @brief Returns the logical block shape, or an empty view for ordinary tensors. */
+    ArrayView<const uint32_t> blockShape() const;
+
+    /** @brief Returns the scale format, or nullopt for ordinary tensors. */
+    std::optional<TensorScaleFormat> scaleFormat() const;
+
+    /** @brief Returns shape with innermost dimensions divided by blockShape, or an empty view for ordinary tensors. */
+    ArrayView<const int64_t> scaleShape() const;
+
   private:
     TensorRequirementsView(const Workload *workload, uint32_t resourceIndex)
         : workload_(workload), resourceIndex_(resourceIndex) {}

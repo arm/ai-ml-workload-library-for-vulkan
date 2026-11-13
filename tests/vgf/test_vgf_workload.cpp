@@ -2,6 +2,7 @@
  * SPDX-FileCopyrightText: Copyright 2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
  * SPDX-License-Identifier: Apache-2.0
  */
+#include "internal/workload_impl.hpp"
 #include "mlworkloadlib/workload.hpp"
 #include "test_spirv_utils.hpp"
 #include "test_vgf_utils.hpp"
@@ -427,5 +428,69 @@ TEST(VgfWorkload, RejectsInvalidImageMetadata) {
         });
 
         EXPECT_THROW((void)Workload::fromVGF(asVgfBytes(data)), std::runtime_error);
+    }
+}
+
+TEST(VgfWorkload, ReportsScaledTensorAndConstantRequirements) {
+    for (const uint32_t block : {16u, 32u}) {
+        const std::array<uint8_t, 128> values{};
+        const auto data = writeVgf([&](Encoder &encoder) {
+            const auto module = encoder.AddModule(ModuleType::GRAPH, "graph", "main", {});
+            const auto input = encoder.AddInputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM,
+                                                        VK_FORMAT_R8_SFLOAT_FPENCODING_FLOAT8E4M3_ARM, {2, 64}, {});
+            encoder.AddScaledTensorConfig(input, {block}, ScaleFormat::E8M0);
+            const auto constantResource =
+                encoder.AddConstantResource(VK_FORMAT_R8_SFLOAT_FPENCODING_FLOAT8E4M3_ARM, {2, 64}, {});
+            encoder.AddScaledTensorConfig(constantResource, {block}, ScaleFormat::E8M0);
+            const auto constant = encoder.AddConstant(constantResource, values.data(), values.size());
+            const auto binding = encoder.AddBindingSlot(0, input);
+            const auto set = encoder.AddDescriptorSetInfo({binding}, 0);
+            encoder.AddSegmentInfo(module, "graph", {set}, {binding}, {}, {{constant.reference, constant}});
+        });
+        auto workload = Workload::fromVGF(asVgfBytes(data));
+        ASSERT_EQ(workload.resourceCount(), 1u);
+        EXPECT_EQ(workload.executable(0).interfaceDescriptorBindingCount(), 1u);
+        const auto requirements = workload.resource(0).requirements();
+        EXPECT_EQ(requirements.format(), vk::Format::eR8SfloatFpencodingFloat8E4M3ARM);
+        const auto tensor = requirements.asTensor();
+        ASSERT_EQ(tensor.blockShape().size(), 1u);
+        EXPECT_EQ(tensor.blockShape()[0], block);
+        EXPECT_EQ(tensor.scaleFormat(), TensorScaleFormat::E8M0);
+        ASSERT_EQ(tensor.scaleShape().size(), 2u);
+        EXPECT_EQ(tensor.scaleShape()[0], 2);
+        EXPECT_EQ(tensor.scaleShape()[1], 64 / block);
+        const auto &state = workloadImpl(workload);
+        ASSERT_EQ(state.constants.size(), 1u);
+        const auto &constant = state.resources.at(state.constants[0].resourceIndex);
+        EXPECT_EQ(constant.format, requirements.format());
+        const auto &metadata = mlsdk::workloadlib::detail::tensorMetadata(constant);
+        ASSERT_TRUE(metadata.scaledTensorConfig);
+        EXPECT_EQ(metadata.scaledTensorConfig->blockShape, (std::vector<uint32_t>{block}));
+        EXPECT_EQ(metadata.scaledTensorConfig->scaleFormat, TensorScaleFormat::E8M0);
+        EXPECT_EQ(metadata.scaleShape, (std::vector<int64_t>{2, 64 / block}));
+    }
+}
+
+TEST(VgfWorkload, PreservesUnresolvedScaledTensorDimensions) {
+    for (const size_t unresolvedAxis : {0u, 1u}) {
+        std::vector<int64_t> shape{2, 64};
+        std::vector<int64_t> expectedScaleShape{2, 4};
+        shape[unresolvedAxis] = -1;
+        expectedScaleShape[unresolvedAxis] = -1;
+        const auto data = writeVgf([&](Encoder &encoder) {
+            const auto module = encoder.AddModule(ModuleType::GRAPH, "graph", "main", {});
+            const auto input = encoder.AddInputResource(VK_DESCRIPTOR_TYPE_TENSOR_ARM,
+                                                        VK_FORMAT_R8_SFLOAT_FPENCODING_FLOAT8E4M3_ARM, shape, {});
+            encoder.AddScaledTensorConfig(input, {16}, ScaleFormat::E8M0);
+            const auto binding = encoder.AddBindingSlot(0, input);
+            const auto set = encoder.AddDescriptorSetInfo({binding}, 0);
+            encoder.AddSegmentInfo(module, "graph", {set}, {binding}, {}, noGraphConstants);
+        });
+        const auto workload = Workload::fromVGF(asVgfBytes(data));
+        const auto requirements = workload.resource(0).requirements();
+        EXPECT_EQ(requirements.elementCount(), 0u);
+        EXPECT_EQ(requirements.byteSize(), 0u);
+        const auto scaleShape = requirements.asTensor().scaleShape();
+        EXPECT_EQ(std::vector<int64_t>(scaleShape.begin(), scaleShape.end()), expectedScaleShape);
     }
 }

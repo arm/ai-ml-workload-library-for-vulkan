@@ -94,6 +94,9 @@ vk::raii::TensorARM createIntermediateTensor(const Workload &workload, const Con
                                              uint32_t resourceIndex, vk::TensorTilingARM tiling,
                                              const std::vector<int64_t> &strides) {
     const auto &resource = workloadImpl(workload).resources.at(resourceIndex);
+    if (tensorMetadata(resource).scaledTensorConfig) {
+        throw std::runtime_error("Scaled intermediate tensor allocation is not implemented");
+    }
     validateTensorMetadata(resource.format, resource.shape, strides);
     const auto description = tensorDescription(workload, resourceIndex, tiling, strides);
     validateTensorTiling(tiling, description.usage, resource.shape, !strides.empty());
