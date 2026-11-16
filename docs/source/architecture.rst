@@ -92,14 +92,18 @@ The resulting execution flow is:
 #. Construct a ``Workload`` and create or wrap a ``Context``.
 #. Create a ``Session``, supply any required compilation inputs and resource
    tiling choices, then call ``configure()``.
-#. Create a ``BindingSet`` and bind the public resources and required push data.
+#. Create or reuse compatible public resource objects. Query their memory
+   requirements and allocate backing as needed, using application allocation or
+   the context helpers, before binding them in a ``BindingSet`` with required
+   push data. Query configured alias-peer requirements before allocating shared
+   backing.
 #. Call ``prepare()`` to capture the bindings and create a ``PreparedExecution``.
 #. Run synchronously or record into an application command buffer.
 
 .. uml:: puml/execution-lifecycle.puml
    :align: center
-   :alt: Workload and context feed session configuration, followed by resource binding and preparation. Prepared execution either submits and waits through run, or records for application submission.
-   :caption: The common lifecycle, with separate submission responsibilities.
+   :alt: An application constructs a workload and creates or wraps a context, configures a session, queries and allocates public resources before binding, and prepares a snapshot. It can reuse unchanged snapshots or prepare changed bindings again. Run submits and waits; record leaves submission and completion to the application.
+   :caption: Create or wrap the context, prepare resource bindings, then choose library submission or application recording.
 
 ``Session::configure()`` builds or reuses pipelines and layouts, creates a
 Vulkan® graph pipeline session and its memory for each graph executable, and
@@ -107,8 +111,14 @@ creates command-buffer and fence state for the synchronous path. A Workload
 Library ``Session`` therefore can contain several Vulkan® graph pipeline
 sessions.
 
-:ref:`wl-architecture-preparation` explains snapshot creation;
-:ref:`wl-architecture-lifetimes` gives the ownership and lifetime rules.
+The application retains public resource allocations, including wrappers returned
+by context helpers. With valid resource and image entry states, reuse the same
+snapshot for new contents in the same bound objects. Changed handles, placements
+or push payloads require another ``prepare()``; see
+:ref:`wl-architecture-preparation` and :ref:`wl-architecture-image-replay`.
+Keep each prepared execution and its borrowed owners alive until its submitted
+use completes, including when using application-owned command buffers; see
+:ref:`wl-architecture-lifetimes` and :ref:`wl-architecture-submission`.
 
 Workload construction and interfaces
 ------------------------------------

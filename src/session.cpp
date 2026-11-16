@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "internal/binding_set_impl.hpp"
+#include "internal/graph_constants.hpp"
 #include "internal/module_compiler.hpp"
 #include "internal/runtime_resource.hpp"
 #include "internal/session_impl.hpp"
@@ -28,6 +29,8 @@
 
 namespace mlsdk::workloadlib {
 
+using detail::DataGraphPipelineCreateStorage;
+using detail::populateDataGraphConstants;
 using DataGraphBinaryInput = detail::DataGraphBinaryInput;
 using DescriptorBinding = detail::DescriptorBinding;
 using Executable = detail::Executable;
@@ -86,15 +89,6 @@ void validateSupportedDescriptorType(vk::DescriptorType descriptorType) {
                                  std::to_string(static_cast<uint32_t>(descriptorType)));
     }
 }
-
-struct DataGraphPipelineCreateStorage {
-    std::vector<vk::TensorDescriptionARM> resourceTensorDescriptions;
-    std::vector<vk::DataGraphPipelineResourceInfoImageLayoutARM> imageLayouts;
-    std::vector<vk::DataGraphPipelineResourceInfoARM> resourceInfos;
-    std::vector<vk::TensorDescriptionARM> constantTensorDescriptions;
-    std::vector<vk::DataGraphPipelineConstantTensorSemiStructuredSparsityInfoARM> sparsityInfos;
-    std::vector<vk::DataGraphPipelineConstantARM> constants;
-};
 
 void validateExecutableBindings(const Workload &workload, const Executable &executable) {
     validateUniqueDescriptorSlots(executable);
@@ -178,43 +172,6 @@ void populateDataGraphResources(DataGraphPipelineCreateStorage &storage, const E
             storage.resourceInfos.emplace_back(descBinding.set, descBinding.binding, 0,
                                                &storage.resourceTensorDescriptions.back());
         }
-    }
-}
-
-void populateDataGraphConstants(DataGraphPipelineCreateStorage &storage, const Executable &executable,
-                                const Workload &workload) {
-    const auto &workloadState = workloadImpl(workload);
-    const auto numConstants = static_cast<uint32_t>(executable.constantIndexes.size());
-    storage.constantTensorDescriptions.reserve(numConstants);
-    storage.sparsityInfos.reserve(numConstants);
-    storage.constants.reserve(numConstants);
-    for (uint32_t constantIndex = 0; constantIndex < numConstants; ++constantIndex) {
-        const auto workloadConstantIndex = executable.constantIndexes.at(constantIndex);
-        const auto &constant = workloadState.constants.at(workloadConstantIndex);
-        const auto &resource = workloadState.resources.at(constant.resourceIndex);
-        if (detail::tensorMetadata(resource).scaledTensorConfig) {
-            throw std::runtime_error("Scaled graph constant execution is not implemented");
-        }
-        void *pNext = nullptr;
-        if (constant.sparsityDimension < detail::Constant::unspecifiedSparsityDimension) {
-            throw std::runtime_error("Graph constant has invalid sparsity dimension");
-        }
-        if (constant.hasSparsity()) {
-            constexpr uint32_t zeroCount = 2;
-            constexpr uint32_t groupSize = 4;
-            storage.sparsityInfos.emplace_back(static_cast<uint32_t>(constant.sparsityDimension), zeroCount, groupSize,
-                                               nullptr);
-            pNext = &storage.sparsityInfos.back();
-        }
-        detail::validateTensorTiling(vk::TensorTilingARM::eLinear, detail::tensorMetadata(resource).usage,
-                                     resource.shape, !resource.stride.empty());
-        detail::validateTensorMetadata(resource.format, resource.shape, resource.stride);
-        storage.constantTensorDescriptions.emplace_back(
-            vk::TensorTilingARM::eLinear, resource.format, static_cast<uint32_t>(resource.shape.size()),
-            resource.shape.data(), resource.stride.empty() ? nullptr : resource.stride.data(),
-            vk::TensorUsageFlagBitsARM::eDataGraph, pNext);
-        storage.constants.emplace_back(workloadConstantIndex, constant.payloadView.data(),
-                                       &storage.constantTensorDescriptions.back());
     }
 }
 
@@ -1009,7 +966,7 @@ void Session::bindDataGraphBinary(ArrayView<const std::byte> binary, DataGraphBi
         (!pipelineIdentifier.empty() && pipelineIdentifier.data() == nullptr)) {
         throw std::runtime_error("Data graph pipeline identifier is invalid");
     }
-    if (!workloadExecutable.constantIndexes.empty()) {
+    if (!workloadExecutable.constantBindings.empty()) {
         throw std::runtime_error("Data graph binary executables cannot declare graph constants");
     }
     if (!sessionState.specializationForCompilation(executableIndex).empty()) {

@@ -11,8 +11,8 @@ ML Workload Library for Vulkan®
    :caption: Table of contents
 
    building.rst
+   Usage <usage.rst>
    architecture.rst
-   usage.rst
    api.rst
    license.rst
    contributing.rst
