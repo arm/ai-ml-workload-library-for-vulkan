@@ -8,6 +8,8 @@
 
 #include "mlworkloadlib/session.hpp"
 
+#include <functional>
+
 namespace mlsdk::workloadlib::test {
 
 // Create real pipelines, then inject results to test error handling and cleanup.
@@ -33,6 +35,7 @@ class PipelineCreationHook {
     unsigned failAt = 0;
     bool validFeedback = true;
     bool skipDriverCall = false;
+    std::function<void(const VkDataGraphPipelineCreateInfoARM &)> inspectGraph;
 
     struct CreationCall {
         VkPipelineCache cache;
@@ -110,6 +113,11 @@ class PipelineCreationHook {
                                                       VkPipelineCache cache, uint32_t count,
                                                       const VkDataGraphPipelineCreateInfoARM *infos,
                                                       const VkAllocationCallbacks *allocator, VkPipeline *pipelines) {
+        if (active_->inspectGraph) {
+            for (uint32_t i = 0; i < count; ++i) {
+                active_->inspectGraph(infos[i]);
+            }
+        }
         return active_->createPipeline(cache, count, infos, VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT,
                                        pipelines, [&](const auto *info) {
                                            return active_->graph_.original()(device, deferredOperation, cache, count,

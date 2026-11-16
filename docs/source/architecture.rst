@@ -379,8 +379,12 @@ exceed tensor rank. Ordinary tensors return empty block and scale shapes and no
 scale format.
 
 Scaling metadata can be inspected without a ``Context`` or ``Session``.
-Scaled tensor allocation and scaled graph-constant execution are unsupported;
-those paths report an error.
+Scaled graph constants support FP8 E4M3/E5M2 values with E8M0 scales and
+``[32]`` blocks. The payload contains values followed immediately by scales.
+The device must enable ``VK_ARM_tensors2`` and ``tensorBlockScaled``. For
+``Context::create()``, supply the extension through ``requiredDeviceExtensions``
+and ``VkPhysicalDeviceTensors2FeaturesARM`` through ``deviceFeaturePNext``.
+Scaled public and intermediate tensor allocation remains unsupported.
 
 ``ResourceRequirementsView::byteSize()`` reports a logical span, not a Vulkan®
 allocation size or a general transfer size. For buffers it is the requested
