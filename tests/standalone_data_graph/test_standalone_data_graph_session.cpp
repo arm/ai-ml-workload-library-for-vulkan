@@ -35,6 +35,22 @@ using namespace mlsdk::workloadlib::test;
 
 class StandaloneDataGraphSessionExecutionTest : public RuntimeSessionExecutionTest {};
 
+#ifdef VK_ARM_tensors2
+class ScaledGraphConstantExecutionTest : public StandaloneDataGraphSessionExecutionTest,
+                                         public ::testing::WithParamInterface<vk::Format> {
+    void SetUp() override {
+        vk::PhysicalDeviceTensors2FeaturesARM tensorFeatures;
+        tensorFeatures.tensorBlockScaled = true;
+        RuntimeContextDeviceRequirements requirements;
+        requirements.requiredDeviceExtensions = {VK_ARM_TENSORS_2_EXTENSION_NAME};
+        requirements.deviceFeaturePNext = &tensorFeatures;
+        if (!initialize(requirements)) {
+            GTEST_SKIP() << "No Vulkan device with block-scaled data graph support";
+        }
+    }
+};
+#endif
+
 BoundMemoryInfo boundMemoryInfo(const Tensor &tensor) { return {*tensor.memory, 0, tensor.memorySize}; }
 
 std::vector<int8_t> makeSparse2To4Weights(std::size_t elements) {
@@ -441,6 +457,64 @@ TEST_F(StandaloneDataGraphSessionExecutionTest, RecordAddConstantInputWithCaller
     EXPECT_EQ(utils::readDeviceMemory<float>(device, boundMemoryInfo(outputTensor), Tensor::numElements(tensorShape)),
               expected);
 }
+
+#ifdef VK_ARM_tensors2
+TEST_P(ScaledGraphConstantExecutionTest, RunsConv2dWithScaledWeights) {
+    const auto format = GetParam();
+    const bool isE4M3 = format == vk::Format::eR8SfloatFpencodingFloat8E4M3ARM;
+    auto assembly = readSpvasmFile(ML_WORKLOAD_LIB_SCALED_CONSTANT_CONV2D_SPVASM);
+    replace(assembly, "VALUE_ENCODING", isE4M3 ? "Float8E4M3EXT" : "Float8E5M2EXT");
+
+    DataGraphDescription description;
+    description.module.codeKind = ModuleCodeKind::Spirv;
+    description.module.spirv = assembleSpirv(assembly);
+    description.entryPoint = "main";
+    description.resources = {
+        {"input", 0, 0, ResourceAccess::Read, tensorRequirements(vk::Format::eR32Sfloat, {1, 1, 1, 64})},
+        {"output", 0, 1, ResourceAccess::Write, tensorRequirements(vk::Format::eR32Sfloat, {1, 1, 1, 1})},
+    };
+    auto weights = tensorRequirements(format, {1, 1, 1, 64});
+    weights.tensor.scaledTensorConfig = ScaledTensorConfig{{32}, TensorScaleFormat::E8M0};
+    std::array<uint8_t, 66> payload{};
+    std::fill_n(payload.begin(), 64, isE4M3 ? 0x38 : 0x3c);
+    payload[64] = 0x7f; // E8M0 scale 1.
+    payload[65] = 0x80; // E8M0 scale 2.
+    const float bias = 3.0F;
+    description.constants = {
+        {"weights", weights, payload.data(), payload.size()},
+        {"bias", tensorRequirements(vk::Format::eR32Sfloat, {1}), &bias, sizeof(bias)},
+    };
+    auto workload = Workload::fromDataGraph(description);
+    auto context = wrappedContext();
+    ASSERT_EQ(workload.resourceCount(), 2u);
+    ASSERT_EQ(workload.executable(0).interfaceDescriptorBindingCount(), 2u);
+
+    const Tensor inputTensor(physicalDevice, device, vk::Format::eR32Sfloat, {1, 1, 1, 64});
+    const Tensor outputTensor(physicalDevice, device, vk::Format::eR32Sfloat, {1, 1, 1, 1});
+    std::vector<float> input(64, 3.0F);
+    std::fill_n(input.begin(), 32, 1.0F);
+    utils::writeDeviceMemory(device, boundMemoryInfo(inputTensor), input);
+    utils::writeDeviceMemory(device, boundMemoryInfo(outputTensor), std::vector<float>{0.0F});
+
+    Session session(context, workload);
+    session.configure();
+    auto bindings = session.createBindingSet();
+    bindings.bindTensor(workload.resource(0), TensorBindingInfo{*inputTensor.tensor, boundMemoryInfo(inputTensor)});
+    bindings.bindTensor(workload.resource(1), TensorBindingInfo{*outputTensor.tensor, boundMemoryInfo(outputTensor)});
+    auto execution = session.prepare(bindings);
+    execution.run();
+
+    // 32 * 1 * 1 + 32 * 3 * 2 + 3 = 227, including the ordinary bias.
+    EXPECT_EQ(utils::readDeviceMemory<float>(device, boundMemoryInfo(outputTensor), 1), std::vector<float>{227.0F});
+}
+
+INSTANTIATE_TEST_SUITE_P(FP8Formats, ScaledGraphConstantExecutionTest,
+                         ::testing::Values(vk::Format::eR8SfloatFpencodingFloat8E4M3ARM,
+                                           vk::Format::eR8SfloatFpencodingFloat8E5M2ARM),
+                         [](const ::testing::TestParamInfo<vk::Format> &info) {
+                             return info.param == vk::Format::eR8SfloatFpencodingFloat8E4M3ARM ? "E4M3" : "E5M2";
+                         });
+#endif
 
 TEST_F(StandaloneDataGraphSessionExecutionTest, RecordDataGraphWorkload) {
     const std::vector<int64_t> inputShape = {1, 16, 16, 16};

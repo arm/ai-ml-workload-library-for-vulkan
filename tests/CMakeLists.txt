@@ -69,6 +69,7 @@ target_compile_definitions(mlworkloadlib_tests PRIVATE
     ML_WORKLOAD_LIB_ADD_F32_CONSTANT_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/add_f32_constant.spvasm"
     ML_WORKLOAD_LIB_ARSHIFT_SPECBOOL_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/arshift_specbool.spvasm"
     ML_WORKLOAD_LIB_CONV2D_RESCALE_CONSTANT_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/conv2d_rescale_constant.spvasm"
+    ML_WORKLOAD_LIB_SCALED_CONSTANT_CONV2D_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/scaled_constant_conv2d.spvasm"
     ML_WORKLOAD_LIB_MAXPOOL_16X16_TO_8X8_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/maxpool_16x16_to_8x8.spvasm"
     ML_WORKLOAD_LIB_MAXPOOL_8X8_TO_4X4_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/maxpool_8x8_to_4x4.spvasm"
     ML_WORKLOAD_LIB_WRITE_PUSH_CONSTANT_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/write_push_constant.spvasm"

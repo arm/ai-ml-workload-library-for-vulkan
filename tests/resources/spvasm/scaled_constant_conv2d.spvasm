@@ -1,0 +1,67 @@
+;
+; SPDX-FileCopyrightText: Copyright 2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
+; SPDX-License-Identifier: Apache-2.0
+;
+               OpCapability Shader
+               OpCapability GraphARM
+               OpCapability TensorsARM
+               OpCapability TensorsBlockScaledARM
+               OpCapability Float8EXT
+               OpCapability Float8UnsignedE8M0EXT
+               OpCapability VulkanMemoryModel
+               OpExtension "SPV_ARM_graph"
+               OpExtension "SPV_ARM_tensors"
+               OpExtension "SPV_ARM_tensors_block_scaled"
+               OpExtension "SPV_EXT_float8"
+               OpExtension "SPV_EXT_ocp_microscaling_types"
+               OpExtension "SPV_KHR_vulkan_memory_model"
+       %tosa = OpExtInstImport "TOSA.1x.1"
+               OpMemoryModel Logical Vulkan
+               OpDecorate %input Binding 0
+               OpDecorate %input DescriptorSet 0
+               OpDecorate %output Binding 1
+               OpDecorate %output DescriptorSet 0
+       %uint = OpTypeInt 32 0
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+     %uint_2 = OpConstant %uint 2
+     %uint_3 = OpConstant %uint 3
+     %uint_4 = OpConstant %uint 4
+    %uint_32 = OpConstant %uint 32
+    %uint_64 = OpConstant %uint 64
+       %bool = OpTypeBool
+       %true = OpConstantTrue %bool
+      %float = OpTypeFloat 32
+      %value = OpTypeFloat 8 VALUE_ENCODING
+      %scale = OpTypeFloat 8 Float8UnsignedE8M0EXT
+     %array1 = OpTypeArray %uint %uint_1
+     %array4 = OpTypeArray %uint %uint_4
+     %shape1 = OpConstantComposite %array1 %uint_1
+     %shape2 = OpConstantComposite %array1 %uint_2
+     %shape4 = OpConstantComposite %array1 %uint_4
+%block_shape = OpConstantComposite %array1 %uint_32
+     %scaled = OpTypeTensorScaledBlockARM %value %scale %block_shape
+%input_shape = OpConstantComposite %array4 %uint_1 %uint_1 %uint_1 %uint_64
+%output_shape = OpConstantComposite %array4 %uint_1 %uint_1 %uint_1 %uint_1
+%input_type = OpTypeTensorARM %float %uint_4 %input_shape
+%weight_type = OpTypeTensorARM %scaled %uint_4 %input_shape
+%output_type = OpTypeTensorARM %float %uint_4 %output_shape
+  %bias_type = OpTypeTensorARM %float %uint_1 %shape1
+  %pair_type = OpTypeTensorARM %uint %uint_1 %shape2
+   %pad_type = OpTypeTensorARM %uint %uint_1 %shape4
+        %pad = OpConstantNull %pad_type
+     %stride = OpConstantComposite %pair_type %uint_1 %uint_1
+       %zero = OpConstantNull %bias_type
+    %weights = OpGraphConstantARM %weight_type 0
+       %bias = OpGraphConstantARM %bias_type 1
+  %input_ptr = OpTypePointer UniformConstant %input_type
+ %output_ptr = OpTypePointer UniformConstant %output_type
+      %input = OpVariable %input_ptr UniformConstant
+     %output = OpVariable %output_ptr UniformConstant
+ %graph_type = OpTypeGraphARM 1 %input_type %output_type
+               OpGraphEntryPointARM %main "main" %input %output
+       %main = OpGraphARM %graph_type
+ %activation = OpGraphInputARM %input_type %uint_0
+     %result = OpExtInst %output_type %tosa CONV2D %pad %stride %stride %uint_3 %true %activation %weights %bias %zero %zero
+               OpGraphSetOutputARM %result %uint_0
+               OpGraphEndARM
