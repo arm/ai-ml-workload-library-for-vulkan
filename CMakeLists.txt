@@ -65,6 +65,12 @@ option(ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT "Build ML Workload Library with VGF wo
 set(ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS "${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS}" CACHE STRING
     "Additional compile options for ML Workload Library")
 
+if(MSVC)
+    set(ML_WORKLOAD_LIB_NO_RTTI_COMPILE_OPTION /GR-)
+else()
+    set(ML_WORKLOAD_LIB_NO_RTTI_COMPILE_OPTION -fno-rtti)
+endif()
+
 if(ML_WORKLOAD_LIB_ENABLE_COVERAGE)
     if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         message(FATAL_ERROR "ML_WORKLOAD_LIB_ENABLE_COVERAGE requires GCC")
@@ -161,7 +167,10 @@ function(mlworkloadlib_configure_target target_name)
         ${CMAKE_DL_LIBS}
     )
 
-    target_compile_options(${target_name} PRIVATE ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS})
+    target_compile_options(${target_name} PRIVATE
+        ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS}
+        ${ML_WORKLOAD_LIB_NO_RTTI_COMPILE_OPTION}
+    )
     mlworkloadlib_enable_coverage(${target_name})
 endfunction()
 
@@ -200,7 +209,10 @@ function(mlworkloadlib_add_source_module_backend target_name source)
             ${ARGN}
     )
 
-    target_compile_options(${object_target} PRIVATE ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS})
+    target_compile_options(${object_target} PRIVATE
+        ${ML_SDK_ML_WORKLOAD_LIB_COMPILE_OPTIONS}
+        ${ML_WORKLOAD_LIB_NO_RTTI_COMPILE_OPTION}
+    )
 
     add_library(${target_name} STATIC $<TARGET_OBJECTS:${object_target}>)
 

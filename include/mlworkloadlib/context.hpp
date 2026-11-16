@@ -92,19 +92,20 @@ class RuntimeAllocation {
     RuntimeAllocation(const RuntimeAllocation &) = delete;
     RuntimeAllocation &operator=(const RuntimeAllocation &) = delete;
 
-    /** @brief Transfers ownership from another allocation. */
+  protected:
+    // Keep moves protected to prevent slicing.
     RuntimeAllocation(RuntimeAllocation &&) noexcept;
-
-    /** @brief Replaces this allocation with ownership transferred from another allocation. */
     RuntimeAllocation &operator=(RuntimeAllocation &&) noexcept;
 
-  protected:
     // Implementation type
     struct Impl;
 
     // Lifetime
-    explicit RuntimeAllocation(std::unique_ptr<Impl> impl);
+    RuntimeAllocation();
     ~RuntimeAllocation();
+
+    // Friends
+    friend class Context;
 
     // Implementation access
     Impl *runtimeAllocationImpl() noexcept;
@@ -122,18 +123,11 @@ class TensorAllocation final : public RuntimeAllocation {
     vk::TensorARM handle() const;
 
   private:
-    // Implementation type
-    struct Impl;
-
     // Lifetime
-    TensorAllocation();
+    TensorAllocation() = default;
 
     // Friends
     friend class Context;
-
-    // Implementation access
-    Impl *tensorAllocationImpl() noexcept;
-    const Impl *tensorAllocationImpl() const noexcept;
 };
 
 /** @brief Runtime-owned storage buffer and its backing memory. */
@@ -143,18 +137,11 @@ class BufferAllocation final : public RuntimeAllocation {
     vk::Buffer handle() const;
 
   private:
-    // Implementation type
-    struct Impl;
-
     // Lifetime
-    BufferAllocation();
+    BufferAllocation() = default;
 
     // Friends
     friend class Context;
-
-    // Implementation access
-    Impl *bufferAllocationImpl() noexcept;
-    const Impl *bufferAllocationImpl() const noexcept;
 };
 
 /** @brief Runtime-owned image, image view, and backing memory. */
@@ -172,18 +159,11 @@ class ImageAllocation final : public RuntimeAllocation {
     ImageBindingInfo binding() const;
 
   private:
-    // Implementation type
-    struct Impl;
-
     // Lifetime
-    ImageAllocation();
+    ImageAllocation() = default;
 
     // Friends
     friend class Context;
-
-    // Implementation access
-    Impl *imageAllocationImpl() noexcept;
-    const Impl *imageAllocationImpl() const noexcept;
 };
 
 /**
