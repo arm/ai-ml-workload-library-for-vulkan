@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace mlsdk::workloadlib {
@@ -38,22 +39,23 @@ vk::DeviceSize allocationSize(vk::DeviceSize memoryRequirementSize) {
  *******************************************************************************/
 
 struct RuntimeAllocation::Impl {
-    Impl() = default;
-    virtual ~Impl() = default;
-    Impl(const Impl &) = delete;
-    Impl &operator=(const Impl &) = delete;
-    Impl(Impl &&) = delete;
-    Impl &operator=(Impl &&) = delete;
+    struct ImageResource {
+        vk::raii::Image image{nullptr};
+        vk::raii::ImageView imageView{nullptr};
+        vk::ImageSubresourceRange subresourceRange;
+    };
 
     vk::raii::DeviceMemory memory{nullptr};
     BoundMemoryInfo memoryInfo{};
+    // Resource handles are destroyed before their backing memory.
+    std::variant<std::monostate, vk::raii::TensorARM, vk::raii::Buffer, ImageResource> resource;
 };
 
 /*******************************************************************************
  * Runtime allocation facade
  *******************************************************************************/
 
-RuntimeAllocation::RuntimeAllocation(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
+RuntimeAllocation::RuntimeAllocation() : impl_(std::make_unique<Impl>()) {}
 
 RuntimeAllocation::~RuntimeAllocation() = default;
 
@@ -74,83 +76,47 @@ BoundMemoryInfo RuntimeAllocation::memory() const {
  * Tensor allocation facade
  *******************************************************************************/
 
-struct TensorAllocation::Impl : RuntimeAllocation::Impl {
-    vk::raii::TensorARM tensor{nullptr};
-};
-
-TensorAllocation::TensorAllocation() : RuntimeAllocation(std::make_unique<Impl>()) {}
-
-TensorAllocation::Impl *TensorAllocation::tensorAllocationImpl() noexcept {
-    return dynamic_cast<Impl *>(runtimeAllocationImpl());
-}
-
-const TensorAllocation::Impl *TensorAllocation::tensorAllocationImpl() const noexcept {
-    return dynamic_cast<const Impl *>(runtimeAllocationImpl());
-}
-
 vk::TensorARM TensorAllocation::handle() const {
-    const auto *allocationState = tensorAllocationImpl();
-    return allocationState != nullptr ? *allocationState->tensor : vk::TensorARM(nullptr);
+    const auto *allocationState = runtimeAllocationImpl();
+    const auto *tensor =
+        allocationState != nullptr ? std::get_if<vk::raii::TensorARM>(&allocationState->resource) : nullptr;
+    return tensor != nullptr ? **tensor : vk::TensorARM(nullptr);
 }
 
 /*******************************************************************************
  * Buffer allocation facade
  *******************************************************************************/
 
-struct BufferAllocation::Impl : RuntimeAllocation::Impl {
-    vk::raii::Buffer buffer{nullptr};
-};
-
-BufferAllocation::BufferAllocation() : RuntimeAllocation(std::make_unique<Impl>()) {}
-
-BufferAllocation::Impl *BufferAllocation::bufferAllocationImpl() noexcept {
-    return dynamic_cast<Impl *>(runtimeAllocationImpl());
-}
-
-const BufferAllocation::Impl *BufferAllocation::bufferAllocationImpl() const noexcept {
-    return dynamic_cast<const Impl *>(runtimeAllocationImpl());
-}
-
 vk::Buffer BufferAllocation::handle() const {
-    const auto *allocationState = bufferAllocationImpl();
-    return allocationState != nullptr ? *allocationState->buffer : vk::Buffer(nullptr);
+    const auto *allocationState = runtimeAllocationImpl();
+    const auto *buffer =
+        allocationState != nullptr ? std::get_if<vk::raii::Buffer>(&allocationState->resource) : nullptr;
+    return buffer != nullptr ? **buffer : vk::Buffer(nullptr);
 }
 
 /*******************************************************************************
  * Image allocation facade
  *******************************************************************************/
 
-struct ImageAllocation::Impl : RuntimeAllocation::Impl {
-    vk::raii::Image image{nullptr};
-    vk::raii::ImageView imageView{nullptr};
-    vk::ImageSubresourceRange subresourceRange;
-};
-
-ImageAllocation::ImageAllocation() : RuntimeAllocation(std::make_unique<Impl>()) {}
-
-ImageAllocation::Impl *ImageAllocation::imageAllocationImpl() noexcept {
-    return dynamic_cast<Impl *>(runtimeAllocationImpl());
-}
-
-const ImageAllocation::Impl *ImageAllocation::imageAllocationImpl() const noexcept {
-    return dynamic_cast<const Impl *>(runtimeAllocationImpl());
-}
-
 vk::Image ImageAllocation::handle() const {
-    const auto *allocationState = imageAllocationImpl();
-    return allocationState != nullptr ? *allocationState->image : vk::Image(nullptr);
+    const auto *allocationState = runtimeAllocationImpl();
+    const auto *image =
+        allocationState != nullptr ? std::get_if<Impl::ImageResource>(&allocationState->resource) : nullptr;
+    return image != nullptr ? *image->image : vk::Image(nullptr);
 }
 
 ImageBindingInfo ImageAllocation::binding() const {
-    const auto *allocationState = imageAllocationImpl();
-    if (allocationState == nullptr) {
+    const auto *allocationState = runtimeAllocationImpl();
+    const auto *image =
+        allocationState != nullptr ? std::get_if<Impl::ImageResource>(&allocationState->resource) : nullptr;
+    if (image == nullptr) {
         return {};
     }
     ImageBindingInfo binding;
-    binding.image = *allocationState->image;
-    binding.imageView = *allocationState->imageView;
+    binding.image = *image->image;
+    binding.imageView = *image->imageView;
     binding.layout = vk::ImageLayout::eUndefined;
-    binding.subresourceRange = allocationState->subresourceRange;
+    binding.subresourceRange = image->subresourceRange;
     binding.memory = allocationState->memoryInfo;
     return binding;
 }
@@ -283,9 +249,9 @@ TensorAllocation Context::createTensor(ResourceView resource, vk::TensorTilingAR
     contextView.device.get().bindTensorMemoryARM(vk::BindTensorMemoryInfoARM(*tensor, *memory, 0));
 
     TensorAllocation allocation;
-    auto &allocationState = *allocation.tensorAllocationImpl();
+    auto &allocationState = *allocation.runtimeAllocationImpl();
     allocationState.memory = std::move(memory);
-    allocationState.tensor = std::move(tensor);
+    allocationState.resource.emplace<vk::raii::TensorARM>(std::move(tensor));
     allocationState.memoryInfo = BoundMemoryInfo{*allocationState.memory, 0, size};
     return allocation;
 }
@@ -316,9 +282,9 @@ BufferAllocation Context::createBuffer(ResourceView resource) const {
     buffer.bindMemory(*memory, 0);
 
     BufferAllocation allocation;
-    auto &allocationState = *allocation.bufferAllocationImpl();
+    auto &allocationState = *allocation.runtimeAllocationImpl();
     allocationState.memory = std::move(memory);
-    allocationState.buffer = std::move(buffer);
+    allocationState.resource.emplace<vk::raii::Buffer>(std::move(buffer));
     allocationState.memoryInfo = {*allocationState.memory, 0, allocationSize(memoryRequirements.size)};
     return allocation;
 }
@@ -378,12 +344,11 @@ ImageAllocation Context::createImage(ResourceView resource, vk::ImageTiling tili
                             vk::ImageViewCreateInfo({}, *image, viewType, requirements.format(), {}, subresourceRange));
 
     ImageAllocation allocation;
-    auto &allocationState = *allocation.imageAllocationImpl();
+    auto &allocationState = *allocation.runtimeAllocationImpl();
     allocationState.memory = std::move(memory);
-    allocationState.image = std::move(image);
-    allocationState.imageView = std::move(imageView);
+    allocationState.resource.emplace<RuntimeAllocation::Impl::ImageResource>(
+        RuntimeAllocation::Impl::ImageResource{std::move(image), std::move(imageView), subresourceRange});
     allocationState.memoryInfo = {*allocationState.memory, 0, allocationSize(memoryRequirements.size)};
-    allocationState.subresourceRange = subresourceRange;
     return allocation;
 }
 
