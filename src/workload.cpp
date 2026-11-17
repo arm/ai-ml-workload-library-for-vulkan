@@ -141,18 +141,7 @@ vk::ImageSubresourceRange detail::Resource::requiredImageSubresourceRange() cons
                                         : formatAspects;
         subresourceRange = {defaultAspects, 0, 1, 0, 1};
     }
-    const auto planeCount = vk::planeCount(format);
-    const auto isValidPlaneAspect =
-        (planeCount > 1 && (subresourceRange.aspectMask == vk::ImageAspectFlagBits::ePlane0 ||
-                            subresourceRange.aspectMask == vk::ImageAspectFlagBits::ePlane1)) ||
-        (planeCount > 2 && subresourceRange.aspectMask == vk::ImageAspectFlagBits::ePlane2);
-    if ((subresourceRange.aspectMask & ~formatAspects) && !isValidPlaneAspect) {
-        throw std::runtime_error("Image subresource aspects do not match its format");
-    }
-    if (descriptorType == vk::DescriptorType::eCombinedImageSampler &&
-        subresourceRange.aspectMask == (vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil)) {
-        throw std::runtime_error("Sampled depth/stencil images must select one aspect");
-    }
+    detail::validateImageSubresourceAspects(format, *descriptorType, subresourceRange.aspectMask);
     return subresourceRange;
 }
 

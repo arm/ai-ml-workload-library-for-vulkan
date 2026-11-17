@@ -10,6 +10,7 @@
 #include "mlworkloadlib/binding_set.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -114,15 +115,16 @@ void BindingSet::bindImage(ResourceView resource, ImageBindingInfo bindingInfo) 
     if (!requirements.requiresSamplerBinding() && bindingInfo.sampler != nullptr) {
         throw std::runtime_error("ImageBindingInfo must not provide a sampler for this workload resource");
     }
-    const auto requiredSubresourceRange = requirements.requiredSubresourceRange();
-    if (bindingInfo.subresourceRange.aspectMask != requiredSubresourceRange.aspectMask ||
-        bindingInfo.subresourceRange.baseMipLevel != requiredSubresourceRange.baseMipLevel ||
-        bindingInfo.subresourceRange.levelCount != requiredSubresourceRange.levelCount ||
-        bindingInfo.subresourceRange.baseArrayLayer != requiredSubresourceRange.baseArrayLayer ||
-        bindingInfo.subresourceRange.layerCount != requiredSubresourceRange.layerCount) {
-        throw std::runtime_error(
-            "ImageBindingInfo subresource range does not match the workload resource requirements");
+    const auto range = bindingInfo.subresourceRange;
+    constexpr auto maxUint32Value = std::numeric_limits<uint32_t>::max();
+    if (!range.aspectMask || range.levelCount == 0 || range.layerCount == 0 ||
+        range.levelCount == VK_REMAINING_MIP_LEVELS || range.layerCount == VK_REMAINING_ARRAY_LAYERS ||
+        range.baseMipLevel > (maxUint32Value - range.levelCount) ||
+        range.baseArrayLayer > (maxUint32Value - range.layerCount)) {
+        throw std::runtime_error("Image subresource range requires explicit aspects and finite, nonempty ranges");
     }
+    detail::validateImageSubresourceAspects(resource.requirements().format(), resource.requirements().descriptorType(),
+                                            range.aspectMask);
 
     bindingSetState->imageBindingsByResourceIndex[resource.resourceIndex_] = bindingInfo;
 }

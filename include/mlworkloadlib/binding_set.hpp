@@ -60,7 +60,12 @@ class BindingSet {
     /** @brief Binds a storage buffer, replacing any binding for the same resource. */
     void bindBuffer(ResourceView resource, BufferBindingInfo bindingInfo);
 
-    /** @brief Binds an image, replacing any binding for the same resource. */
+    /**
+     * @brief Binds an image, replacing any binding for the same resource.
+     *
+     * The range in ImageBindingInfo selects the bound view's subresources;
+     * compatible ranges may differ between bindings within one session.
+     */
     void bindImage(ResourceView resource, ImageBindingInfo bindingInfo);
 
     /**

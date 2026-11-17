@@ -63,6 +63,7 @@
   tensor requirements while retaining the existing defaults.
 - Added per-session tensor and image tiling selection, with validation and
   alias-group-aware defaults for library- and caller-owned resources.
+- Allowed compatible external image view ranges to be selected at binding time.
 - Added experimental standalone data-graph binary pipeline creation from
   caller-provided bytes, with both storage modes and an optional opaque
   pipeline selector.

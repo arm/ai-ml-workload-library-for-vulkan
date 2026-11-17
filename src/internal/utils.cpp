@@ -224,6 +224,22 @@ vk::ImageAspectFlags imageAspectMask(vk::Format format) {
     }
 }
 
+void validateImageSubresourceAspects(vk::Format format, vk::DescriptorType descriptorType,
+                                     vk::ImageAspectFlags aspects) {
+    const auto formatAspects = imageAspectMask(format);
+    const auto planeCount = vk::planeCount(format);
+    const auto isValidPlaneAspect = (planeCount > 1 && (aspects == vk::ImageAspectFlagBits::ePlane0 ||
+                                                        aspects == vk::ImageAspectFlagBits::ePlane1)) ||
+                                    (planeCount > 2 && aspects == vk::ImageAspectFlagBits::ePlane2);
+    if ((aspects & ~formatAspects) && !isValidPlaneAspect) {
+        throw std::runtime_error("Image subresource aspects do not match its format");
+    }
+    if (descriptorType == vk::DescriptorType::eCombinedImageSampler &&
+        aspects == (vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil)) {
+        throw std::runtime_error("Sampled depth/stencil images must select one aspect");
+    }
+}
+
 vk::ImageViewType imageViewType(vk::ImageType imageType) {
     switch (imageType) {
     case vk::ImageType::e1D:
