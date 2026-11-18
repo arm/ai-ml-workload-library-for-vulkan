@@ -192,6 +192,9 @@ void populateDataGraphConstants(DataGraphPipelineCreateStorage &storage, const E
         const auto workloadConstantIndex = executable.constantIndexes.at(constantIndex);
         const auto &constant = workloadState.constants.at(workloadConstantIndex);
         const auto &resource = workloadState.resources.at(constant.resourceIndex);
+        if (detail::tensorMetadata(resource).scaledTensorConfig) {
+            throw std::runtime_error("Scaled graph constant execution is not implemented");
+        }
         void *pNext = nullptr;
         if (constant.sparsityDimension < detail::Constant::unspecifiedSparsityDimension) {
             throw std::runtime_error("Graph constant has invalid sparsity dimension");

@@ -173,12 +173,27 @@ uint32_t addDecodedResource(WorkloadBuilder &builder, const vgflib::ModelResourc
     const auto aliasGroupId = decoder.getAliasGroupId(resourceIndex);
     const bool requiresBoundMemoryInfo = aliasGroupId.has_value();
 
+    std::optional<ScaledTensorConfig> scaledTensorConfig;
+    if (const auto *const scaled = decoder.getScaledTensorConfigHandle(resourceIndex)) {
+        if (kind != ResourceKind::Tensor) {
+            throw std::runtime_error("Unsupported scaled VGF resource");
+        }
+        switch (decoder.getScaledTensorConfigScaleFormat(scaled)) {
+        case vgflib::ScaleFormat::E8M0:
+            scaledTensorConfig =
+                ScaledTensorConfig{toVector(decoder.getScaledTensorConfigBlockShape(scaled)), TensorScaleFormat::E8M0};
+            break;
+        default:
+            throw std::runtime_error("Unsupported VGF scale format");
+        }
+    }
+
     switch (kind) {
     case ResourceKind::Tensor:
         // Constants retain tensor metadata without adding a descriptor binding.
         return builder.addTensorResource({}, role, descriptorType, format, std::move(shape), std::move(stride),
                                          elementCount, aliasGroupId, requiresBoundMemoryInfo,
-                                         vk::TensorUsageFlagBitsARM::eDataGraph);
+                                         vk::TensorUsageFlagBitsARM::eDataGraph, std::move(scaledTensorConfig));
     case ResourceKind::StorageBuffer:
         return builder.addBufferResource({}, role, *descriptorType, format, std::move(shape), std::move(stride),
                                          elementCount, aliasGroupId, requiresBoundMemoryInfo, 0,

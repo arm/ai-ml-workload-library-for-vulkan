@@ -144,6 +144,23 @@ Workload makeTensorAliasWorkload(uint32_t peerCount = 1) {
     return builder.finish();
 }
 
+TEST(RuntimeResource, RejectsScaledIntermediateAllocation) {
+    detail::WorkloadBuilder builder;
+    auto requirements = tensorRequirements(vk::Format::eR8SfloatFpencodingFloat8E4M3ARM, {2, 64});
+    requirements.tensor.scaledTensorConfig = ScaledTensorConfig{{16}, TensorScaleFormat::E8M0};
+    const auto resourceIndex = builder.addResource("scaled", requirements, detail::Resource::Role::Intermediate);
+    const auto workload = builder.finish();
+    const vk::raii::Instance instance{nullptr};
+    const vk::raii::PhysicalDevice physicalDevice{nullptr};
+    const vk::raii::Device device{nullptr};
+    const vk::raii::Queue queue{nullptr};
+    const ContextView context{instance, physicalDevice, device, 0, queue};
+    EXPECT_THAT(
+        [&] { detail::createIntermediateTensor(workload, context, resourceIndex, vk::TensorTilingARM::eLinear, {}); },
+        testing::ThrowsMessage<std::runtime_error>(
+            testing::HasSubstr("Scaled intermediate tensor allocation is not implemented")));
+}
+
 TEST(AliasLayout, RejectsIncompatibleImageTensorDescriptions) {
     for (const auto &tensor :
          {tensorRequirements(vk::Format::eR8Sint, {2, 2, 3}), tensorRequirements(vk::Format::eR8Sint, {2, 2}),

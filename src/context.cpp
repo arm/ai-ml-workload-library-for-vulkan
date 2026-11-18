@@ -219,6 +219,9 @@ TensorAllocation Context::createTensor(ResourceView resource, vk::TensorTilingAR
     }
 
     const auto tensorRequirements = requirements.asTensor();
+    if (tensorRequirements.scaleFormat()) {
+        throw std::runtime_error("Scaled tensor allocation is not implemented");
+    }
     const auto shapeView = tensorRequirements.shape();
     const auto strideView = tensorRequirements.stride();
     const auto usage = tensorRequirements.usage(tiling);

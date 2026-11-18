@@ -27,6 +27,10 @@
 
 ### Resource Binding and Execution
 
+- Added experimental support for inspecting block shape, symbolic E8M0 scale
+  format, and derived scale shape in standalone and VGF tensor requirements, including
+  graph constants. Each scaled tensor retains one logical binding. Vulkan®
+  allocation and graph-constant execution for scaled tensors remain unsupported.
 - Added session-wide compilation policy and shared per-executable pipeline creation reports.
 - Added executable pipeline cache overrides through `Session::setExecutableOptions()`,
   including explicit disabling of the session default cache.

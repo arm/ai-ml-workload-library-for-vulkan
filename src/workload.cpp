@@ -424,6 +424,22 @@ ArrayView<const int64_t> TensorRequirementsView::shape() const {
     return {shape.data(), shape.size()};
 }
 
+ArrayView<const uint32_t> TensorRequirementsView::blockShape() const {
+    const auto &config = detail::tensorMetadata(workloadResource(*workload_, resourceIndex_)).scaledTensorConfig;
+    return config ? ArrayView<const uint32_t>{config->blockShape.data(), config->blockShape.size()}
+                  : ArrayView<const uint32_t>{};
+}
+
+std::optional<TensorScaleFormat> TensorRequirementsView::scaleFormat() const {
+    const auto &config = detail::tensorMetadata(workloadResource(*workload_, resourceIndex_)).scaledTensorConfig;
+    return config ? std::optional<TensorScaleFormat>{config->scaleFormat} : std::nullopt;
+}
+
+ArrayView<const int64_t> TensorRequirementsView::scaleShape() const {
+    const auto &shape = detail::tensorMetadata(workloadResource(*workload_, resourceIndex_)).scaleShape;
+    return {shape.data(), shape.size()};
+}
+
 ArrayView<const int64_t> TensorRequirementsView::stride() const {
     const auto &stride = workloadResource(*workload_, resourceIndex_).stride;
     return {stride.data(), stride.size()};

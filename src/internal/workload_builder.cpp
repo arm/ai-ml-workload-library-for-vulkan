@@ -81,6 +81,44 @@ Resource resourceBase(std::string name, Resource::Role role, std::optional<vk::D
     return workloadResource;
 }
 
+bool supportsBlockScaling(vk::Format format) {
+    // Keep experimental format values usable with Vulkan headers predating tensors2.
+    switch (static_cast<uint32_t>(format)) {
+    case 1000460002: // VK_FORMAT_R8_SFLOAT_FPENCODING_FLOAT8E4M3_ARM
+    case 1000460003: // VK_FORMAT_R8_SFLOAT_FPENCODING_FLOAT8E5M2_ARM
+    case 1000729000: // VK_FORMAT_OCPMXFP_32_SFLOAT_BLOCK_FPENCODING_FLOAT6E2M3_ARM
+    case 1000729001: // VK_FORMAT_OCPMXFP_32_SFLOAT_BLOCK_FPENCODING_FLOAT6E3M2_ARM
+    case 1000729002: // VK_FORMAT_OCPMXFP_32_SFLOAT_BLOCK_FPENCODING_FLOAT4E2M1_ARM
+    case 1000729004: // VK_FORMAT_R8_SFLOAT_FPENCODING_MXINT8_ARM
+        return true;
+    default:
+        return false;
+    }
+}
+
+std::vector<int64_t> deriveScaleShape(const std::vector<int64_t> &shape,
+                                      const std::optional<ScaledTensorConfig> &scaledTensorConfig) {
+    std::vector<int64_t> scaleShape;
+    if (scaledTensorConfig) {
+        const auto &blockShape = scaledTensorConfig->blockShape;
+        if (scaledTensorConfig->scaleFormat != TensorScaleFormat::E8M0 || blockShape.empty() ||
+            blockShape.size() > shape.size()) {
+            throw std::runtime_error("Unsupported scale format or invalid block shape rank");
+        }
+        const auto offset = shape.size() - blockShape.size();
+        for (size_t i = 0; i < shape.size(); ++i) {
+            const auto dimension = shape[i];
+            const auto blockDimension = i < offset ? 1u : blockShape[i - offset];
+            if (blockDimension == 0 || (dimension != -1 && (dimension <= 0 || dimension % blockDimension != 0))) {
+                throw std::runtime_error("Scaled tensor block dimensions must divide the tensor shape");
+            }
+            // Preserve VGF unresolved dimensions for metadata inspection.
+            scaleShape.push_back(dimension == -1 ? -1 : dimension / blockDimension);
+        }
+    }
+    return scaleShape;
+}
+
 Resource::ImageMetadata::SamplerConfig samplerConfigForRequirements(const SamplerRequirements &requirements) {
     Resource::ImageMetadata::SamplerConfig samplerConfig;
     samplerConfig.minFilter = requirements.minFilter;
@@ -162,7 +200,8 @@ uint32_t WorkloadBuilder::addResource(std::string name, const ResourceRequiremen
         return addTensorResource(
             std::move(name), role, descriptorType, requirements.format, requirements.tensor.shape,
             requirements.tensor.stride, requirements.elementCount, aliasGroupId, requiresBoundMemoryInfo,
-            requirements.tensor.usage ? requirements.tensor.usage : vk::TensorUsageFlagBitsARM::eDataGraph);
+            requirements.tensor.usage ? requirements.tensor.usage : vk::TensorUsageFlagBitsARM::eDataGraph,
+            requirements.tensor.scaledTensorConfig);
     case ResourceKind::StorageBuffer: {
         const auto usage =
             requirements.buffer.usage ? requirements.buffer.usage : vk::BufferUsageFlagBits::eStorageBuffer;
@@ -200,10 +239,15 @@ uint32_t WorkloadBuilder::addTensorResource(std::string name, Resource::Role rol
                                             std::optional<vk::DescriptorType> descriptorType, vk::Format format,
                                             std::vector<int64_t> shape, std::vector<int64_t> stride,
                                             vk::DeviceSize elementCount, std::optional<uint32_t> aliasGroupId,
-                                            bool requiresBoundMemoryInfo, vk::TensorUsageFlagsARM usage) {
+                                            bool requiresBoundMemoryInfo, vk::TensorUsageFlagsARM usage,
+                                            std::optional<ScaledTensorConfig> scaledTensorConfig) {
     auto workloadResource = resourceBase(std::move(name), role, descriptorType, format, std::move(shape),
                                          std::move(stride), elementCount, aliasGroupId, requiresBoundMemoryInfo);
-    workloadResource.metadata = Resource::TensorMetadata{usage};
+    if (scaledTensorConfig && !supportsBlockScaling(format)) {
+        throw std::runtime_error("Unsupported scaled tensor value format");
+    }
+    auto scaleShape = deriveScaleShape(workloadResource.shape, scaledTensorConfig);
+    workloadResource.metadata = Resource::TensorMetadata{usage, std::move(scaledTensorConfig), std::move(scaleShape)};
     return appendResource(std::move(workloadResource));
 }
 
@@ -293,7 +337,8 @@ uint32_t WorkloadBuilder::addConstantResource(std::string name, const ResourceRe
                              requirements.tensor.shape, requirements.tensor.stride, requirements.elementCount,
                              aliasGroupId, requirements.requiresBoundMemoryInfo || aliasGroupId.has_value(),
                              requirements.tensor.usage ? requirements.tensor.usage
-                                                       : vk::TensorUsageFlagBitsARM::eDataGraph);
+                                                       : vk::TensorUsageFlagBitsARM::eDataGraph,
+                             requirements.tensor.scaledTensorConfig);
 }
 
 uint32_t WorkloadBuilder::addConstant(uint32_t resourceIndex, const void *data, std::uint64_t size,
