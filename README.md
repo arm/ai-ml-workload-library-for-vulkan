@@ -88,6 +88,9 @@ target_link_libraries(my_target PRIVATE MLWorkloadLibraryForVulkan::mlworkloadli
 The package target requires the `VGF` and `VulkanHeaders` packages to be
 discoverable at configure time.
 
+Consumers must use the same `NDEBUG` setting as the library. Vulkan-Hpp dispatcher
+layouts depend on this setting, and mismatches can cause crashes.
+
 ## Optional VGF support
 
 VGF workload support is enabled by default. Disable it when the library is only
