@@ -855,6 +855,9 @@ void PreparedExecution::Impl::createDescriptorSets() {
             poolSizes.emplace_back(type, count);
         }
         const auto &compiledExecutable = sessionImpl.executableStates[executableIndex].compiledExecutable.get();
+        if (compiledExecutable.descriptorSetLayouts.empty()) {
+            continue;
+        }
         descriptors.descriptorPool = vk::raii::DescriptorPool(
             sessionImpl.contextView.device.get(),
             {vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,

@@ -63,6 +63,7 @@ if(ML_WORKLOAD_LIB_ENABLE_VGF_SUPPORT)
 endif()
 
 target_compile_definitions(mlworkloadlib_tests PRIVATE
+    ML_WORKLOAD_LIB_NO_DESCRIPTORS_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/no_descriptors.spvasm"
     ML_WORKLOAD_LIB_ADD_INT32_BUFFERS_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/add_int32_buffers.spvasm"
     ML_WORKLOAD_LIB_ADD_F32_CONSTANT_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/add_f32_constant.spvasm"
     ML_WORKLOAD_LIB_ARSHIFT_SPECBOOL_SPVASM="${CMAKE_CURRENT_SOURCE_DIR}/resources/spvasm/arshift_specbool.spvasm"

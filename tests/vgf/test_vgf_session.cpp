@@ -655,6 +655,37 @@ TEST_F(VgfAliasExecutionTest, RunLinearImageAliasWithSessionSelection) {
     EXPECT_EQ(recorder.imageUsages, (std::vector<vk::ImageUsageFlags>{aliasedUsage, aliasedUsage}));
 }
 
+TEST_F(VgfSessionExecutionTest, KeepsDescriptorStateAlignedAcrossDescriptorFreeSegments) {
+    const auto emptyCode = assembleSpirv(readSpvasmFile(ML_WORKLOAD_LIB_NO_DESCRIPTORS_SPVASM));
+    const auto addCode = assembleAddInt32BuffersSpirv();
+    const auto bytes = writeVgf([&](mlsdk::vgflib::Encoder &encoder) {
+        const auto empty = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "empty", "main", emptyCode);
+        const auto add = encoder.AddModule(mlsdk::vgflib::ModuleType::COMPUTE, "add", "main", addCode);
+        encoder.AddSegmentInfo(empty, "before", {}, {}, {}, noGraphConstants, {1, 1, 1});
+        addInt32BuffersSegment(encoder, add, "add_buffers");
+        encoder.AddSegmentInfo(empty, "after", {}, {}, {}, noGraphConstants, {1, 1, 1});
+    });
+    auto workload = Workload::fromVGF(asVgfBytes(bytes));
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.configure();
+    const Buffer first(physicalDevice, device, 10 * sizeof(int32_t));
+    const Buffer second(physicalDevice, device, 10 * sizeof(int32_t));
+    const Buffer output(physicalDevice, device, 10 * sizeof(int32_t));
+    auto bindings = session.createBindingSet();
+    bindings.bindBuffer(workload.resource(0), {*first.buffer});
+    bindings.bindBuffer(workload.resource(1), {*second.buffer});
+    bindings.bindBuffer(workload.resource(2), {*output.buffer});
+    auto execution = session.prepare(bindings);
+    for (const int32_t value : {3, 7}) {
+        first.write(std::vector<int32_t>(10, value));
+        second.write(std::vector<int32_t>(10, 2));
+        output.write(std::vector<int32_t>(10, 0));
+        execution.run();
+        EXPECT_EQ(output.read(10), std::vector<int32_t>(10, value + 2));
+    }
+}
+
 TEST_F(VgfSessionExecutionTest, RunComputeShaderSegment) {
     constexpr size_t elements = 10;
     constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);
