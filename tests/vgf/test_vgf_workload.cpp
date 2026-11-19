@@ -2,6 +2,7 @@
  * SPDX-FileCopyrightText: Copyright 2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
  * SPDX-License-Identifier: Apache-2.0
  */
+#include "internal/graph_constants.hpp"
 #include "internal/workload_impl.hpp"
 #include "mlworkloadlib/workload.hpp"
 #include "test_spirv_utils.hpp"
@@ -33,6 +34,40 @@ using namespace mlsdk::workloadlib::test;
 /*******************************************************************************
  * Positive coverage
  *******************************************************************************/
+
+TEST(VgfWorkload, PreservesSegmentLocalGraphConstantIds) {
+    const std::array<float, 2> values{2.0f, 3.0f};
+    const auto data = writeVgf([&](Encoder &encoder) {
+        const auto module = encoder.AddModule(ModuleType::GRAPH, "graph", "main");
+        const auto resource0 = encoder.AddConstantResource(VK_FORMAT_R32_SFLOAT, {1}, {});
+        const auto resource1 = encoder.AddConstantResource(VK_FORMAT_R32_SFLOAT, {1}, {});
+        const auto constant0 = encoder.AddConstant(resource0, values.data(), sizeof(float), -1);
+        const auto constant1 = encoder.AddConstant(resource1, &values[1], sizeof(float), -1);
+        encoder.AddSegmentInfo(module, "nonidentity", {}, {}, {},
+                               std::vector<GraphConstantBindingRef>{{10000, constant1}});
+        encoder.AddSegmentInfo(module, "local_zero_a", {}, {}, {},
+                               std::vector<GraphConstantBindingRef>{{0, constant0}});
+        encoder.AddSegmentInfo(module, "local_zero_b", {}, {}, {},
+                               std::vector<GraphConstantBindingRef>{{0, constant1}});
+        encoder.AddSegmentInfo(module, "identity", {}, {}, {}, std::vector<GraphConstantBindingRef>{{1, constant1}});
+    });
+    const auto workload = Workload::fromVGF(asVgfBytes(data));
+    const auto &state = workloadImpl(workload);
+    ASSERT_EQ(state.executables.size(), 4u);
+    const std::array<uint32_t, 4> expectedIds{10000, 0, 0, 1};
+    const std::array<uint32_t, 4> expectedConstants{1, 0, 1, 1};
+    for (size_t i = 0; i < state.executables.size(); ++i) {
+        const auto &bindings = state.executables[i].constantBindings;
+        ASSERT_EQ(bindings.size(), 1u);
+        EXPECT_EQ(bindings[0].graphConstantId, expectedIds[i]);
+        EXPECT_EQ(bindings[0].constantIndex, expectedConstants[i]);
+        mlsdk::workloadlib::detail::DataGraphPipelineCreateStorage storage;
+        mlsdk::workloadlib::detail::populateDataGraphConstants(storage, state.executables[i], workload);
+        ASSERT_EQ(storage.constants.size(), 1u);
+        EXPECT_EQ(storage.constants[0].id, expectedIds[i]);
+        EXPECT_FLOAT_EQ(*static_cast<const float *>(storage.constants[0].pConstantData), values[expectedConstants[i]]);
+    }
+}
 
 TEST(VgfWorkload, DecodesPublicExecutablesBindingsResourcesAndDispatch) {
     const auto &code = assembleMaxpool16x16To8x8Spirv("maxpool_set0", {0, 0, 0, 1});
@@ -493,4 +528,27 @@ TEST(VgfWorkload, PreservesUnresolvedScaledTensorDimensions) {
         const auto scaleShape = requirements.asTensor().scaleShape();
         EXPECT_EQ(std::vector<int64_t>(scaleShape.begin(), scaleShape.end()), expectedScaleShape);
     }
+}
+
+TEST(VgfWorkload, RejectsScaledGraphConstantExecution) {
+    const std::array<uint8_t, 128> values{};
+    const auto data = writeVgf([&](Encoder &encoder) {
+        const auto module = encoder.AddModule(ModuleType::GRAPH, "graph", "main", {});
+        const auto resource = encoder.AddConstantResource(VK_FORMAT_R8_SFLOAT_FPENCODING_FLOAT8E4M3_ARM, {2, 64}, {});
+        encoder.AddScaledTensorConfig(resource, {16}, ScaleFormat::E8M0);
+        const auto constant = encoder.AddConstant(resource, values.data(), values.size());
+        encoder.AddSegmentInfo(module, "graph", {}, {}, {}, std::vector<GraphConstantBindingRef>{{10000, constant}});
+    });
+    const auto workload = Workload::fromVGF(asVgfBytes(data));
+    const auto &state = workloadImpl(workload);
+    ASSERT_EQ(state.executables[0].constantBindings[0].graphConstantId, 10000u);
+    ASSERT_EQ(state.executables[0].constantBindings[0].constantIndex, 0u);
+    mlsdk::workloadlib::detail::DataGraphPipelineCreateStorage storage;
+    try {
+        mlsdk::workloadlib::detail::populateDataGraphConstants(storage, state.executables[0], workload);
+        FAIL() << "Scaled graph constants must be rejected before execution";
+    } catch (const std::runtime_error &error) {
+        EXPECT_STREQ(error.what(), "Scaled graph constant execution is not implemented");
+    }
+    EXPECT_TRUE(storage.constants.empty());
 }

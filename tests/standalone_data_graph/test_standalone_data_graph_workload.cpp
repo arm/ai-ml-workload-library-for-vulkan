@@ -4,6 +4,7 @@
  */
 #include "test_standalone_data_graph_utils.hpp"
 
+#include "internal/graph_constants.hpp"
 #include "internal/workload_impl.hpp"
 
 #include <gmock/gmock.h>
@@ -120,9 +121,12 @@ TEST(StandaloneDataGraphWorkload, AcceptsSparseConstantsWithDimension) {
 
 TEST(StandaloneDataGraphWorkload, HidesConstantsFromPublicResources) {
     std::array<int32_t, 4> constantData = {1, 2, 3, 4};
+    std::array<int32_t, 1> secondConstantData = {7};
     auto description = makeMaxpoolDescription();
     description.constants.push_back({"constant", tensorRequirements(vk::Format::eR32Sint, {4}), constantData.data(),
                                      constantData.size() * sizeof(int32_t)});
+    description.constants.push_back(
+        {"second", tensorRequirements(vk::Format::eR32Sint, {1}), secondConstantData.data(), sizeof(int32_t)});
 
     auto workload = Workload::fromDataGraph(std::move(description));
 
@@ -131,6 +135,14 @@ TEST(StandaloneDataGraphWorkload, HidesConstantsFromPublicResources) {
     EXPECT_EQ(workload.resource(0).name(), "input");
     EXPECT_EQ(workload.resource(1).name(), "output");
     EXPECT_EQ(workload.executable(0).interfaceDescriptorBindingCount(), 2);
+    const auto &state = workloadImpl(workload);
+    mlsdk::workloadlib::detail::DataGraphPipelineCreateStorage storage;
+    mlsdk::workloadlib::detail::populateDataGraphConstants(storage, state.executables[0], workload);
+    ASSERT_EQ(storage.constants.size(), 2u);
+    EXPECT_EQ(storage.constants[0].id, 0u);
+    EXPECT_EQ(storage.constants[1].id, 1u);
+    EXPECT_EQ(storage.constants[0].pConstantData, constantData.data());
+    EXPECT_EQ(storage.constants[1].pConstantData, secondConstantData.data());
 }
 
 /*******************************************************************************

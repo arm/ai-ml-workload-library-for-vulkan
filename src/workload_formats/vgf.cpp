@@ -365,8 +365,11 @@ void populateVgfWorkload(WorkloadBuilder &builder, const void *data, std::size_t
         std::copy(dispatchShape.begin(), dispatchShape.end(), executable.dispatchShape.begin());
         addDecodedPushConstantRanges(*modelSequenceTable, builder, executableIndex);
 
-        for (const auto constantIndex : modelSequenceTable->getSegmentConstantIndexes(executableIndex)) {
-            executable.constantIndexes.push_back(constantIndex);
+        const auto *const constantBindings = modelSequenceTable->getSegmentConstantBindingsHandle(executableIndex);
+        for (uint32_t bindingIndex = 0;
+             bindingIndex < modelSequenceTable->getGraphConstantBindingsSize(constantBindings); ++bindingIndex) {
+            const auto binding = modelSequenceTable->getGraphConstantBinding(constantBindings, bindingIndex);
+            executable.constantBindings.push_back({binding.graphConstantId, binding.constantIndex});
         }
 
         for (uint32_t descIdx = 0; descIdx < modelSequenceTable->getSegmentDescriptorSetInfosSize(executableIndex);

@@ -44,7 +44,7 @@ Workload Workload::fromDataGraph(DataGraphDescription description) {
     }
 
     // Graph constants
-    executable.constantIndexes.reserve(description.constants.size());
+    executable.constantBindings.reserve(description.constants.size());
     for (auto &constantDescription : description.constants) {
         const auto sparsityDimension = constantDescription.sparse2To4.has_value()
                                            ? constantDescription.sparse2To4->dimension
@@ -57,7 +57,7 @@ Workload Workload::fromDataGraph(DataGraphDescription description) {
             builder.addConstantResource(std::move(constantDescription.name), constantDescription.resource);
         const auto constantIndex =
             builder.addConstant(resourceIndex, constantDescription.data, constantDescription.size, sparsityDimension);
-        executable.constantIndexes.push_back(constantIndex);
+        executable.constantBindings.push_back({constantIndex, constantIndex});
     }
 
     return builder.finish();

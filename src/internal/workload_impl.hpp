@@ -138,13 +138,18 @@ struct Constant {
     bool hasSparsity() const noexcept { return sparsityDimension >= 0; }
 };
 
+struct GraphConstantBinding {
+    uint32_t graphConstantId = 0;
+    uint32_t constantIndex = 0;
+};
+
 struct Executable {
     std::string name;
     ExecutableKind type = ExecutableKind::Graph;
     uint32_t moduleIndex = 0;
     std::vector<DescriptorBinding> bindings;
     std::array<uint32_t, 3> dispatchShape = {};
-    std::vector<uint32_t> constantIndexes;
+    std::vector<GraphConstantBinding> constantBindings;
     std::string dataGraphPipelineIdentifier;
     vk::PipelineCreateFlags2 dataGraphPipelineFlags;
     SpecializationInfo specializationInfo;

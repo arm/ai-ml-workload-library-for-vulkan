@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+- Fixed VGF graph constant bindings to preserve graph constant IDs separately
+  from constant-table indices when creating Vulkan® data-graph pipelines.
+
 ### Breaking API Changes
 
 - Changed memory-based `Workload::fromVGF()` to take
