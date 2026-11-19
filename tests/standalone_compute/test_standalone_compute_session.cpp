@@ -54,6 +54,30 @@ vk::raii::Sampler makeNearestSampler(const vk::raii::Device &device) {
  * Positive coverage
  *******************************************************************************/
 
+TEST_F(StandaloneComputeSessionExecutionTest, RunsWithoutDescriptorSets) {
+    ComputeShaderDescription description;
+    description.module.codeKind = ModuleCodeKind::Spirv;
+    description.module.spirv = assembleSpirv(readSpvasmFile(ML_WORKLOAD_LIB_NO_DESCRIPTORS_SPVASM));
+    auto workload = Workload::fromComputeShader(std::move(description));
+    auto context = wrappedContext();
+    Session session(context, workload);
+    session.configure();
+    ScopedDispatcherHook<PFN_vkCreateDescriptorPool> pool(
+        device, &vk::raii::detail::DeviceDispatcher::vkCreateDescriptorPool,
+        +[](VkDevice, const VkDescriptorPoolCreateInfo *, const VkAllocationCallbacks *, VkDescriptorPool *) {
+            ADD_FAILURE() << "Descriptor-free execution must not create a descriptor pool";
+            return VK_ERROR_INITIALIZATION_FAILED;
+        });
+    ScopedDispatcherHook<PFN_vkAllocateDescriptorSets> allocation(
+        device, &vk::raii::detail::DeviceDispatcher::vkAllocateDescriptorSets,
+        +[](VkDevice, const VkDescriptorSetAllocateInfo *, VkDescriptorSet *) {
+            ADD_FAILURE() << "Descriptor-free execution must not allocate descriptor sets";
+            return VK_ERROR_INITIALIZATION_FAILED;
+        });
+    auto execution = session.prepare(session.createBindingSet());
+    execution.run();
+}
+
 TEST_F(StandaloneComputeSessionExecutionTest, RunComputeShaderWorkload) {
     constexpr size_t elements = 10;
     constexpr vk::DeviceSize bufferSize = elements * sizeof(int32_t);

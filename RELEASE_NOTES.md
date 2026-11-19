@@ -37,6 +37,7 @@
 - Fixed preparation of repeated bindings to the same external image and
   subresource range without requiring an alias group, while retaining checks
   for conflicting layouts and alias groups.
+- Fixed preparation of executables that require no descriptor sets.
 - Added compute executable push-constant layout overrides through
   `Session::setPushConstantSize()` and effective size inspection through
   `Session::pushConstantSize()`, including layouts absent from a VGF.
