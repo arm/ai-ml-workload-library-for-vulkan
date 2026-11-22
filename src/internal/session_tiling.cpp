@@ -102,6 +102,13 @@ void validateImageTensorAliases(const Workload &workload) {
 } // namespace
 
 std::vector<ResourceTiling> defaultResourceTilings(const Workload &workload) {
+    const auto &resources = workloadImpl(workload).resources;
+    for (const auto &resource : resources) {
+        const auto *tensor = std::get_if<Resource::TensorMetadata>(&resource.metadata);
+        if (resource.aliasGroupId && tensor && tensor->scaledTensorConfig) {
+            throw std::runtime_error("Scaled tensor alias groups are not supported");
+        }
+    }
     validateImageTensorAliases(workload);
 
     struct AliasGroupTiling {
@@ -110,7 +117,6 @@ std::vector<ResourceTiling> defaultResourceTilings(const Workload &workload) {
         bool requiresOptimal = false;
     };
 
-    const auto &resources = workloadImpl(workload).resources;
     std::map<uint32_t, AliasGroupTiling> aliasGroupTilings;
     std::vector<ResourceTiling> resourceTilings;
     resourceTilings.reserve(resources.size());

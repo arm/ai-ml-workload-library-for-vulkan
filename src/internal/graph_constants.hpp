@@ -16,6 +16,11 @@ namespace mlsdk::workloadlib::detail {
 
 struct DataGraphPipelineCreateStorage {
     std::vector<vk::TensorDescriptionARM> resourceTensorDescriptions;
+    std::vector<std::array<vk::TensorDescriptionARM, 2>> scaledResourcePlaneDescriptions;
+    std::vector<std::vector<int64_t>> resourceScaleStrides;
+#ifdef VK_ARM_tensors2
+    std::vector<vk::BlockScaledTensorDescriptionARM> scaledResourceDescriptions;
+#endif
     std::vector<vk::DataGraphPipelineResourceInfoImageLayoutARM> imageLayouts;
     std::vector<vk::DataGraphPipelineResourceInfoARM> resourceInfos;
     std::vector<vk::TensorDescriptionARM> constantTensorDescriptions;
@@ -52,16 +57,7 @@ inline std::vector<int64_t> validateScaledConstant(const Constant &constant, con
     }
     validateTensorMetadata(resource.format, resource.shape, resource.stride, /*allowPackedBlocks=*/true);
     const auto valueBlockBytes = static_cast<int64_t>(blockSize) * vk::blockSize(resource.format) / valueBlockExtent;
-    std::vector<int64_t> scaleStrides;
-    if (!resource.stride.empty()) {
-        scaleStrides.resize(resource.stride.size(), 1);
-        for (size_t i = 0; i + 1 < resource.stride.size(); ++i) {
-            if (resource.stride[i] % valueBlockBytes != 0) {
-                throw std::runtime_error("Scaled graph constant strides must align to whole blocks");
-            }
-            scaleStrides[i] = resource.stride[i] / valueBlockBytes;
-        }
-    }
+    auto scaleStrides = deriveScalePlaneStrides(resource.stride, valueBlockBytes);
     validateTensorMetadata(scaleFormat, metadata.scaleShape, scaleStrides);
     const auto outerElements = resource.stride.empty() ? scaleElements
                                                        : static_cast<vk::DeviceSize>(resource.shape.front()) /
@@ -81,7 +77,7 @@ inline std::vector<int64_t> validateScaledConstant(const Constant &constant, con
 
 inline void appendScaledGraphConstant(DataGraphPipelineCreateStorage &storage, uint32_t graphConstantId,
                                       const Constant &constant, const Resource &resource) {
-    auto &scaleStrides = storage.constantScaleStrides.emplace_back(validateScaledConstant(constant, resource));
+    const auto &scaleStrides = storage.constantScaleStrides.emplace_back(validateScaledConstant(constant, resource));
     const auto &metadata = tensorMetadata(resource);
     static constexpr std::array planeTypes{vk::TensorPlaneARM::eValues, vk::TensorPlaneARM::eScales};
     auto &planes = storage.constantPlaneDescriptions.emplace_back();

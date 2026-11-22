@@ -218,6 +218,24 @@ void validateTensorMetadata(vk::Format format, const std::vector<int64_t> &shape
     (void)byteSizeFromShapeAndStride(storageShape, stride, elementSize, "Workload byte size");
 }
 
+std::vector<int64_t> deriveScalePlaneStrides(const std::vector<int64_t> &valueStrides, int64_t valueBlockBytes) {
+    if (valueBlockBytes <= 0) {
+        throw std::runtime_error("Value block size must be positive");
+    }
+    if (valueStrides.empty()) {
+        return {};
+    }
+
+    std::vector<int64_t> scaleStrides(valueStrides.size(), 1);
+    for (size_t i = 0; i + 1 < valueStrides.size(); ++i) {
+        if (valueStrides[i] % valueBlockBytes != 0) {
+            throw std::runtime_error("Value strides must align to whole scaling blocks");
+        }
+        scaleStrides[i] = valueStrides[i] / valueBlockBytes;
+    }
+    return scaleStrides;
+}
+
 vk::ImageAspectFlags imageAspectMask(vk::Format format) {
     if (!isKnownFormat(format)) {
         throw std::runtime_error("Unknown image format");

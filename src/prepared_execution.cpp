@@ -578,11 +578,18 @@ void PreparedExecution::Impl::resolveUnaliasedIntermediateTensor(const Descripto
     const auto tiling = detail::toTensorTiling(sessionImpl.resourceTilings.at(descBinding.resourceIndex));
     auto tensor = createIntermediateTensor(sessionImpl.workload, sessionImpl.contextView, descBinding.resourceIndex,
                                            tiling, sessionImpl.tensorStrides(descBinding.resourceIndex));
-    const auto memoryRequirements = resourceMemoryRequirements(sessionImpl.contextView, tensor);
-    auto memory = allocateDeviceLocalMemory(sessionImpl.contextView, memoryRequirements);
-    bindResourceMemory(sessionImpl.contextView, tensor, {*memory, 0, memoryRequirements.size});
-    const auto tensorBindingInfo =
-        runtimeResources.adoptTensor(std::move(tensor), std::move(memory), memoryRequirements.size);
+    const auto &resource = workloadImpl(sessionImpl.workload).resources.at(descBinding.resourceIndex);
+    const bool scaled = detail::tensorMetadata(resource).scaledTensorConfig.has_value();
+    const auto tensorBindingInfo = runtimeResources.adoptTensor(std::move(tensor));
+    // Planes can require different memory types, so allocate each one separately.
+    for (uint32_t planeIndex = 0; planeIndex < (scaled ? 2u : 1u); ++planeIndex) {
+        const auto memoryRequirements = detail::tensorPlaneMemoryRequirements(
+            sessionImpl.contextView, tensorBindingInfo.tensor, planeIndex, scaled);
+        auto memory = allocateDeviceLocalMemory(sessionImpl.contextView, memoryRequirements);
+        const auto boundMemory = runtimeResources.adoptMemory(std::move(memory), memoryRequirements.size);
+        detail::bindTensorPlaneMemory(sessionImpl.contextView, tensorBindingInfo.tensor, boundMemory, planeIndex,
+                                      scaled);
+    }
     addBoundTensor(tensorBindingInfo, descBinding);
 }
 
