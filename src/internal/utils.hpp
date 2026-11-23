@@ -120,7 +120,9 @@ uint32_t findMemoryType(const vk::raii::PhysicalDevice &physicalDevice, uint32_t
 
 void validateTensorTiling(vk::TensorTilingARM tiling, vk::TensorUsageFlagsARM usage, const std::vector<int64_t> &shape,
                           bool hasExplicitStrides);
-void validateTensorMetadata(vk::Format format, const std::vector<int64_t> &shape, const std::vector<int64_t> &stride);
+// Packed formats require block scaling metadata, which the caller validates before opting in.
+void validateTensorMetadata(vk::Format format, const std::vector<int64_t> &shape, const std::vector<int64_t> &stride,
+                            bool allowPackedBlocks = false);
 vk::ImageAspectFlags imageAspectMask(vk::Format format);
 void validateImageSubresourceAspects(vk::Format format, vk::DescriptorType descriptorType,
                                      vk::ImageAspectFlags aspects);

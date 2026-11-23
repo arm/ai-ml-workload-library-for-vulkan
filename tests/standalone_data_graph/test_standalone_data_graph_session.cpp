@@ -17,8 +17,10 @@
 #include <gtest/gtest.h>
 #include <vulkan/vulkan_beta.h>
 #include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan_format_traits.hpp>
 #include <vulkan/vulkan_raii.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -65,6 +67,109 @@ TEST(DataGraphPipelineCreateInfoTest, NeuralStatisticsPreserveShaderModuleCreate
     EXPECT_EQ(shaderModuleInfo.pNext, &neuralStatisticsInfo);
     EXPECT_EQ(neuralStatisticsInfo.pNext, nullptr);
 }
+
+#ifdef VK_ARM_tensors2
+class ScaledGraphConstantSubmissionTest : public StandaloneDataGraphSessionExecutionTest,
+                                          public ::testing::WithParamInterface<vk::Format> {};
+
+TEST_P(ScaledGraphConstantSubmissionTest, SubmitsScaledConstantPlanes) {
+    const auto format = GetParam();
+    const auto valueSize = static_cast<size_t>(64U * vk::blockSize(format) / vk::blockExtent(format)[0]);
+    std::vector<uint8_t> payload(valueSize + 2, 0x38);
+    payload[valueSize] = 0x7f;     // E8M0 scale 1.
+    payload[valueSize + 1] = 0x80; // E8M0 scale 2.
+    const float bias = 0;
+    auto description = makeMaxpoolDescription();
+    auto requirements = tensorRequirements(format, {2, 32});
+    requirements.tensor.scaledTensorConfig = ScaledTensorConfig{{32}, TensorScaleFormat::E8M0};
+    description.constants = {
+        {"bias", tensorRequirements(vk::Format::eR32Sfloat, {1}), &bias, sizeof(bias)},
+        {"weights", requirements, payload.data(), payload.size()},
+    };
+    auto context = wrappedContext();
+    auto workload = Workload::fromDataGraph(description);
+    EXPECT_EQ(workload.resourceCount(), 2u);
+    EXPECT_EQ(workload.executable(0).interfaceDescriptorBindingCount(), 2u);
+
+    // Inspect submission independently of support for scaled shaders in the driver.
+    PipelineCreationHook hook(device);
+    hook.skipDriverCall = true;
+    hook.inspectGraph = [&](const VkDataGraphPipelineCreateInfoARM &info) {
+        const auto *node = static_cast<const VkBaseInStructure *>(info.pNext);
+        while (node && node->sType != VK_STRUCTURE_TYPE_DATA_GRAPH_PIPELINE_SHADER_MODULE_CREATE_INFO_ARM) {
+            node = node->pNext;
+        }
+        ASSERT_NE(node, nullptr);
+        const auto *shader = reinterpret_cast<const VkDataGraphPipelineShaderModuleCreateInfoARM *>(node);
+        ASSERT_EQ(shader->constantCount, 2u);
+        EXPECT_EQ(info.resourceInfoCount, 2u);
+        EXPECT_EQ(shader->pConstants[0].id, 0u);
+        EXPECT_EQ(shader->pConstants[0].pConstantData, &bias);
+        const auto *ordinary = static_cast<const VkTensorDescriptionARM *>(shader->pConstants[0].pNext);
+        ASSERT_NE(ordinary, nullptr);
+        EXPECT_EQ(ordinary->sType, VK_STRUCTURE_TYPE_TENSOR_DESCRIPTION_ARM);
+        EXPECT_EQ(ordinary->format, VK_FORMAT_R32_SFLOAT);
+
+        const auto &constant = shader->pConstants[1];
+        EXPECT_EQ(constant.id, 1u);
+        EXPECT_EQ(constant.pConstantData, payload.data());
+        const auto *scaled = static_cast<const VkBlockScaledTensorDescriptionARM *>(constant.pNext);
+        ASSERT_NE(scaled, nullptr);
+        ASSERT_EQ(scaled->sType, VK_STRUCTURE_TYPE_BLOCK_SCALED_TENSOR_DESCRIPTION_ARM);
+        EXPECT_EQ(scaled->pNext, nullptr);
+        EXPECT_EQ(scaled->blockScalingScheme, VK_TENSOR_BLOCK_SCALING_SCHEME_PLANAR_OCP_MICROSCALING_ARM);
+        ASSERT_EQ(scaled->planeCount, 2u);
+        EXPECT_EQ(scaled->pPlaneTypes[0], VK_TENSOR_PLANE_VALUES_ARM);
+        EXPECT_EQ(scaled->pPlaneTypes[1], VK_TENSOR_PLANE_SCALES_ARM);
+        for (uint32_t plane = 0; plane < 2; ++plane) {
+            const auto &tensor = scaled->pPlaneDescriptions[plane];
+            EXPECT_EQ(tensor.tiling, VK_TENSOR_TILING_LINEAR_ARM);
+            EXPECT_EQ(tensor.usage, VK_TENSOR_USAGE_DATA_GRAPH_BIT_ARM);
+            EXPECT_EQ(tensor.pStrides, nullptr);
+            ASSERT_EQ(tensor.dimensionCount, 2u);
+            EXPECT_EQ(tensor.pDimensions[0], 2);
+            EXPECT_EQ(tensor.pDimensions[1], plane == 0 ? 32 : 1);
+        }
+        EXPECT_EQ(scaled->pPlaneDescriptions[0].format, static_cast<VkFormat>(format));
+        EXPECT_EQ(scaled->pPlaneDescriptions[1].format, VK_FORMAT_R8_UFLOAT_FPENCODING_FLOAT8UNSIGNEDE8M0_ARM);
+    };
+    Session session(context, workload);
+    EXPECT_THROW(session.configure(), vk::SystemError);
+    ASSERT_EQ(hook.calls.size(), 1u);
+
+    description.constants.back().size -= 1;
+    auto truncated = Workload::fromDataGraph(std::move(description));
+    Session truncatedSession(context, truncated);
+    EXPECT_THROW(truncatedSession.configure(), std::runtime_error);
+    EXPECT_EQ(hook.calls.size(), 1u);
+}
+
+INSTANTIATE_TEST_SUITE_P(MXFormats, ScaledGraphConstantSubmissionTest,
+                         ::testing::Values(vk::Format::eR8SfloatFpencodingFloat8E4M3ARM,
+                                           vk::Format::eR8SfloatFpencodingFloat8E5M2ARM,
+                                           vk::Format::eR8SfloatFpencodingMxint8ARM,
+                                           vk::Format::eOcpmxfp32SfloatBlockFpencodingFloat4E2M1ARM,
+                                           vk::Format::eOcpmxfp32SfloatBlockFpencodingFloat6E2M3ARM,
+                                           vk::Format::eOcpmxfp32SfloatBlockFpencodingFloat6E3M2ARM),
+                         [](const ::testing::TestParamInfo<vk::Format> &info) {
+                             switch (info.param) {
+                             case vk::Format::eR8SfloatFpencodingFloat8E4M3ARM:
+                                 return "E4M3";
+                             case vk::Format::eR8SfloatFpencodingFloat8E5M2ARM:
+                                 return "E5M2";
+                             case vk::Format::eR8SfloatFpencodingMxint8ARM:
+                                 return "MXINT8";
+                             case vk::Format::eOcpmxfp32SfloatBlockFpencodingFloat4E2M1ARM:
+                                 return "FP4";
+                             case vk::Format::eOcpmxfp32SfloatBlockFpencodingFloat6E2M3ARM:
+                                 return "FP6E2M3";
+                             case vk::Format::eOcpmxfp32SfloatBlockFpencodingFloat6E3M2ARM:
+                                 return "FP6E3M2";
+                             default:
+                                 return "Unknown";
+                             }
+                         });
+#endif
 
 /*******************************************************************************
  * Positive coverage

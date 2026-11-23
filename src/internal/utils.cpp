@@ -175,13 +175,27 @@ vk::DeviceSize resourceByteSize(const Resource &resource) {
     return size;
 }
 
-void validateTensorMetadata(vk::Format format, const std::vector<int64_t> &shape, const std::vector<int64_t> &stride) {
-    const auto elementSize = formatByteSize(format);
+void validateTensorMetadata(vk::Format format, const std::vector<int64_t> &shape, const std::vector<int64_t> &stride,
+                            bool allowPackedBlocks) {
+    const auto blockExtent = vk::blockExtent(format);
+    const bool packed = allowPackedBlocks && blockExtent[0] > 1;
+    if (packed && (vk::planeCount(format) != 1 || vk::isCompressed(format) || blockExtent[1] != 1 ||
+                   blockExtent[2] != 1 || vk::blockSize(format) == 0)) {
+        throw std::runtime_error("Tensor format has unsupported packed blocks");
+    }
+    const auto elementSize = packed ? vk::blockSize(format) : formatByteSize(format);
     if (vk::componentCount(format) != 1) {
         throw std::runtime_error("Tensor format must be a single-component format");
     }
     if (shape.empty() || elementCount(shape) == 0) {
         throw std::runtime_error("Tensor dimensions must be positive and non-empty");
+    }
+    auto storageShape = shape;
+    if (packed) {
+        if (storageShape.back() % blockExtent[0] != 0) {
+            throw std::runtime_error("Tensor innermost dimension must contain whole format blocks");
+        }
+        storageShape.back() /= blockExtent[0];
     }
     if (!stride.empty()) {
         if (stride.size() != shape.size() || stride.back() != static_cast<int64_t>(elementSize)) {
@@ -194,14 +208,14 @@ void validateTensorMetadata(vk::Format format, const std::vector<int64_t> &shape
             if (index != 0 &&
                 static_cast<vk::DeviceSize>(stride[index - 1]) <
                     checkedDeviceSizeMultiply(static_cast<vk::DeviceSize>(stride[index]),
-                                              static_cast<vk::DeviceSize>(shape[index]), "Tensor stride span")) {
+                                              static_cast<vk::DeviceSize>(storageShape[index]), "Tensor stride span")) {
                 throw std::runtime_error("Tensor strides must not overlap elements");
             }
         }
         (void)checkedDeviceSizeMultiply(static_cast<vk::DeviceSize>(stride.front()),
-                                        static_cast<vk::DeviceSize>(shape.front()), "Tensor storage size");
+                                        static_cast<vk::DeviceSize>(storageShape.front()), "Tensor storage size");
     }
-    (void)byteSizeFromShapeAndStride(shape, stride, elementSize, "Workload byte size");
+    (void)byteSizeFromShapeAndStride(storageShape, stride, elementSize, "Workload byte size");
 }
 
 vk::ImageAspectFlags imageAspectMask(vk::Format format) {

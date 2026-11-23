@@ -10,6 +10,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan_format_traits.hpp>
 
 #include <array>
 #include <cstddef>
@@ -224,6 +225,27 @@ TEST(StandaloneDataGraphWorkload, ReportsScaledTensorAndConstantRequirements) {
         EXPECT_EQ(metadata.scaledTensorConfig->scaleFormat, TensorScaleFormat::E8M0);
         EXPECT_EQ(metadata.scaleShape, (std::vector<int64_t>{2, 64 / block}));
     }
+#ifdef VK_ARM_tensors2
+    const std::array formats{
+        vk::Format::eR8SfloatFpencodingMxint8ARM,
+        vk::Format::eOcpmxfp32SfloatBlockFpencodingFloat4E2M1ARM,
+        vk::Format::eOcpmxfp32SfloatBlockFpencodingFloat6E2M3ARM,
+        vk::Format::eOcpmxfp32SfloatBlockFpencodingFloat6E3M2ARM,
+    };
+    for (const auto format : formats) {
+        SCOPED_TRACE(static_cast<uint32_t>(format));
+        auto description = makeMaxpoolDescription();
+        auto requirements = tensorRequirements(format, {2, 32});
+        requirements.tensor.scaledTensorConfig = ScaledTensorConfig{{32}, TensorScaleFormat::E8M0};
+        const auto valueBytes = static_cast<size_t>(64U * vk::blockSize(format) / vk::blockExtent(format)[0]);
+        const std::vector<uint8_t> payload(valueBytes + 2);
+        description.constants = {{"scaled_constant", requirements, payload.data(), payload.size()}};
+        const auto workload = Workload::fromDataGraph(std::move(description));
+        const auto &state = workloadImpl(workload);
+        ASSERT_EQ(state.constants.size(), 1u);
+        EXPECT_EQ(state.resources.at(state.constants[0].resourceIndex).format, format);
+    }
+#endif
 }
 
 TEST(StandaloneDataGraphWorkload, RejectsInvalidScaledTensorMetadata) {

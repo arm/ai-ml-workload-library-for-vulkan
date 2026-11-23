@@ -12,15 +12,19 @@
 #include "vgf-utils/temp_folder.hpp"
 #include "vgf/decoder.hpp"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan_format_traits.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -530,7 +534,8 @@ TEST(VgfWorkload, PreservesUnresolvedScaledTensorDimensions) {
     }
 }
 
-TEST(VgfWorkload, RejectsScaledGraphConstantExecution) {
+#ifdef VK_ARM_tensors2
+TEST(VgfWorkload, RejectsNon32ScaledGraphConstantBlock) {
     const std::array<uint8_t, 128> values{};
     const auto data = writeVgf([&](Encoder &encoder) {
         const auto module = encoder.AddModule(ModuleType::GRAPH, "graph", "main", {});
@@ -544,11 +549,43 @@ TEST(VgfWorkload, RejectsScaledGraphConstantExecution) {
     ASSERT_EQ(state.executables[0].constantBindings[0].graphConstantId, 10000u);
     ASSERT_EQ(state.executables[0].constantBindings[0].constantIndex, 0u);
     mlsdk::workloadlib::detail::DataGraphPipelineCreateStorage storage;
-    try {
-        mlsdk::workloadlib::detail::populateDataGraphConstants(storage, state.executables[0], workload);
-        FAIL() << "Scaled graph constants must be rejected before execution";
-    } catch (const std::runtime_error &error) {
-        EXPECT_STREQ(error.what(), "Scaled graph constant execution is not implemented");
-    }
+    EXPECT_THROW(mlsdk::workloadlib::detail::populateDataGraphConstants(storage, state.executables[0], workload),
+                 std::runtime_error);
     EXPECT_TRUE(storage.constants.empty());
 }
+
+TEST(VgfWorkload, SubmitsAllScaledGraphConstantFormats) {
+    const std::array<VkFormat, 6> formats{{
+        VK_FORMAT_R8_SFLOAT_FPENCODING_FLOAT8E4M3_ARM,
+        VK_FORMAT_R8_SFLOAT_FPENCODING_FLOAT8E5M2_ARM,
+        VK_FORMAT_R8_SFLOAT_FPENCODING_MXINT8_ARM,
+        VK_FORMAT_OCPMXFP_32_SFLOAT_BLOCK_FPENCODING_FLOAT4E2M1_ARM,
+        VK_FORMAT_OCPMXFP_32_SFLOAT_BLOCK_FPENCODING_FLOAT6E2M3_ARM,
+        VK_FORMAT_OCPMXFP_32_SFLOAT_BLOCK_FPENCODING_FLOAT6E3M2_ARM,
+    }};
+    for (const auto format : formats) {
+        SCOPED_TRACE(format);
+        const auto valueBytes =
+            static_cast<size_t>(64U * vk::blockSize(vk::Format(format)) / vk::blockExtent(vk::Format(format))[0]);
+        const std::vector<uint8_t> payload(valueBytes + 2);
+        const auto data = writeVgf([&](Encoder &encoder) {
+            const auto module = encoder.AddModule(ModuleType::GRAPH, "graph", "main", {});
+            const auto resource = encoder.AddConstantResource(format, {2, 32}, {});
+            encoder.AddScaledTensorConfig(resource, {32}, ScaleFormat::E8M0);
+            const auto constant = encoder.AddConstant(resource, payload.data(), payload.size());
+            encoder.AddSegmentInfo(module, "graph", {}, {}, {}, std::vector<GraphConstantBindingRef>{{0, constant}});
+        });
+        const auto workload = Workload::fromVGF(asVgfBytes(data));
+        const auto &state = workloadImpl(workload);
+        mlsdk::workloadlib::detail::DataGraphPipelineCreateStorage storage;
+        ASSERT_NO_THROW(
+            mlsdk::workloadlib::detail::populateDataGraphConstants(storage, state.executables[0], workload));
+        ASSERT_EQ(storage.constants.size(), 1u);
+        const auto *scaled = static_cast<const VkBlockScaledTensorDescriptionARM *>(storage.constants[0].pNext);
+        ASSERT_NE(scaled, nullptr);
+        ASSERT_EQ(scaled->planeCount, 2u);
+        EXPECT_EQ(scaled->pPlaneDescriptions[0].format, format);
+        EXPECT_EQ(scaled->pPlaneDescriptions[1].format, VK_FORMAT_R8_UFLOAT_FPENCODING_FLOAT8UNSIGNEDE8M0_ARM);
+    }
+}
+#endif
