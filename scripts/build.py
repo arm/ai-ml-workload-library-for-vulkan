@@ -213,6 +213,8 @@ class Builder:
             "-B",
             self.build_dir,
             f"-DCMAKE_BUILD_TYPE={self.build_type}",
+            f"-DPython_EXECUTABLE={sys.executable}",
+            f"-DPython3_EXECUTABLE={sys.executable}",
             f"-DCMAKE_TOOLCHAIN_FILE={CMAKE_TOOLCHAIN_PATH / 'gcc.cmake'}",
             f"-DVULKAN_HEADERS_PATH={self.vulkan_headers_path}",
             "-G",
