@@ -123,6 +123,7 @@ void validateTensorTiling(vk::TensorTilingARM tiling, vk::TensorUsageFlagsARM us
 // Packed formats require block scaling metadata, which the caller validates before opting in.
 void validateTensorMetadata(vk::Format format, const std::vector<int64_t> &shape, const std::vector<int64_t> &stride,
                             bool allowPackedBlocks = false);
+std::vector<int64_t> deriveScalePlaneStrides(const std::vector<int64_t> &valueStrides, int64_t valueBlockBytes);
 vk::ImageAspectFlags imageAspectMask(vk::Format format);
 void validateImageSubresourceAspects(vk::Format format, vk::DescriptorType descriptorType,
                                      vk::ImageAspectFlags aspects);

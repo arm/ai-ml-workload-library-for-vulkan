@@ -7,6 +7,8 @@
 
 #include <vulkan/vulkan_format_traits.hpp>
 
+#include <algorithm>
+#include <array>
 #include <limits>
 #include <sstream>
 #include <string_view>
@@ -90,16 +92,106 @@ vk::TensorDescriptionARM tensorDescription(const Workload &workload, uint32_t re
             tensorUsageForTiling(workload, resourceIndex, tiling)};
 }
 
+std::vector<int64_t> validateScaledTensorRuntimeMetadata(vk::Format valueFormat, const std::vector<int64_t> &shape,
+                                                         const std::vector<int64_t> &strides,
+                                                         const std::vector<int64_t> &scaleShape,
+                                                         const ScaledTensorConfig &config) {
+    if (config.scaleFormat != TensorScaleFormat::E8M0 || config.blockShape != std::vector<uint32_t>{32}) {
+        throw std::runtime_error("Planar OCP microscaling requires E8M0 scales and block shape [32]");
+    }
+    if (shape.empty() || shape.size() != scaleShape.size() ||
+        std::any_of(shape.begin(), shape.end(), [](int64_t dimension) { return dimension <= 0; }) ||
+        shape.back() % 32 != 0) {
+        throw std::runtime_error("Scaled tensor requires positive dimensions and a multiple-of-32 innermost size");
+    }
+    for (size_t i = 0; i < shape.size(); ++i) {
+        const auto expected = i + 1 == shape.size() ? shape[i] / 32 : shape[i];
+        if (scaleShape[i] != expected) {
+            throw std::runtime_error("Scale plane shape does not match the value plane shape");
+        }
+    }
+    validateTensorMetadata(valueFormat, shape, strides, /*allowPackedBlocks=*/true);
+    const auto valueBlockExtent = vk::blockExtent(valueFormat)[0];
+    const auto blockSize = config.blockShape[0];
+    if (valueBlockExtent == 0 || blockSize % valueBlockExtent != 0) {
+        throw std::runtime_error("Value format must fit whole scaling blocks");
+    }
+    const auto valueBlockBytes = static_cast<int64_t>(blockSize / valueBlockExtent) * vk::blockSize(valueFormat);
+    auto scaleStrides = deriveScalePlaneStrides(strides, valueBlockBytes);
+#ifdef VK_ARM_tensors2
+    constexpr auto scaleFormat = vk::Format::eR8UfloatFpencodingFloat8Unsignede8M0ARM;
+#else
+    // E8M0 and R8_UINT have the same one-byte storage layout.
+    constexpr auto scaleFormat = vk::Format::eR8Uint;
+#endif
+    validateTensorMetadata(scaleFormat, scaleShape, scaleStrides);
+    return scaleStrides;
+}
+
+#ifdef VK_ARM_tensors2
+vk::BlockScaledTensorDescriptionARM
+blockScaledTensorDescription(const vk::TensorDescriptionARM &values, const std::vector<int64_t> &scaleShape,
+                             const std::vector<int64_t> &scaleStrides,
+                             std::array<vk::TensorDescriptionARM, 2> &planeDescriptions) {
+    static constexpr std::array<vk::TensorPlaneARM, 2> planeTypes = {vk::TensorPlaneARM::eValues,
+                                                                     vk::TensorPlaneARM::eScales};
+    planeDescriptions[0] = values;
+    planeDescriptions[1] = {
+        values.tiling,     vk::Format::eR8UfloatFpencodingFloat8Unsignede8M0ARM, values.dimensionCount,
+        scaleShape.data(), scaleStrides.empty() ? nullptr : scaleStrides.data(), values.usage};
+    return {vk::TensorBlockScalingSchemeARM::ePlanarOcpMicroscaling, static_cast<uint32_t>(planeTypes.size()),
+            planeTypes.data(), planeDescriptions.data()};
+}
+#endif
+
+vk::MemoryRequirements tensorPlaneMemoryRequirements(const ContextView &contextView, vk::TensorARM tensor,
+                                                     uint32_t planeIndex, bool scaled) {
+#ifdef VK_ARM_tensors2
+    const vk::TensorPlaneInfoARM planeInfo(planeIndex);
+    const vk::TensorMemoryRequirementsInfoARM info(tensor, scaled ? &planeInfo : nullptr);
+#else
+    (void)planeIndex;
+    (void)scaled;
+    const vk::TensorMemoryRequirementsInfoARM info(tensor);
+#endif
+    return contextView.device.get().getTensorMemoryRequirementsARM(info).memoryRequirements;
+}
+
+void bindTensorPlaneMemory(const ContextView &contextView, vk::TensorARM tensor, BoundMemoryInfo memory,
+                           uint32_t planeIndex, bool scaled) {
+#ifdef VK_ARM_tensors2
+    const vk::TensorPlaneInfoARM planeInfo(planeIndex);
+    const vk::BindTensorMemoryInfoARM bindInfo(tensor, memory.memory, memory.offset, scaled ? &planeInfo : nullptr);
+#else
+    (void)planeIndex;
+    (void)scaled;
+    const vk::BindTensorMemoryInfoARM bindInfo(tensor, memory.memory, memory.offset);
+#endif
+    contextView.device.get().bindTensorMemoryARM(bindInfo);
+}
+
 vk::raii::TensorARM createIntermediateTensor(const Workload &workload, const ContextView &contextView,
                                              uint32_t resourceIndex, vk::TensorTilingARM tiling,
                                              const std::vector<int64_t> &strides) {
     const auto &resource = workloadImpl(workload).resources.at(resourceIndex);
-    if (tensorMetadata(resource).scaledTensorConfig) {
-        throw std::runtime_error("Scaled intermediate tensor allocation is not implemented");
-    }
-    validateTensorMetadata(resource.format, resource.shape, strides);
     const auto description = tensorDescription(workload, resourceIndex, tiling, strides);
     validateTensorTiling(tiling, description.usage, resource.shape, !strides.empty());
+    const auto &config = tensorMetadata(resource).scaledTensorConfig;
+    if (config) {
+#ifdef VK_ARM_tensors2
+        const auto scaleStrides = validateScaledTensorRuntimeMetadata(resource.format, resource.shape, strides,
+                                                                      tensorMetadata(resource).scaleShape, *config);
+        std::array<vk::TensorDescriptionARM, 2> planes;
+        const auto scaledDescription =
+            blockScaledTensorDescription(description, tensorMetadata(resource).scaleShape, scaleStrides, planes);
+        vk::TensorCreateInfoARM createInfo({}, nullptr, vk::SharingMode::eExclusive);
+        createInfo.pNext = &scaledDescription;
+        return {contextView.device.get(), createInfo};
+#else
+        throw std::runtime_error("Scaled tensor allocation requires VK_ARM_tensors2 headers");
+#endif
+    }
+    validateTensorMetadata(resource.format, resource.shape, strides);
     const vk::TensorCreateInfoARM createInfo({}, &description, vk::SharingMode::eExclusive);
     return {contextView.device.get(), createInfo};
 }

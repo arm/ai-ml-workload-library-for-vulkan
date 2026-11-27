@@ -4,6 +4,7 @@
  */
 
 #include "internal/context_impl.hpp"
+#include "internal/runtime_resource.hpp"
 #include "internal/utils.hpp"
 
 #include "mlworkloadlib/workload.hpp"
@@ -11,6 +12,7 @@
 #include <vulkan/vulkan_beta.h>
 
 #include <algorithm>
+#include <array>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -32,6 +34,18 @@ vk::DeviceSize allocationSize(vk::DeviceSize memoryRequirementSize) {
     return memoryRequirementSize == 0 ? 1 : memoryRequirementSize;
 }
 
+void allocateTensorPlane(const ContextView &contextView, vk::TensorARM tensor, uint32_t planeIndex, bool scaled,
+                         vk::raii::DeviceMemory &ownedMemory, BoundMemoryInfo &memoryInfo) {
+    const auto requirements = detail::tensorPlaneMemoryRequirements(contextView, tensor, planeIndex, scaled);
+    const auto size = allocationSize(requirements.size);
+    const auto memoryType =
+        detail::findMemoryType(contextView.physicalDevice.get(), requirements.memoryTypeBits,
+                               vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+    ownedMemory = vk::raii::DeviceMemory(contextView.device.get(), vk::MemoryAllocateInfo(size, memoryType));
+    memoryInfo = {*ownedMemory, 0, size};
+    detail::bindTensorPlaneMemory(contextView, tensor, memoryInfo, planeIndex, scaled);
+}
+
 } // namespace
 
 /*******************************************************************************
@@ -47,6 +61,8 @@ struct RuntimeAllocation::Impl {
 
     vk::raii::DeviceMemory memory{nullptr};
     BoundMemoryInfo memoryInfo{};
+    vk::raii::DeviceMemory scaleMemory{nullptr};
+    BoundMemoryInfo scaleMemoryInfo{};
     // Resource handles are destroyed before their backing memory.
     std::variant<std::monostate, vk::raii::TensorARM, vk::raii::Buffer, ImageResource> resource;
 };
@@ -69,6 +85,9 @@ const RuntimeAllocation::Impl *RuntimeAllocation::runtimeAllocationImpl() const 
 
 BoundMemoryInfo RuntimeAllocation::memory() const {
     const auto *allocationState = runtimeAllocationImpl();
+    if (allocationState != nullptr && *allocationState->scaleMemory != nullptr) {
+        throw std::runtime_error("Scaled tensor allocation has multiple memory planes; use planeMemory()");
+    }
     return allocationState != nullptr ? allocationState->memoryInfo : BoundMemoryInfo{};
 }
 
@@ -81,6 +100,26 @@ vk::TensorARM TensorAllocation::handle() const {
     const auto *tensor =
         allocationState != nullptr ? std::get_if<vk::raii::TensorARM>(&allocationState->resource) : nullptr;
     return tensor != nullptr ? **tensor : vk::TensorARM(nullptr);
+}
+
+uint32_t TensorAllocation::planeCount() const {
+    if (handle() == nullptr) {
+        return 0;
+    }
+    return *runtimeAllocationImpl()->scaleMemory != nullptr ? 2 : 1;
+}
+
+BoundMemoryInfo TensorAllocation::planeMemory(uint32_t planeIndex) const {
+    const auto *allocationState = runtimeAllocationImpl();
+    if (allocationState != nullptr && handle() != nullptr) {
+        if (planeIndex == 0) {
+            return allocationState->memoryInfo;
+        }
+        if (planeIndex == 1 && *allocationState->scaleMemory != nullptr) {
+            return allocationState->scaleMemoryInfo;
+        }
+    }
+    throw std::out_of_range("Tensor allocation plane index is out of range");
 }
 
 /*******************************************************************************
@@ -219,16 +258,12 @@ TensorAllocation Context::createTensor(ResourceView resource, vk::TensorTilingAR
     }
 
     const auto tensorRequirements = requirements.asTensor();
-    if (tensorRequirements.scaleFormat()) {
-        throw std::runtime_error("Scaled tensor allocation is not implemented");
-    }
     const auto shapeView = tensorRequirements.shape();
     const auto strideView = tensorRequirements.stride();
     const auto usage = tensorRequirements.usage(tiling);
     std::vector<int64_t> shape(shapeView.begin(), shapeView.end());
     detail::validateTensorTiling(tiling, usage, shape, !strideView.empty());
     std::vector<int64_t> stride(strideView.begin(), strideView.end());
-    detail::validateTensorMetadata(requirements.format(), shape, stride);
 
     vk::TensorDescriptionARM description;
     description.tiling = tiling;
@@ -237,25 +272,45 @@ TensorAllocation Context::createTensor(ResourceView resource, vk::TensorTilingAR
     description.pDimensions = shape.data();
     description.pStrides = stride.empty() ? nullptr : stride.data();
     description.usage = usage;
-    const vk::TensorCreateInfoARM createInfo({}, &description, vk::SharingMode::eExclusive);
 
     const auto contextView = this->contextView();
-    auto tensor = vk::raii::TensorARM(contextView.device.get(), createInfo);
-    const auto memoryRequirements = contextView.device.get()
-                                        .getTensorMemoryRequirementsARM(vk::TensorMemoryRequirementsInfoARM(*tensor))
-                                        .memoryRequirements;
-    const auto size = allocationSize(memoryRequirements.size);
-    const auto memoryType =
-        detail::findMemoryType(contextView.physicalDevice.get(), memoryRequirements.memoryTypeBits,
-                               vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-    auto memory = vk::raii::DeviceMemory(contextView.device.get(), vk::MemoryAllocateInfo(size, memoryType));
-    contextView.device.get().bindTensorMemoryARM(vk::BindTensorMemoryInfoARM(*tensor, *memory, 0));
+    vk::raii::TensorARM tensor{nullptr};
+    const bool scaled = tensorRequirements.scaleFormat().has_value();
+    if (scaled) {
+#ifdef VK_ARM_tensors2
+        const auto blockShapeView = tensorRequirements.blockShape();
+        const auto scaleShapeView = tensorRequirements.scaleShape();
+        const ScaledTensorConfig config{{blockShapeView.begin(), blockShapeView.end()},
+                                        *tensorRequirements.scaleFormat()};
+        const std::vector<int64_t> scaleShape(scaleShapeView.begin(), scaleShapeView.end());
+        const auto scaleStrides =
+            detail::validateScaledTensorRuntimeMetadata(requirements.format(), shape, stride, scaleShape, config);
+        std::array<vk::TensorDescriptionARM, 2> planes;
+        const auto scaledDescription =
+            detail::blockScaledTensorDescription(description, scaleShape, scaleStrides, planes);
+        vk::TensorCreateInfoARM createInfo({}, nullptr, vk::SharingMode::eExclusive);
+        createInfo.pNext = &scaledDescription;
+        tensor = vk::raii::TensorARM(contextView.device.get(), createInfo);
+#else
+        throw std::runtime_error("Scaled tensor allocation requires VK_ARM_tensors2 headers");
+#endif
+    } else {
+        detail::validateTensorMetadata(requirements.format(), shape, stride);
+        const vk::TensorCreateInfoARM createInfo({}, &description, vk::SharingMode::eExclusive);
+        tensor = vk::raii::TensorARM(contextView.device.get(), createInfo);
+    }
 
     TensorAllocation allocation;
     auto &allocationState = *allocation.runtimeAllocationImpl();
-    allocationState.memory = std::move(memory);
     allocationState.resource.emplace<vk::raii::TensorARM>(std::move(tensor));
-    allocationState.memoryInfo = BoundMemoryInfo{*allocationState.memory, 0, size};
+    const auto tensorHandle = *std::get<vk::raii::TensorARM>(allocationState.resource);
+    allocateTensorPlane(contextView, tensorHandle, 0, scaled, allocationState.memory, allocationState.memoryInfo);
+#ifdef VK_ARM_tensors2
+    if (scaled) {
+        allocateTensorPlane(contextView, tensorHandle, 1, true, allocationState.scaleMemory,
+                            allocationState.scaleMemoryInfo);
+    }
+#endif
     return allocation;
 }
 

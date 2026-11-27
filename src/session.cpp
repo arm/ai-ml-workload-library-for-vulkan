@@ -118,11 +118,16 @@ void validateExecutableResourceMetadata(const Workload &workload, const Executab
             (void)resource.imageExtent();
             continue;
         }
-        if (resource.byteSize() == 0) {
-            throw std::runtime_error("Session requires non-zero resource size metadata");
-        }
         if (descriptorType == vk::DescriptorType::eTensorARM) {
-            detail::validateTensorMetadata(resource.format, resource.shape, resource.stride);
+            const auto &tensor = detail::tensorMetadata(resource);
+            if (tensor.scaledTensorConfig) {
+                (void)detail::validateScaledTensorRuntimeMetadata(resource.format, resource.shape, resource.stride,
+                                                                  tensor.scaleShape, *tensor.scaledTensorConfig);
+            } else {
+                detail::validateTensorMetadata(resource.format, resource.shape, resource.stride);
+            }
+        } else if (resource.byteSize() == 0) {
+            throw std::runtime_error("Session requires non-zero resource size metadata");
         }
     }
 }
@@ -140,6 +145,11 @@ void populateDataGraphResources(DataGraphPipelineCreateStorage &storage, const E
                                 const std::map<uint32_t, std::vector<int64_t>> &tensorStrideOverrides) {
     const auto &workloadState = workloadImpl(workload);
     storage.resourceTensorDescriptions.reserve(executable.bindings.size());
+    storage.scaledResourcePlaneDescriptions.reserve(executable.bindings.size());
+    storage.resourceScaleStrides.reserve(executable.bindings.size());
+#ifdef VK_ARM_tensors2
+    storage.scaledResourceDescriptions.reserve(executable.bindings.size());
+#endif
     storage.imageLayouts.reserve(executable.bindings.size());
     storage.resourceInfos.reserve(executable.bindings.size());
     for (const auto &descBinding : executable.bindings) {
@@ -155,22 +165,39 @@ void populateDataGraphResources(DataGraphPipelineCreateStorage &storage, const E
                 descriptorType == vk::DescriptorType::eTensorARM
                     ? effectiveTensorStrides(workload, descBinding.resourceIndex, tensorStrideOverrides)
                     : resource.stride;
+            const void *resourceDescription = nullptr;
             if (descriptorType == vk::DescriptorType::eTensorARM) {
                 const auto description =
                     detail::tensorDescription(workload, descBinding.resourceIndex, tensorTiling, strides);
-                detail::validateTensorMetadata(resource.format, resource.shape, strides);
                 detail::validateTensorTiling(tensorTiling, description.usage, resource.shape, !strides.empty());
                 if (!(description.usage & vk::TensorUsageFlagBitsARM::eDataGraph)) {
                     throw std::runtime_error("Graph tensor resources require eDataGraph usage");
                 }
-                storage.resourceTensorDescriptions.push_back(description);
+                const auto &tensor = detail::tensorMetadata(resource);
+                if (tensor.scaledTensorConfig) {
+#ifdef VK_ARM_tensors2
+                    const auto &scaleStrides =
+                        storage.resourceScaleStrides.emplace_back(detail::validateScaledTensorRuntimeMetadata(
+                            resource.format, resource.shape, strides, tensor.scaleShape, *tensor.scaledTensorConfig));
+                    storage.scaledResourcePlaneDescriptions.emplace_back();
+                    storage.scaledResourceDescriptions.push_back(detail::blockScaledTensorDescription(
+                        description, tensor.scaleShape, scaleStrides, storage.scaledResourcePlaneDescriptions.back()));
+                    resourceDescription = &storage.scaledResourceDescriptions.back();
+#else
+                    throw std::runtime_error("Scaled graph resources require VK_ARM_tensors2 headers");
+#endif
+                } else {
+                    detail::validateTensorMetadata(resource.format, resource.shape, strides);
+                    storage.resourceTensorDescriptions.push_back(description);
+                    resourceDescription = &storage.resourceTensorDescriptions.back();
+                }
             } else {
                 storage.resourceTensorDescriptions.emplace_back(
                     tensorTiling, resource.format, static_cast<uint32_t>(resource.shape.size()), resource.shape.data(),
                     strides.empty() ? nullptr : strides.data(), vk::TensorUsageFlagBitsARM::eDataGraph);
+                resourceDescription = &storage.resourceTensorDescriptions.back();
             }
-            storage.resourceInfos.emplace_back(descBinding.set, descBinding.binding, 0,
-                                               &storage.resourceTensorDescriptions.back());
+            storage.resourceInfos.emplace_back(descBinding.set, descBinding.binding, 0, resourceDescription);
         }
     }
 }

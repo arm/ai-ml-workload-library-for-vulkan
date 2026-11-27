@@ -9,6 +9,7 @@
 #include "session_tiling.hpp"
 #include "workload_impl.hpp"
 
+#include <array>
 #include <type_traits>
 
 namespace mlsdk::workloadlib::detail {
@@ -19,6 +20,20 @@ void validateAliasTensorDescription(uint32_t resourceIndex, const Resource &reso
 
 vk::TensorDescriptionARM tensorDescription(const Workload &workload, uint32_t resourceIndex, vk::TensorTilingARM tiling,
                                            const std::vector<int64_t> &strides);
+std::vector<int64_t> validateScaledTensorRuntimeMetadata(vk::Format valueFormat, const std::vector<int64_t> &shape,
+                                                         const std::vector<int64_t> &strides,
+                                                         const std::vector<int64_t> &scaleShape,
+                                                         const ScaledTensorConfig &config);
+#ifdef VK_ARM_tensors2
+vk::BlockScaledTensorDescriptionARM
+blockScaledTensorDescription(const vk::TensorDescriptionARM &values, const std::vector<int64_t> &scaleShape,
+                             const std::vector<int64_t> &scaleStrides,
+                             std::array<vk::TensorDescriptionARM, 2> &planeDescriptions);
+#endif
+vk::MemoryRequirements tensorPlaneMemoryRequirements(const ContextView &contextView, vk::TensorARM tensor,
+                                                     uint32_t planeIndex, bool scaled);
+void bindTensorPlaneMemory(const ContextView &contextView, vk::TensorARM tensor, BoundMemoryInfo memory,
+                           uint32_t planeIndex, bool scaled);
 vk::raii::TensorARM createIntermediateTensor(const Workload &workload, const ContextView &contextView,
                                              uint32_t resourceIndex, vk::TensorTilingARM tiling,
                                              const std::vector<int64_t> &strides);

@@ -86,7 +86,10 @@ struct RuntimeContextDeviceRequirements {
  */
 class RuntimeAllocation {
   public:
-    /** @brief Returns the backing-memory range sized from Vulkan memory requirements. */
+    /** @brief Returns the backing-memory range for a single-plane allocation.
+     *
+     * Throws std::runtime_error for a scaled tensor; use planeMemory() instead.
+     */
     BoundMemoryInfo memory() const;
 
     RuntimeAllocation(const RuntimeAllocation &) = delete;
@@ -121,6 +124,12 @@ class TensorAllocation final : public RuntimeAllocation {
   public:
     /** @brief Returns the owned tensor handle. */
     vk::TensorARM handle() const;
+
+    /** @brief Returns the number of bound memory planes (one for an ordinary tensor). */
+    uint32_t planeCount() const;
+
+    /** @brief Returns the memory range for a tensor plane (value at 0, scale at 1). */
+    BoundMemoryInfo planeMemory(uint32_t planeIndex) const;
 
   private:
     // Lifetime
