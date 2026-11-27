@@ -21,6 +21,8 @@
 
 ### Build, Packaging & Dependencies
 
+- Aligned CMake Python discovery with the interpreter running `scripts/build.py`
+  to prevent build and test Python version mismatches.
 - Locked development tooling with `uv.lock` in place of the tooling
   requirements file.
 - Added GCC code coverage reporting for native Linux unit-test builds.
